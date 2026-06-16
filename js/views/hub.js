@@ -65,8 +65,10 @@ function renderTopic(topic) {
     ["What it covers", topic.covers],
     ["What it doesn't cover", topic.doesntCover],
     ["Who needs it", topic.whoNeeds],
+    ["Things to consider", topic.consider],
   ];
   for (const [term, desc] of rows) {
+    if (!desc) continue;
     dl.appendChild(el("dt", { text: term }));
     dl.appendChild(el("dd", { text: desc }));
   }

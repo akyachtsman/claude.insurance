@@ -38,6 +38,35 @@ test("renter with no car and low value -> renters only", () => {
   assert.deepEqual(ids(needs), ["renters"]);
 });
 
+test("dependents trigger life insurance (high priority)", () => {
+  const needs = computeNeeds({
+    domain: "residential",
+    answers: {
+      home_status: { value: "own" },
+      home_value: { value: "under_250k", amount: 200000 },
+      vehicle_count: { value: "0", amount: 0 },
+      dependents: { value: "yes" },
+    },
+  }, SETTINGS);
+  const life = needs.find((n) => n.id === "life");
+  assert.ok(life, "expected a life insurance need");
+  assert.equal(life.priority, "high");
+});
+
+test("flood risk: yes -> high, unsure -> medium, no -> none", () => {
+  const base = {
+    home_status: { value: "own" },
+    home_value: { value: "under_250k", amount: 200000 },
+    vehicle_count: { value: "0", amount: 0 },
+  };
+  const yes = computeNeeds({ domain: "residential", answers: { ...base, flood_risk: { value: "yes" } } }, SETTINGS);
+  const unsure = computeNeeds({ domain: "residential", answers: { ...base, flood_risk: { value: "unsure" } } }, SETTINGS);
+  const no = computeNeeds({ domain: "residential", answers: { ...base, flood_risk: { value: "no" } } }, SETTINGS);
+  assert.equal(yes.find((n) => n.id === "flood")?.priority, "high");
+  assert.equal(unsure.find((n) => n.id === "flood")?.priority, "medium");
+  assert.equal(no.find((n) => n.id === "flood"), undefined);
+});
+
 test("umbrella triggers on vehicle count even when value is low", () => {
   const needs = computeNeeds({
     domain: "residential",
@@ -74,7 +103,7 @@ test("commercial professional services, full profile -> all relevant needs, high
   assert.ok(lastHigh < firstMedium);
 });
 
-test("commercial solo, remote, low revenue, no vehicles -> general liability only", () => {
+test("commercial solo, remote, low revenue, no vehicles, no data -> general liability only", () => {
   const needs = computeNeeds({
     domain: "commercial",
     answers: {
@@ -82,10 +111,62 @@ test("commercial solo, remote, low revenue, no vehicles -> general liability onl
       employee_count: { value: "0", amount: 0 },
       revenue: { value: "under_250k", amount: 150000 },
       has_premises: { value: "no" },
+      owns_property: { value: "no" },
       company_vehicles: { value: "no" },
+      handles_data: { value: "no" },
     },
   }, SETTINGS);
   assert.deepEqual(ids(needs), ["general-liability"]);
+});
+
+test("handling customer data triggers cyber liability (high)", () => {
+  const needs = computeNeeds({
+    domain: "commercial",
+    answers: {
+      industry: { value: "retail" },
+      employee_count: { value: "0", amount: 0 },
+      revenue: { value: "under_250k", amount: 150000 },
+      has_premises: { value: "no" },
+      owns_property: { value: "no" },
+      company_vehicles: { value: "no" },
+      handles_data: { value: "yes" },
+    },
+  }, SETTINGS);
+  const cyber = needs.find((n) => n.id === "cyber");
+  assert.ok(cyber && cyber.priority === "high");
+});
+
+test("commercial property: fires for remote business with equipment, not for small premises-based business", () => {
+  // Remote business storing equipment, no premises -> standalone property coverage.
+  const remote = computeNeeds({
+    domain: "commercial",
+    answers: {
+      industry: { value: "retail" },
+      employee_count: { value: "0", amount: 0 },
+      revenue: { value: "under_250k", amount: 150000 },
+      has_premises: { value: "no" },
+      owns_property: { value: "yes" },
+      company_vehicles: { value: "no" },
+      handles_data: { value: "no" },
+    },
+  }, SETTINGS);
+  assert.ok(remote.find((n) => n.id === "commercial-property"));
+
+  // Small business with premises -> BOP bundles property, so no standalone property need.
+  const premises = computeNeeds({
+    domain: "commercial",
+    answers: {
+      industry: { value: "retail" },
+      employee_count: { value: "1_5", amount: 3 },
+      revenue: { value: "under_250k", amount: 150000 },
+      has_premises: { value: "yes" },
+      owns_property: { value: "yes" },
+      company_vehicles: { value: "no" },
+      handles_data: { value: "no" },
+    },
+  }, SETTINGS);
+  assert.ok(premises.find((n) => n.id === "bop"));
+  assert.equal(premises.find((n) => n.id === "commercial-property"), undefined);
 });
 
 test("thresholds are read from settings, not hard-coded", () => {

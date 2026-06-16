@@ -29,6 +29,8 @@ function residentialNeeds(a, s) {
   const status = value(a.home_status);
   const homeValue = amount(a.home_value);
   const vehicles = amount(a.vehicle_count);
+  const dependents = value(a.dependents) === "yes";
+  const flood = value(a.flood_risk);
 
   if (status === "own") {
     out.push(need("home", "Homeowners insurance",
@@ -43,13 +45,28 @@ function residentialNeeds(a, s) {
       "You have a vehicle in the household, and liability coverage is required in most states.", "high"));
   }
 
+  if (dependents) {
+    out.push(need("life", "Life insurance",
+      "People depend on your income or care, so a death benefit would help protect them financially.", "high"));
+  }
+
+  if (flood === "yes") {
+    out.push(need("flood", "Flood insurance",
+      "You're in a higher flood-risk area, and flooding is excluded from standard home and renters policies.", "high"));
+  }
+
   const highValue = homeValue >= s.umbrellaHomeValue;
   const manyVehicles = vehicles >= s.umbrellaVehicleCount;
   if (highValue || manyVehicles) {
-    out.push(need("umbrella", "Umbrella liability",
+    out.push(need("umbrella", "Umbrella / personal liability",
       highValue
         ? "Your assets are high enough that a large claim could exceed standard liability limits."
         : "Multiple vehicles raise your liability exposure beyond standard policy limits.", "medium"));
+  }
+
+  if (flood === "unsure") {
+    out.push(need("flood", "Flood insurance",
+      "It's worth checking your flood risk — flooding is excluded from standard policies and can occur outside mapped zones.", "medium"));
   }
 
   return out;
@@ -60,7 +77,9 @@ function commercialNeeds(a, s) {
   const employees = amount(a.employee_count);
   const revenue = amount(a.revenue);
   const hasPremises = value(a.has_premises) === "yes";
+  const hasProperty = value(a.owns_property) === "yes";
   const hasVehicles = value(a.company_vehicles) === "yes";
+  const handlesData = value(a.handles_data) === "yes";
   const professional = Boolean(a.industry && a.industry.professional);
 
   out.push(need("general-liability", "General liability insurance",
@@ -68,7 +87,7 @@ function commercialNeeds(a, s) {
 
   if (hasPremises) {
     out.push(need("bop", "Business owner's policy (BOP)",
-      "You own or lease premises or equipment, which a BOP bundles with liability cost-effectively.", "high"));
+      "You own or lease premises, which a BOP bundles with property and liability cost-effectively.", "high"));
   }
 
   if (employees >= s.workersCompMinEmployees) {
@@ -79,6 +98,18 @@ function commercialNeeds(a, s) {
   if (professional) {
     out.push(need("professional-liability", "Professional liability (E&O)",
       "Your industry advises or serves clients, exposing you to claims of professional error.", "high"));
+  }
+
+  if (handlesData) {
+    out.push(need("cyber", "Cyber liability insurance",
+      "You store customer data or depend on online systems, which exposes you to breach and ransomware costs.", "high"));
+  }
+
+  // Standalone property coverage matters when there's no BOP to bundle it, or when
+  // the business is large enough that a BOP's limits likely fall short.
+  if (hasProperty && (!hasPremises || revenue >= s.umbrellaRevenue)) {
+    out.push(need("commercial-property", "Commercial property insurance",
+      "You own significant equipment or inventory that would be costly to replace if damaged or stolen.", "medium"));
   }
 
   if (hasVehicles) {
