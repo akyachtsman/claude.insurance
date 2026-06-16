@@ -3,7 +3,10 @@
     "deductible": "The amount you pay out of pocket before insurance starts to pay.",
     "liability": "Coverage for harm or damage you cause to other people or their property.",
     "premises": "The physical location where your business operates.",
-    "umbrella": "Extra liability coverage that sits on top of your other policies for large claims."
+    "umbrella": "Extra liability coverage that sits on top of your other policies for large claims.",
+    "beneficiary": "The person or people you name to receive a life insurance payout.",
+    "replacement cost": "Pays to replace property with new equivalent items, without subtracting for age or wear.",
+    "dependents": "People who rely on your income or care, such as a partner, children, or relatives."
   },
   "branches": {
     "residential": {
@@ -20,7 +23,7 @@
         },
         {
           "id": "home_value",
-          "question": "Roughly what is your home or belongings worth?",
+          "question": "Roughly what are your home or belongings worth?",
           "hint": "A rough range is fine — this helps gauge whether extra liability coverage fits.",
           "type": "single",
           "options": [
@@ -39,6 +42,27 @@
             { "value": "2", "label": "2", "amount": 2 },
             { "value": "3plus", "label": "3 or more", "amount": 3 }
           ]
+        },
+        {
+          "id": "dependents",
+          "question": "Does anyone depend on your income or care?",
+          "hint": "For example a partner, children, or relatives you support.",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No" }
+          ]
+        },
+        {
+          "id": "flood_risk",
+          "question": "Is your home in a flood-prone area or near water?",
+          "hint": "Flooding is excluded from standard home and renters policies. Flooding can also happen outside mapped high-risk zones.",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes, higher risk" },
+            { "value": "unsure", "label": "I'm not sure" },
+            { "value": "no", "label": "No, low risk" }
+          ]
         }
       ]
     },
@@ -51,12 +75,12 @@
           "hint": "This shapes which coverages are typically relevant.",
           "type": "single",
           "options": [
-            { "value": "retail", "label": "Retail or e-commerce" },
+            { "value": "retail", "label": "Retail or e-commerce", "data": true },
             { "value": "food", "label": "Food & beverage" },
             { "value": "construction", "label": "Construction & trades" },
-            { "value": "professional", "label": "Professional services", "professional": true },
-            { "value": "healthcare", "label": "Healthcare", "professional": true },
-            { "value": "technology", "label": "Technology & software", "professional": true },
+            { "value": "professional", "label": "Professional services", "professional": true, "data": true },
+            { "value": "healthcare", "label": "Healthcare", "professional": true, "data": true },
+            { "value": "technology", "label": "Technology & software", "professional": true, "data": true },
             { "value": "manufacturing", "label": "Manufacturing" },
             { "value": "realestate", "label": "Real estate" },
             { "value": "hospitality", "label": "Hospitality & lodging" },
@@ -86,7 +110,7 @@
         },
         {
           "id": "has_premises",
-          "question": "Do you own or lease a business location or equipment?",
+          "question": "Do you own or lease a business location?",
           "type": "single",
           "options": [
             { "value": "yes", "label": "Yes" },
@@ -94,8 +118,28 @@
           ]
         },
         {
+          "id": "owns_property",
+          "question": "Do you own or store significant equipment, inventory, or tools?",
+          "hint": "Things the business would need to repair or replace if damaged or stolen.",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No, very little" }
+          ]
+        },
+        {
           "id": "company_vehicles",
           "question": "Does the business own or use vehicles?",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No" }
+          ]
+        },
+        {
+          "id": "handles_data",
+          "question": "Do you store customer data or rely on online systems?",
+          "hint": "For example payment details, customer records, or software your business depends on.",
           "type": "single",
           "options": [
             { "value": "yes", "label": "Yes" },

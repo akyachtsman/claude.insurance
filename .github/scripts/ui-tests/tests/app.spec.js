@@ -366,7 +366,7 @@ test('S5: residential flow reaches a summary framed as a lead, not a quote', asy
   // Choose the residential branch, then answer each single-choice step by
   // clicking the first option until the contact step (the only step with inputs).
   await page.getByRole('button', { name: /for my household/i }).click();
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 10; i++) {
     if (await page.locator('#contact-name').isVisible().catch(() => false)) break;
     await page.locator('.choices .choice').first().click();
     await page.waitForTimeout(150);
