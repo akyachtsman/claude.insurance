@@ -18,7 +18,7 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 One-time color-scheme choice from `directives/design.md` → "Color Schemes"
 (changeable later). Set this field, and set `data-theme` on the app's root
 `<html>` to match.
-- **Design Theme:** `[choose one: forest | slate-blue | teal | indigo | plum | terracotta | charcoal | burgundy | bronze | deep-cyan]`
+- **Design Theme:** `slate-blue`
 
 ## Application Architecture
 - [main source file/folder] — [brief description]

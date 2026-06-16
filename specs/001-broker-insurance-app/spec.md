@@ -189,3 +189,51 @@ Cross-cutting
 8. **Commercial industry granularity** (FR-B2) — curated short list vs. long taxonomy.
 9. **Usable-lead minimum** (FR-B8) — required fields for a partial lead.
 10. **Design Theme** (FR-X3) — which scheme from `design.md`.
+
+---
+
+## 10. Clarifications (Phase 2 — resolved 2026-06-16)
+
+Resolved by the user (AskUserQuestion). Items not explicitly asked were resolved
+to the recommended default and are recorded here as decisions.
+
+**Explicitly decided:**
+- **C1 — Lead delivery (FR-B7):** Persist each completed lead to Supabase **and**
+  send the broker an email notification. **No broker-facing UI in v1** (delivery
+  only). → resolves §2 broker-surface for v1 as *delivery-only*; S-C4 / FR-C4
+  broker view is reconsidered in v2.
+- **C2 — Identity model (FR-X1):** Knowledge hub + qualification questionnaire are
+  **fully anonymous** (no login). A lightweight account (per `data.md` client-auth
+  PIN/login pattern) is introduced **only at v2 asset protection**, which needs
+  per-user data.
+- **C3 — Suggestion rules (FR-B9, FR-C3):** **Broker-configurable from v1.** The
+  needs/gap engine reads tunable thresholds (not hard-coded constants); v1 ships
+  sensible defaults plus the config surface/storage to edit them.
+- **C4 — Design Theme (FR-X3):** **`slate-blue`.** Set `data-theme="slate-blue"` on
+  root `<html>` and update the CLAUDE.md Design Theme field.
+
+**Resolved to default (override anytime):**
+- **C5 — Geographic scope (FR-X2):** **United States.** Coverage terminology,
+  minimum-vs-adequate framing, and examples are US-oriented.
+- **C6 — v1 coverage set & source (FR-A6):** Seed a starter set —
+  Residential: **home, auto**; Commercial: **business owner's policy (BOP),
+  general liability**. Content is **seeded by us** and broker-editable later (broker
+  authoring is not a v1 requirement).
+- **C7 — Commercial industry granularity (FR-B2):** **Curated short list** (~8–12
+  common categories), not a long trade taxonomy.
+- **C8 — Usable-lead minimum (FR-B8):** A lead is usable when it has **name + one
+  contact method (email or phone) + domain (residential/commercial)**. Anything
+  beyond that enriches but isn't required.
+- **C9 — Asset entry (FR-C2):** **Manual entry only** for v2; import
+  (photos/receipts/integrations) is out of scope for the first asset-protection cut.
+
+**Requirement adjustments from the above:**
+- FR-B7 → leads are written to Supabase and trigger a broker email; no in-app broker
+  queue in v1.
+- FR-B9 / FR-C3 → suggestion thresholds are stored and broker-editable (config), with
+  shipped defaults.
+- FR-C5 / data model → Supabase is in scope from **v1** (lead storage), expanded in
+  v2 for accounts + assets; RLS always on per `data.md`.
+- FR-X3 → theme fixed to `slate-blue`.
+- New non-goal: **no broker-facing UI in v1** (broker consumes leads via email +
+  database only).
