@@ -345,3 +345,41 @@ test('S4: no horizontal overflow at 390px mobile viewport', async ({ page }) => 
 // Generic coverage is S1–S4 above; add project-specific scenarios starting at S5.
 // Add one scenario per row in that table before running the QA pipeline.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO 5 — Residential qualification flow ends in a broker lead, not a quote
+// Source: CLAUDE.md § Project-Specific Test Scenarios (S5)
+// Verifies: a user can go hub → questionnaire → summary, the summary lists at
+// least one coverage need, and it is explicitly framed as a lead (not a quote).
+// ─────────────────────────────────────────────────────────────────────────────
+test('S5: residential flow reaches a summary framed as a lead, not a quote', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+
+  await page.goto('./');
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  // Enter the questionnaire from the hub.
+  await page.getByRole('button', { name: /find what coverage i need/i }).click();
+
+  // Choose the residential branch, then answer each single-choice step by
+  // clicking the first option until the contact step (the only step with inputs).
+  await page.getByRole('button', { name: /for my household/i }).click();
+  for (let i = 0; i < 6; i++) {
+    if (await page.locator('#contact-name').isVisible().catch(() => false)) break;
+    await page.locator('.choices .choice').first().click();
+    await page.waitForTimeout(150);
+  }
+
+  // Deferred PII: contact step appears last. Provide name + one contact method.
+  await page.locator('#contact-name').fill('Test Person');
+  await page.locator('#contact-email').fill('test@example.com');
+  await page.getByRole('button', { name: /see my coverage needs/i }).click();
+
+  // Summary: at least one need, and the explicit "not a quote" framing.
+  await expect(page.locator('.need').first()).toBeVisible();
+  await expect(page.locator('.disclaimer')).toContainText(/not a quote/i);
+
+  expect(errors, `JS errors during flow: ${errors.join('; ')}`).toHaveLength(0);
+});

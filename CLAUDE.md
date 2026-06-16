@@ -11,7 +11,7 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 ## Project Overview
 - **Project name:** claude.insurance
 - **Live URL:** https://akyachtsman.github.io/claude.insurance/
-- **Stack:** [fill in]
+- **Stack:** Static SPA — plain HTML + vanilla ES modules (no framework/build), CSS design tokens; Supabase (Postgres + RLS + Edge Functions) for leads & broker-editable rule settings; hosted on GitHub Pages. *(Supabase provisioning deferred — front-end built first against a stub client.)*
 - **Branch policy:** Develop on a `claude/<name>` feature branch; PRs target `main`
 
 ## Design Theme
@@ -21,7 +21,14 @@ One-time color-scheme choice from `directives/design.md` → "Color Schemes"
 - **Design Theme:** `slate-blue`
 
 ## Application Architecture
-- [main source file/folder] — [brief description]
+- `index.html` — app shell; sets `data-theme="slate-blue"`, loads `js/main.js` (ES module)
+- `js/main.js` — hash router (`#/hub`, `#/qualify`, `#/summary`)
+- `js/views/` — `hub.js` (knowledge hub), `qualify.js` (questionnaire state machine, deferred PII), `summary.js` (needs result + lead submit)
+- `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
+- `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
+- `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
+- `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
+- `supabase/` — *(planned)* migration (`leads` + `rule_settings`, RLS) and `notify-lead` Edge Function
 
 ## Required Commands
 | Purpose | Command |
@@ -30,7 +37,9 @@ One-time color-scheme choice from `directives/design.md` → "Color Schemes"
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
 
 ## Project-Specific Security Constraints
-- [List any accepted security trade-offs, e.g. client-side token usage]
+- **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
+- **Secrets stay server-side:** the email provider key lives only in the `notify-lead` Edge Function. No service-role key is ever shipped to the client.
+- **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
 
 ## Project-Specific Coding Standards
 - [Add project-specific rules here]
@@ -49,13 +58,13 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Key | Value |
 |---|---|
 | App URL | `https://akyachtsman.github.io/claude.insurance/` |
-| Valid test credential | `[a real read-only TEST_AUTH_CREDENTIAL]` |
-| Invalid test credential | `[any value the app rejects]` |
-| Primary nav button | `[label of the first feature button]` |
-| Primary content selector | `[CSS selector for loaded content, e.g. .task]` |
-| Nav cards | `[top-level menu labels, e.g. ['Morning','Evening','Dashboard']]` |
+| Valid test credential | `n/a — app is anonymous, no login` |
+| Invalid test credential | `n/a — no auth gate` |
+| Primary nav button | `Find what coverage I need` |
+| Primary content selector | `.card` |
+| Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | `[login / home / error element selectors]` |
+| Key selectors | home: `.app-header h1` · choice steps: `.choices .choice` · contact: `#contact-name` · summary: `.need`, `.disclaimer` · error: `.error` |
 
 ## Project-Specific Test Scenarios
 Authoritative list of coverage beyond the generic S1–S4 suite — the ui-tester
@@ -63,7 +72,7 @@ adds one `app.spec.js` scenario per row, numbered from S5. Fill in before
 invoking agents (the ui-tester stops and asks if this table is missing).
 | # | Feature | What to verify | Failure indicator |
 |---|---|---|---|
-| S5 | [feature name] | [what correct behavior looks like] | [what broken looks like] |
+| S5 | Residential qualification flow | From the hub, "Find what coverage I need" → choose "For my household" → answer each step → contact step (name + email/phone) appears last → summary lists ≥1 coverage `.need` and shows the "not a quote" disclaimer | Flow stalls, contact step appears before substantive questions, summary shows no needs, or the lead/quote disclaimer is missing |
 
 ## Reporting Requirements
 Agents write evidence to `.agent-reports/`:

@@ -1,0 +1,50 @@
+{
+  "sections": [
+    {
+      "id": "residential",
+      "label": "Residential",
+      "blurb": "Coverage that protects your home, belongings, and personal liability.",
+      "topics": [
+        {
+          "id": "home",
+          "title": "Homeowners insurance",
+          "definition": "A policy that protects your home structure, your belongings, and your personal liability if someone is injured on your property.",
+          "covers": "Damage to the home and attached structures, personal property, loss of use while repairs happen, and liability for injuries to others.",
+          "doesntCover": "Flood and earthquake damage (separate policies), normal wear and tear, and damage from neglected maintenance.",
+          "whoNeeds": "Anyone who owns a home — and it is usually required by your mortgage lender."
+        },
+        {
+          "id": "auto",
+          "title": "Auto insurance",
+          "definition": "A policy that covers financial loss from accidents, theft, and damage involving your vehicle, plus liability for injury or damage you cause.",
+          "covers": "Liability for injury and property damage you cause, plus optional collision and comprehensive coverage for your own vehicle.",
+          "doesntCover": "Routine maintenance, mechanical breakdown, and (without added coverage) a rental while your car is repaired.",
+          "whoNeeds": "Anyone who owns or regularly drives a vehicle — minimum liability coverage is required in almost every state."
+        }
+      ]
+    },
+    {
+      "id": "commercial",
+      "label": "Commercial",
+      "blurb": "Coverage that protects a business, its property, its people, and its liability.",
+      "topics": [
+        {
+          "id": "bop",
+          "title": "Business owner's policy (BOP)",
+          "definition": "A bundled policy that combines property insurance and general liability into one package, often at a lower cost than buying them separately.",
+          "covers": "Business property (equipment, inventory, furnishings), general liability, and usually business-interruption income loss.",
+          "doesntCover": "Employee injuries (workers' compensation), professional mistakes (professional liability), and commercial vehicles.",
+          "whoNeeds": "Small and mid-sized businesses with a physical location or business property who want bundled, cost-effective coverage."
+        },
+        {
+          "id": "general-liability",
+          "title": "General liability insurance",
+          "definition": "A policy that protects a business from claims of bodily injury, property damage, and advertising injury caused to others.",
+          "covers": "Third-party bodily injury and property damage, legal defense costs, and personal and advertising injury claims.",
+          "doesntCover": "Your own property damage, employee injuries, professional errors, and damage to work you performed.",
+          "whoNeeds": "Almost every business — it is the baseline liability protection clients and landlords often require."
+        }
+      ]
+    }
+  ]
+}
