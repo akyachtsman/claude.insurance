@@ -1,0 +1,16 @@
+# Node dependencies
+node_modules/
+
+# Per-repo MCP/backend config — holds connection details, never commit (see data directive)
+.claude/mcp.json
+
+# Local key/secret files — never commit
+.env
+.env.*
+
+# Playwright generated output (package-lock.json IS committed — qa.yml's
+# `cache: npm` step requires it to resolve the dependency lock file)
+.github/scripts/ui-tests/node_modules/
+.github/scripts/ui-tests/test-results/
+.github/scripts/ui-tests/playwright-report/
+.agent-reports/
