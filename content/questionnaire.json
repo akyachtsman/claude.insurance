@@ -1,0 +1,118 @@
+{
+  "glossary": {
+    "deductible": "The amount you pay out of pocket before insurance starts to pay.",
+    "liability": "Coverage for harm or damage you cause to other people or their property.",
+    "premises": "The physical location where your business operates.",
+    "umbrella": "Extra liability coverage that sits on top of your other policies for large claims."
+  },
+  "branches": {
+    "residential": {
+      "label": "For my household",
+      "steps": [
+        {
+          "id": "home_status",
+          "question": "Do you own or rent your home?",
+          "type": "single",
+          "options": [
+            { "value": "own", "label": "I own it" },
+            { "value": "rent", "label": "I rent it" }
+          ]
+        },
+        {
+          "id": "home_value",
+          "question": "Roughly what is your home or belongings worth?",
+          "hint": "A rough range is fine — this helps gauge whether extra liability coverage fits.",
+          "type": "single",
+          "options": [
+            { "value": "under_250k", "label": "Under $250K", "amount": 200000 },
+            { "value": "250k_750k", "label": "$250K – $750K", "amount": 500000 },
+            { "value": "over_750k", "label": "Over $750K", "amount": 1000000 }
+          ]
+        },
+        {
+          "id": "vehicle_count",
+          "question": "How many vehicles are in your household?",
+          "type": "single",
+          "options": [
+            { "value": "0", "label": "None", "amount": 0 },
+            { "value": "1", "label": "1", "amount": 1 },
+            { "value": "2", "label": "2", "amount": 2 },
+            { "value": "3plus", "label": "3 or more", "amount": 3 }
+          ]
+        }
+      ]
+    },
+    "commercial": {
+      "label": "For my business",
+      "steps": [
+        {
+          "id": "industry",
+          "question": "What industry is your business in?",
+          "hint": "This shapes which coverages are typically relevant.",
+          "type": "single",
+          "options": [
+            { "value": "retail", "label": "Retail or e-commerce" },
+            { "value": "food", "label": "Food & beverage" },
+            { "value": "construction", "label": "Construction & trades" },
+            { "value": "professional", "label": "Professional services", "professional": true },
+            { "value": "healthcare", "label": "Healthcare", "professional": true },
+            { "value": "technology", "label": "Technology & software", "professional": true },
+            { "value": "manufacturing", "label": "Manufacturing" },
+            { "value": "realestate", "label": "Real estate" },
+            { "value": "hospitality", "label": "Hospitality & lodging" },
+            { "value": "other", "label": "Something else" }
+          ]
+        },
+        {
+          "id": "employee_count",
+          "question": "How many people does the business employ?",
+          "type": "single",
+          "options": [
+            { "value": "0", "label": "Just me", "amount": 0 },
+            { "value": "1_5", "label": "1 – 5", "amount": 3 },
+            { "value": "6_20", "label": "6 – 20", "amount": 12 },
+            { "value": "20plus", "label": "More than 20", "amount": 30 }
+          ]
+        },
+        {
+          "id": "revenue",
+          "question": "Roughly what is the annual revenue?",
+          "type": "single",
+          "options": [
+            { "value": "under_250k", "label": "Under $250K", "amount": 150000 },
+            { "value": "250k_2m", "label": "$250K – $2M", "amount": 1000000 },
+            { "value": "over_2m", "label": "Over $2M", "amount": 3000000 }
+          ]
+        },
+        {
+          "id": "has_premises",
+          "question": "Do you own or lease a business location or equipment?",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No, fully remote / no premises" }
+          ]
+        },
+        {
+          "id": "company_vehicles",
+          "question": "Does the business own or use vehicles?",
+          "type": "single",
+          "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No" }
+          ]
+        }
+      ]
+    }
+  },
+  "contactStep": {
+    "id": "contact",
+    "question": "Where should your broker reach you?",
+    "hint": "We only need a name and one way to reach you. This is shared with a broker — it is not a quote.",
+    "fields": [
+      { "id": "name", "label": "Name", "type": "text", "required": true },
+      { "id": "email", "label": "Email", "type": "email", "required": false },
+      { "id": "phone", "label": "Phone", "type": "tel", "required": false }
+    ]
+  }
+}
