@@ -1,44 +1,73 @@
 // main.js — app bootstrap and hash router.
-// Routes: #/hub (default), #/qualify, #/summary.
+// Routes: #/ (landing), #/residential, #/commercial, #/coverage/:id,
+//         #/qualify, #/summary. Deep-linkable; old #/hub redirects to #/residential.
 
 import { el, mount } from "./dom.js";
-import { renderHub } from "./views/hub.js";
-import { renderQualify } from "./views/qualify.js";
-import { renderSummary } from "./views/summary.js";
+import { renderLanding } from "./views/landing.js";
+import { renderSection } from "./views/section.js";
+import { renderCoverage } from "./views/coverage.js";
+import { renderPlaceholder } from "./views/placeholder.js";
 
-// Hoisted function declaration so view modules can import it despite the
-// circular reference (main <-> views).
+// Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
-  if (location.hash === hash) {
-    route(); // same hash: re-render explicitly
-  } else {
-    location.hash = hash;
-  }
+  if (location.hash === hash) route();
+  else location.hash = hash;
 }
 
-const ROUTES = {
-  "/hub": renderHub,
-  "/qualify": renderQualify,
-  "/summary": renderSummary,
-};
-
 async function route() {
-  const raw = location.hash.replace(/^#/, "") || "/hub";
-  const [path, query] = raw.split("?");
-  const handler = ROUTES[path] || renderHub;
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const [pathPart, query] = raw.split("?");
+  const parts = pathPart.split("/").filter(Boolean); // ["coverage","home"]
   const params = new URLSearchParams(query || "");
+
   try {
-    await handler(params);
+    await dispatch(parts, params);
   } catch (err) {
     console.error("route error:", err);
-    mount(el("div", { class: "card" }, [
-      el("h2", { text: "Something went wrong" }),
+    mount(el("div", { class: "placeholder" }, [
+      el("h1", { class: "placeholder__title", text: "Something went wrong" }),
       el("p", { text: "We couldn't load this view. Please reload the page." }),
     ]));
   }
+  setActiveNav(parts[0] ? `/${parts[0]}` : "/");
+  focusMain();
+}
+
+async function dispatch(parts, params) {
+  const [top, sub] = parts;
+  switch (top) {
+    case undefined:
+      return renderLanding();
+    case "residential":
+    case "commercial":
+      return renderSection(params, top);
+    case "coverage":
+      return renderCoverage(params, sub);
+    case "qualify":
+      return renderPlaceholder(params, "qualify");
+    case "summary":
+      return renderPlaceholder(params, "summary");
+    case "hub": // back-compat with the old default route
+      location.replace("#/residential");
+      return;
+    default:
+      return renderLanding();
+  }
+}
+
+function setActiveNav(path) {
+  document.querySelectorAll("[data-nav]").forEach((a) => {
+    if (a.getAttribute("data-nav") === path) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+}
+
+// Move focus to the main region on navigation (a11y), without scroll jank.
+function focusMain() {
+  const app = document.getElementById("app");
+  if (app) app.focus({ preventScroll: true });
 }
 
 window.addEventListener("hashchange", route);
 window.addEventListener("DOMContentLoaded", route);
-// If the document is already parsed (module loaded late), route now.
 if (document.readyState !== "loading") route();

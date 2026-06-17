@@ -13,6 +13,7 @@
           "doesntCover": "Flood and earthquake damage (each needs a separate policy), gradual wear and tear, pest or mold damage from neglected maintenance, and losses above your coverage limits.",
           "whoNeeds": "Anyone who owns a home. Mortgage lenders almost always require it, and even without a mortgage it protects what is usually your largest asset.",
           "consider": "Choose 'replacement cost' rather than 'actual cash value' so you can rebuild without depreciation taken out. Check that your dwelling limit reflects today's rebuild cost, not the market price, and review high-value items (jewelry, art) that may need a separate rider.",
+          "scenario": "A kitchen fire spreads while you're at work, leaving $180,000 in structural damage and forcing your family into a rental for four months. A homeowners policy with replacement-cost coverage rebuilds the house and pays the roughly $9,600 in temporary living costs — instead of that bill landing on you.",
           "related": ["auto", "umbrella", "flood"]
         },
         {
@@ -23,6 +24,7 @@
           "doesntCover": "Routine maintenance and mechanical breakdown, intentional damage, business use of a personal vehicle, and losses above your selected limits.",
           "whoNeeds": "Anyone who owns or regularly drives a vehicle. A minimum level of liability coverage is legally required in nearly every state.",
           "consider": "State-minimum liability limits are often too low to cover a serious accident — higher limits are inexpensive relative to the protection. Adding uninsured/underinsured-motorist coverage guards against drivers who carry too little insurance.",
+          "scenario": "You're found at fault in a highway collision that injures another driver. The medical and vehicle claims reach $120,000 — but a state-minimum $25,000 limit stops well short, leaving you personally on the hook for the $95,000 gap. Higher liability limits would have absorbed the full amount.",
           "related": ["umbrella", "home"]
         },
         {
@@ -33,6 +35,7 @@
           "doesntCover": "The building structure (that is the landlord's responsibility), flood and earthquake damage, roommates' belongings unless named, and losses above your limits.",
           "whoNeeds": "Anyone renting an apartment, house, or condo. It is inexpensive and many landlords now require it.",
           "consider": "Estimate the cost to replace everything you own — most people underestimate. As with home insurance, pick replacement-cost coverage, and confirm whether expensive electronics or bicycles need to be scheduled separately.",
+          "scenario": "An electrical fault next door triggers a fire that destroys your furniture, laptop, and clothes — about $22,000 to replace. Your landlord's policy covers the building, not your belongings; a renters policy reimburses your losses and covers a hotel while the unit is repaired.",
           "related": ["umbrella", "life", "flood"]
         },
         {
@@ -43,6 +46,7 @@
           "doesntCover": "Your own property or injuries, business or professional liability, and intentional or criminal acts.",
           "whoNeeds": "People with assets or income worth protecting, multiple vehicles or drivers, a pool, rental property, or anyone whose net worth exceeds their current liability limits.",
           "consider": "Umbrella coverage is unusually inexpensive per dollar of protection. Insurers usually require you to carry certain minimum liability limits on your home and auto policies before they will add an umbrella on top.",
+          "scenario": "A guest is seriously hurt at your pool and the lawsuit settles for $1.3 million. Your home policy's $500,000 liability limit leaves an $800,000 shortfall — exactly what a $1 million umbrella policy, often around $200 a year, is built to absorb.",
           "related": ["home", "auto"]
         },
         {
@@ -53,6 +57,7 @@
           "doesntCover": "Typically excludes death from fraud on the application; some policies limit payouts in the first couple of years or for specific high-risk activities. It does not cover your own living expenses while you are alive.",
           "whoNeeds": "Anyone whose income or care others depend on — partners, children, or family members — and people with significant debts they wouldn't want to pass on.",
           "consider": "Term life is usually the most affordable way to cover the years your dependents need protection (for example until children are grown or a mortgage is paid). A common rule of thumb is coverage of several times your annual income, adjusted for debts and goals.",
+          "scenario": "A sole earner with two children passes unexpectedly, leaving a $310,000 mortgage and years of living costs. A term life policy pays a tax-free benefit — say $750,000 — that keeps the family in their home and covers childcare and education instead of forcing a sale.",
           "related": ["home", "umbrella"]
         },
         {
@@ -63,6 +68,7 @@
           "doesntCover": "Damage from water that originates inside the home (a burst pipe is usually under home insurance), and often basement improvements or contents unless specifically added.",
           "whoNeeds": "Anyone in or near a flood-prone area, close to water, or downhill from runoff. Flooding can happen well outside mapped high-risk zones, so it is worth considering even in moderate-risk areas.",
           "consider": "There is typically a 30-day waiting period before a new flood policy takes effect, so buying ahead of storm season matters. Check whether your area participates in the National Flood Insurance Program and compare it with private flood options.",
+          "scenario": "Six inches of water from a nearby creek ruins flooring, drywall, and your HVAC — roughly $45,000 in damage. Because flooding is excluded from standard home policies, only a separate flood policy pays; without it, that repair comes straight out of pocket.",
           "related": ["home", "renters"]
         }
       ]

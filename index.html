@@ -3,19 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Insurance Coverage Guide</title>
-  <meta name="description" content="Understand your insurance coverage needs and connect with a broker.">
+  <title>Harborline Insurance — Understand your coverage</title>
+  <meta name="description" content="Learn what insurance coverage fits your household or business in plain language, then share your needs with a licensed broker. Anonymous — a lead summary, not a quote.">
   <link rel="stylesheet" href="css/tokens.css">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/views.css">
+  <link rel="stylesheet" href="css/motion.css">
 </head>
 <body>
-  <header class="app-header">
-    <h1>Insurance Coverage Guide</h1>
-    <p>Learn what coverage fits you, then share your needs with a broker.</p>
+  <a class="skip-link" href="#app">Skip to content</a>
+
+  <!-- Persistent site chrome. Brand is placeholder broker branding for the mockup. -->
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <a class="brand" href="#/" aria-label="Harborline Insurance — home">
+        <svg class="brand__mark" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#icon-shield"></use></svg>
+        <span class="brand__name">Harborline<span class="brand__name-accent"> Insurance</span></span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#/residential" data-nav="/residential">Residential</a>
+        <a href="#/commercial" data-nav="/commercial">Commercial</a>
+        <a class="btn btn-primary btn-sm site-nav__cta" href="#/qualify" data-nav="/qualify">Find what coverage I need</a>
+      </nav>
+    </div>
   </header>
-  <main id="app" aria-live="polite">
+
+  <main id="app" tabindex="-1" aria-live="polite">
     <noscript>This guide requires JavaScript to be enabled.</noscript>
   </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer__inner">
+      <div class="site-footer__brand">
+        <svg class="brand__mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#icon-shield"></use></svg>
+        <span>Harborline Insurance</span>
+      </div>
+      <nav class="site-footer__nav" aria-label="Footer">
+        <a href="#/residential">Residential</a>
+        <a href="#/commercial">Commercial</a>
+        <a href="#/qualify">Find what coverage I need</a>
+      </nav>
+      <p class="site-footer__legal">
+        Educational information only. Completing the guide creates a lead summary for a
+        licensed broker to follow up — it is <strong>not a quote, price, or bound
+        policy</strong>. Anonymous: we never sell your data.
+      </p>
+    </div>
+  </footer>
+
+  <!-- Inline SVG icon sprite. Author-controlled static markup (no runtime innerHTML).
+       24x24, stroke=currentColor; one symbol per concept, referenced via <use>. -->
+  <svg class="svg-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+        <symbol id="icon-home" viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/></symbol>
+        <symbol id="icon-auto" viewBox="0 0 24 24"><path d="M5 16v2H3v-2m18 0v2h-2v-2"/><path d="M4 16l1.4-5.2A2 2 0 0 1 7.3 9.3h9.4a2 2 0 0 1 1.9 1.5L20 16z"/><rect x="4" y="13" width="16" height="3.5" rx="1.5"/><circle cx="8" cy="16.5" r="1.3"/><circle cx="16" cy="16.5" r="1.3"/></symbol>
+        <symbol id="icon-renters" viewBox="0 0 24 24"><circle cx="8" cy="13" r="3.2"/><path d="M10.3 11l5.7-5.7 2.5 2.5-1.4 1.4 1.4 1.4-2 2-1.4-1.4-1.4 1.4"/></symbol>
+        <symbol id="icon-umbrella" viewBox="0 0 24 24"><path d="M12 4v2"/><path d="M3.5 11a8.5 8.5 0 0 1 17 0z"/><path d="M12 11v6.5a2.5 2.5 0 0 0 4 0"/></symbol>
+        <symbol id="icon-life" viewBox="0 0 24 24"><path d="M12 19s-6.5-4-8.5-8A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 4c-2 4-8.5 8-8.5 8z"/></symbol>
+        <symbol id="icon-flood" viewBox="0 0 24 24"><path d="M12 3s5 5.5 5 9a5 5 0 0 1-10 0c0-3.5 5-9 5-9z"/><path d="M4 19c1.3 0 1.3 1 2.7 1s1.3-1 2.6-1 1.4 1 2.7 1 1.3-1 2.7-1 1.3 1 2.6 1"/></symbol>
+        <symbol id="icon-bop" viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="11" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M3.5 12h17"/></symbol>
+        <symbol id="icon-general-liability" viewBox="0 0 24 24"><path d="M12 4v15"/><path d="M7 19h10"/><path d="M6 7l-3 5h6z"/><path d="M18 7l-3 5h6z"/><path d="M6 7h12"/></symbol>
+        <symbol id="icon-commercial-property" viewBox="0 0 24 24"><path d="M4 20V8l8-4 8 4v12"/><path d="M3 20h18"/><rect x="8" y="11" width="3" height="3"/><rect x="13" y="11" width="3" height="3"/><path d="M9 20v-3h6v3"/></symbol>
+        <symbol id="icon-professional-liability" viewBox="0 0 24 24"><circle cx="12" cy="9" r="5"/><path d="M9 13.5L8 21l4-2 4 2-1-7.5"/><path d="M10 9l1.5 1.5L14 8"/></symbol>
+        <symbol id="icon-workers-comp" viewBox="0 0 24 24"><path d="M5 13a7 7 0 0 1 14 0"/><path d="M3.5 13h17"/><path d="M9 6.5V13M15 6.5V13"/><path d="M12 6V4"/></symbol>
+        <symbol id="icon-cyber" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6z"/><circle cx="12" cy="11" r="1.6"/><path d="M12 12.6V15"/></symbol>
+        <symbol id="icon-commercial-auto" viewBox="0 0 24 24"><path d="M3 16V8h10v8"/><path d="M13 11h4l3 3v2h-7"/><circle cx="7" cy="16.5" r="1.4"/><circle cx="17" cy="16.5" r="1.4"/></symbol>
+        <symbol id="icon-commercial-umbrella" viewBox="0 0 24 24"><path d="M12 3v2"/><path d="M4 10a8 8 0 0 1 16 0z"/><path d="M12 10v7a2 2 0 0 0 3.5 1.3"/></symbol>
+        <symbol id="icon-book" viewBox="0 0 24 24"><path d="M4 5.5A2 2 0 0 1 6 4h6v15H6a2 2 0 0 0-2 2z"/><path d="M20 5.5A2 2 0 0 0 18 4h-6v15h6a2 2 0 0 1 2 2z"/></symbol>
+        <symbol id="icon-clipboard" viewBox="0 0 24 24"><rect x="6" y="5" width="12" height="16" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 11h6M9 15h4"/></symbol>
+        <symbol id="icon-handshake" viewBox="0 0 24 24"><path d="M3 12l3-3 5 4 2-2 5 3"/><path d="M21 12l-3 3-4-3"/><path d="M3 12V9m18 3V9"/></symbol>
+        <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/><path d="M12 14v3"/></symbol>
+        <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24"><path d="M5 12.5l4 4 10-10"/></symbol>
+        <symbol id="icon-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></symbol>
+        <symbol id="icon-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+        <symbol id="icon-briefcase" viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="11" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/></symbol>
+      </g>
+    </defs>
+  </svg>
+
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

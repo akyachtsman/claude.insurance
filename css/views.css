@@ -1,0 +1,94 @@
+/* views.css — per-view layout: hero, landing, section index, coverage explainer. */
+
+/* ── Hero (landing) ──────────────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 480px at 78% -8%, var(--color-accent-light), transparent 60%),
+    radial-gradient(700px 500px at 8% 110%, rgba(21,101,192,0.10), transparent 55%),
+    var(--color-bg);
+  padding: var(--space-16) 0 var(--space-20);
+}
+.hero__grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  align-items: center;
+  gap: var(--space-12);
+}
+.hero__title { margin-top: var(--space-4); }
+.hero__title .accent { color: var(--color-accent); }
+.hero__lede { margin-top: var(--space-5); font-size: var(--font-xl); }
+.hero__cta { margin-top: var(--space-8); }
+.hero__assure {
+  margin-top: var(--space-6);
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5);
+  color: var(--color-text-secondary); font-size: var(--font-sm); font-weight: 500;
+}
+.hero__assure span { display: inline-flex; align-items: center; gap: var(--space-2); }
+.hero__assure .icon { color: var(--color-accent); }
+.hero__art { display: grid; place-items: center; }
+.hero__art svg { width: 100%; height: auto; max-width: 460px; filter: drop-shadow(0 24px 48px rgba(20,41,82,0.16)); }
+
+/* ── Covered / not-covered split (coverage explainer) ────────────────────── */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+.split__col { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-6); }
+.split__head { display: flex; align-items: center; gap: var(--space-3); font-weight: 600; font-size: var(--font-lg); margin-bottom: var(--space-4); }
+.split__head .icon { width: 22px; height: 22px; }
+.split__col--yes .split__head { color: #1f7a4d; }
+.split__col--yes .icon-badge { background: #e3f3ea; color: #1f7a4d; }
+.split__col--no .split__head { color: var(--color-danger); }
+.split__col--no .icon-badge { background: #fbe9e7; color: var(--color-danger); }
+.split p { color: var(--color-text-secondary); }
+
+/* ── Coverage explainer layout ───────────────────────────────────────────── */
+.cov-hero { background: var(--color-surface); border-bottom: 1px solid var(--color-border); padding: var(--space-12) 0; }
+.cov-hero__inner { display: grid; grid-template-columns: auto 1fr; gap: var(--space-6); align-items: start; }
+.cov-hero__title { font-size: var(--font-5xl); font-weight: 600; line-height: 1.06; letter-spacing: -0.02em; margin-top: var(--space-3); }
+.cov-hero__def { margin-top: var(--space-5); font-size: var(--font-lg); color: var(--color-text-secondary); max-width: 60ch; }
+.cov-hero__cta { margin-top: var(--space-8); }
+
+.breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-sm); color: var(--color-text-secondary); margin-bottom: var(--space-4); }
+.breadcrumb a { font-weight: 600; }
+.breadcrumb .sep { color: var(--color-border-hover); }
+
+.cov-body { max-width: var(--maxw-content); margin: 0 auto; padding: var(--space-16) var(--space-6); display: grid; gap: var(--space-12); }
+.cov-section__title { font-size: var(--font-3xl); font-weight: 600; letter-spacing: -0.01em; margin-bottom: var(--space-5); }
+.cov-section > p { color: var(--color-text-secondary); font-size: var(--font-lg); }
+
+/* Scenario callout. */
+.scenario {
+  background: linear-gradient(135deg, #16294f, #1f3b6e);
+  color: #fff;
+  border-radius: var(--radius-xl);
+  padding: var(--space-10);
+  position: relative;
+  overflow: hidden;
+}
+.scenario__label { color: #9ec5f3; }
+.scenario__text { font-size: var(--font-xl); line-height: 1.5; margin-top: var(--space-4); color: #eaf2fc; }
+.scenario__text .amount { color: #fff; font-weight: 700; border-bottom: 2px solid #9ec5f3; }
+
+/* Related coverages + bottom CTA reuse .card-grid / .band--deep. */
+.cta-band__inner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); flex-wrap: wrap; }
+.cta-band__copy { max-width: 52ch; }
+.cta-band__title { font-size: var(--font-4xl); font-weight: 600; letter-spacing: -0.02em; }
+
+/* Placeholder (routes not yet built in the mockup). */
+.placeholder { max-width: var(--maxw-content); margin: 0 auto; padding: var(--space-20) var(--space-6); text-align: center; }
+.placeholder .icon-badge { margin: 0 auto var(--space-5); }
+.placeholder__title { font-size: var(--font-4xl); font-weight: 600; margin-bottom: var(--space-4); }
+.placeholder p { color: var(--color-text-secondary); font-size: var(--font-lg); max-width: 52ch; margin: 0 auto var(--space-8); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .hero__grid { grid-template-columns: 1fr; gap: var(--space-10); }
+  .hero__art { order: -1; }
+  .hero__art svg { max-width: 320px; }
+  .cov-hero__inner { grid-template-columns: 1fr; }
+  .split { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .hero { padding: var(--space-12) 0 var(--space-16); }
+  .scenario { padding: var(--space-6); }
+}

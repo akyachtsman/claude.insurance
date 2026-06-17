@@ -6,10 +6,13 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.08), 0 4px 6px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 24px 48px -12px rgba(20, 41, 82, 0.18), 0 8px 16px -8px rgba(20, 41, 82, 0.12);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -18,10 +21,33 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 56px;
+  --space-16: 80px;
+  --space-20: 112px;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
-  --maxw-content: 720px;
+
+  /* Body / utility type (<=24px utility cap). */
+  --font-sm: 14px;
+  --font-base: 16px;
+  --font-lg: 18px;
+  --font-xl: 20px;
+  --font-2xl: 24px;
+
+  /* Expressive display scale (design.md) — heroes & section openers beyond 24px.
+     Weight 600, tight line-height (1.05-1.15). Fluid via clamp() for responsiveness. */
+  --font-3xl: clamp(26px, 3.4vw, 30px);
+  --font-4xl: clamp(30px, 4.4vw, 40px);
+  --font-5xl: clamp(38px, 6vw, 56px);
+  --font-6xl: clamp(46px, 7.6vw, 72px);
+  --leading-display: 1.08;
+
+  /* Layout widths. */
+  --maxw-content: 720px;   /* reading measure (explainer body) */
+  --maxw-wide: 1120px;     /* marketing container */
+  --maxw-prose: 640px;     /* hero/section copy measure */
 }
 
 [data-theme="slate-blue"] {
