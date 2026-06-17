@@ -93,7 +93,6 @@ export async function renderQualify(params) {
     const answer = { value: opt.value };
     if (typeof opt.amount === "number") answer.amount = opt.amount;
     if (opt.professional) answer.professional = true;
-    if (opt.data) answer.data = true;
     state.answers[step.id] = answer;
     state.stepIndex += 1;
     render();

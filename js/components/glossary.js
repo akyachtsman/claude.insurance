@@ -53,6 +53,7 @@ function termButton(label, definition) {
 }
 
 function closeOpen() {
+  if (openPopover && !openPopover.isConnected) { openPopover = null; return; }
   if (openPopover) {
     openPopover.classList.remove("is-open");
     const b = openPopover.querySelector(".glossary-term");

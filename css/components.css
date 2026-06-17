@@ -62,7 +62,7 @@
   transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, border-color 0.14s ease;
 }
 .btn .icon { transition: transform 0.14s ease; }
-.btn-sm { padding: 10px 18px; min-height: 40px; font-size: var(--font-sm); }
+.btn-sm { padding: 11px 18px; min-height: 44px; font-size: var(--font-sm); }
 .btn-lg { padding: 16px 32px; min-height: 56px; font-size: var(--font-lg); }
 
 .btn-primary { background: var(--color-accent); color: #fff; box-shadow: var(--shadow-sm); }
