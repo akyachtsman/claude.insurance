@@ -12,7 +12,8 @@
           "covers": "Damage to the house and attached structures from events like fire, wind, hail, and theft; your personal belongings; additional living expenses while repairs happen; and liability for injuries to guests or damage you cause to others.",
           "doesntCover": "Flood and earthquake damage (each needs a separate policy), gradual wear and tear, pest or mold damage from neglected maintenance, and losses above your coverage limits.",
           "whoNeeds": "Anyone who owns a home. Mortgage lenders almost always require it, and even without a mortgage it protects what is usually your largest asset.",
-          "consider": "Choose 'replacement cost' rather than 'actual cash value' so you can rebuild without depreciation taken out. Check that your dwelling limit reflects today's rebuild cost, not the market price, and review high-value items (jewelry, art) that may need a separate rider."
+          "consider": "Choose 'replacement cost' rather than 'actual cash value' so you can rebuild without depreciation taken out. Check that your dwelling limit reflects today's rebuild cost, not the market price, and review high-value items (jewelry, art) that may need a separate rider.",
+          "related": ["auto", "umbrella", "flood"]
         },
         {
           "id": "auto",
@@ -21,7 +22,8 @@
           "covers": "Liability for bodily injury and property damage you cause; optional collision coverage for your own car in a crash; comprehensive coverage for theft, weather, and vandalism; and (if added) medical payments and uninsured-motorist protection.",
           "doesntCover": "Routine maintenance and mechanical breakdown, intentional damage, business use of a personal vehicle, and losses above your selected limits.",
           "whoNeeds": "Anyone who owns or regularly drives a vehicle. A minimum level of liability coverage is legally required in nearly every state.",
-          "consider": "State-minimum liability limits are often too low to cover a serious accident — higher limits are inexpensive relative to the protection. Adding uninsured/underinsured-motorist coverage guards against drivers who carry too little insurance."
+          "consider": "State-minimum liability limits are often too low to cover a serious accident — higher limits are inexpensive relative to the protection. Adding uninsured/underinsured-motorist coverage guards against drivers who carry too little insurance.",
+          "related": ["umbrella", "home"]
         },
         {
           "id": "renters",
@@ -30,7 +32,8 @@
           "covers": "Your belongings against theft, fire, and many types of damage (even outside the home); liability if you injure someone or damage their property; and additional living expenses if your rental becomes uninhabitable.",
           "doesntCover": "The building structure (that is the landlord's responsibility), flood and earthquake damage, roommates' belongings unless named, and losses above your limits.",
           "whoNeeds": "Anyone renting an apartment, house, or condo. It is inexpensive and many landlords now require it.",
-          "consider": "Estimate the cost to replace everything you own — most people underestimate. As with home insurance, pick replacement-cost coverage, and confirm whether expensive electronics or bicycles need to be scheduled separately."
+          "consider": "Estimate the cost to replace everything you own — most people underestimate. As with home insurance, pick replacement-cost coverage, and confirm whether expensive electronics or bicycles need to be scheduled separately.",
+          "related": ["umbrella", "life", "flood"]
         },
         {
           "id": "umbrella",
@@ -39,7 +42,8 @@
           "covers": "Large liability claims that exhaust your underlying home or auto limits — for example a serious car accident or an injury on your property — plus some claims those policies exclude, such as libel or slander.",
           "doesntCover": "Your own property or injuries, business or professional liability, and intentional or criminal acts.",
           "whoNeeds": "People with assets or income worth protecting, multiple vehicles or drivers, a pool, rental property, or anyone whose net worth exceeds their current liability limits.",
-          "consider": "Umbrella coverage is unusually inexpensive per dollar of protection. Insurers usually require you to carry certain minimum liability limits on your home and auto policies before they will add an umbrella on top."
+          "consider": "Umbrella coverage is unusually inexpensive per dollar of protection. Insurers usually require you to carry certain minimum liability limits on your home and auto policies before they will add an umbrella on top.",
+          "related": ["home", "auto"]
         },
         {
           "id": "life",
@@ -48,7 +52,8 @@
           "covers": "A death benefit paid to your beneficiaries, which can be used for everyday living costs, a mortgage, childcare, education, or final expenses. Term policies cover a set period; permanent policies last for life and can build cash value.",
           "doesntCover": "Typically excludes death from fraud on the application; some policies limit payouts in the first couple of years or for specific high-risk activities. It does not cover your own living expenses while you are alive.",
           "whoNeeds": "Anyone whose income or care others depend on — partners, children, or family members — and people with significant debts they wouldn't want to pass on.",
-          "consider": "Term life is usually the most affordable way to cover the years your dependents need protection (for example until children are grown or a mortgage is paid). A common rule of thumb is coverage of several times your annual income, adjusted for debts and goals."
+          "consider": "Term life is usually the most affordable way to cover the years your dependents need protection (for example until children are grown or a mortgage is paid). A common rule of thumb is coverage of several times your annual income, adjusted for debts and goals.",
+          "related": ["home", "umbrella"]
         },
         {
           "id": "flood",
@@ -57,7 +62,8 @@
           "covers": "Damage to your home's structure and systems and, depending on the policy, your belongings, caused by flooding from heavy rain, storm surge, overflowing rivers, or rapid snowmelt.",
           "doesntCover": "Damage from water that originates inside the home (a burst pipe is usually under home insurance), and often basement improvements or contents unless specifically added.",
           "whoNeeds": "Anyone in or near a flood-prone area, close to water, or downhill from runoff. Flooding can happen well outside mapped high-risk zones, so it is worth considering even in moderate-risk areas.",
-          "consider": "There is typically a 30-day waiting period before a new flood policy takes effect, so buying ahead of storm season matters. Check whether your area participates in the National Flood Insurance Program and compare it with private flood options."
+          "consider": "There is typically a 30-day waiting period before a new flood policy takes effect, so buying ahead of storm season matters. Check whether your area participates in the National Flood Insurance Program and compare it with private flood options.",
+          "related": ["home", "renters"]
         }
       ]
     },
@@ -73,7 +79,8 @@
           "covers": "Business property such as equipment, inventory, and furnishings; general liability for third-party injury and property damage; and usually business-interruption coverage that replaces lost income if you cannot operate after a covered event.",
           "doesntCover": "Employee injuries (workers' compensation), professional mistakes (professional liability), commercial vehicles (commercial auto), and cyber incidents — these are added separately.",
           "whoNeeds": "Small to mid-sized businesses with a physical location, equipment, or inventory that want broad, cost-effective coverage in a single policy.",
-          "consider": "Confirm the business-interruption portion reflects how long it would realistically take to reopen. A BOP suits typical small businesses; larger or higher-risk operations often need standalone property and liability policies with higher limits."
+          "consider": "Confirm the business-interruption portion reflects how long it would realistically take to reopen. A BOP suits typical small businesses; larger or higher-risk operations often need standalone property and liability policies with higher limits.",
+          "related": ["general-liability", "commercial-property", "workers-comp"]
         },
         {
           "id": "general-liability",
@@ -82,7 +89,8 @@
           "covers": "Third-party bodily injury and property damage, legal defense costs even for groundless suits, and personal and advertising injury such as libel, slander, or copyright issues in your advertising.",
           "doesntCover": "Your own property damage, employee injuries, professional errors, damage to work you performed, and cyber or data-breach losses.",
           "whoNeeds": "Almost every business. It is the protection that clients, landlords, and venues most often require before they will work with you.",
-          "consider": "Clients frequently ask to be named as an 'additional insured' on your policy — make sure yours allows that. Match your limits to the contracts you sign, since many require a minimum amount of coverage."
+          "consider": "Clients frequently ask to be named as an 'additional insured' on your policy — make sure yours allows that. Match your limits to the contracts you sign, since many require a minimum amount of coverage.",
+          "related": ["bop", "professional-liability", "commercial-umbrella"]
         },
         {
           "id": "commercial-property",
@@ -91,7 +99,8 @@
           "covers": "Owned or leased buildings, tools and equipment, inventory and stock, furniture and fixtures, and often outdoor signage and fencing, damaged by covered events. Many policies also include business-interruption income loss.",
           "doesntCover": "Flood and earthquake (separate coverage), normal wear and tear, employee theft unless added, and property in transit or vehicles (covered elsewhere).",
           "whoNeeds": "Businesses that own or store meaningful property — a storefront, a workshop, expensive equipment, or significant inventory — especially those that have outgrown a basic BOP.",
-          "consider": "Insure property at replacement cost where possible, and keep an up-to-date inventory with values so claims go smoothly. If you lease, check whether your lease makes you responsible for improvements you installed."
+          "consider": "Insure property at replacement cost where possible, and keep an up-to-date inventory with values so claims go smoothly. If you lease, check whether your lease makes you responsible for improvements you installed.",
+          "related": ["bop", "commercial-umbrella"]
         },
         {
           "id": "professional-liability",
@@ -100,7 +109,8 @@
           "covers": "Legal defense and damages from claims of negligence, errors, omissions, missed deadlines, or failure to deliver promised professional services. For some fields this extends to malpractice.",
           "doesntCover": "Bodily injury and property damage (that is general liability), intentional wrongdoing or fraud, and cyber breaches unless specifically included.",
           "whoNeeds": "Businesses that give advice or deliver professional services — consultants, agencies, technology and software firms, accountants, healthcare providers, designers, and similar.",
-          "consider": "Many of these policies are 'claims-made', meaning they only cover claims filed while the policy is active — so keeping continuous coverage (and considering 'tail' coverage when you switch) matters. Match limits to the size of the projects you take on."
+          "consider": "Many of these policies are 'claims-made', meaning they only cover claims filed while the policy is active — so keeping continuous coverage (and considering 'tail' coverage when you switch) matters. Match limits to the size of the projects you take on.",
+          "related": ["general-liability", "cyber"]
         },
         {
           "id": "workers-comp",
@@ -109,7 +119,8 @@
           "covers": "Employee medical treatment, a portion of lost wages during recovery, rehabilitation costs, and death benefits to a family. It applies regardless of who was at fault.",
           "doesntCover": "Injuries to owners in some states unless they opt in, independent contractors (usually), injuries from intoxication or horseplay, and ordinary business liability.",
           "whoNeeds": "Almost any business with employees. It is legally required in nearly every state once you have one or more employees, with rules that vary by state.",
-          "consider": "Misclassifying employees as contractors to avoid premiums can lead to serious penalties. Premiums are based on payroll and job risk, so accurate job classifications and a focus on workplace safety keep costs down."
+          "consider": "Misclassifying employees as contractors to avoid premiums can lead to serious penalties. Premiums are based on payroll and job risk, so accurate job classifications and a focus on workplace safety keep costs down.",
+          "related": ["general-liability", "bop"]
         },
         {
           "id": "cyber",
@@ -118,7 +129,28 @@
           "covers": "Costs to investigate and contain a breach, notify affected customers, restore data and systems, and handle ransomware, plus legal liability, regulatory fines where insurable, and lost income from downtime.",
           "doesntCover": "Future lost profits beyond covered downtime, the cost of upgrading systems after an incident, and losses from poor security you failed to maintain as required by the policy.",
           "whoNeeds": "Any business that stores customer or payment data, relies on online systems, or would be disrupted by an outage — which today is most businesses, not just tech companies.",
-          "consider": "Insurers increasingly require basic safeguards (multi-factor authentication, backups, employee training) before they will quote. Distinguish 'first-party' coverage (your own costs) from 'third-party' coverage (claims by others) and make sure you have both."
+          "consider": "Insurers increasingly require basic safeguards (multi-factor authentication, backups, employee training) before they will quote. Distinguish 'first-party' coverage (your own costs) from 'third-party' coverage (claims by others) and make sure you have both.",
+          "related": ["professional-liability", "general-liability"]
+        },
+        {
+          "id": "commercial-auto",
+          "title": "Commercial auto insurance",
+          "definition": "Coverage for vehicles used for business purposes — owned, leased, or in some cases employees' personal cars driven for work. Personal auto policies generally exclude business use, leaving a serious gap without it.",
+          "covers": "Liability for injury and property damage caused while driving for the business, physical damage to owned business vehicles, and — when added — 'hired and non-owned' auto for rented vehicles or staff using their own cars for work.",
+          "doesntCover": "Purely personal use under some policies, wear and tear and mechanical breakdown, and cargo or tools inside the vehicle unless specifically added.",
+          "whoNeeds": "Any business that owns vehicles, or whose employees drive for work — including deliveries, client visits, or running errands in personal cars.",
+          "consider": "Even with no company-owned vehicles, 'hired and non-owned' auto coverage protects you when staff drive their own cars for business. After an at-fault accident a personal insurer may deny a claim once it learns the trip was for work.",
+          "related": ["general-liability", "commercial-umbrella"]
+        },
+        {
+          "id": "commercial-umbrella",
+          "title": "Commercial umbrella insurance",
+          "definition": "Extra liability coverage that sits on top of your general liability, commercial auto, and employer's liability policies. When a large claim exhausts those underlying limits, the umbrella covers the excess.",
+          "covers": "Large third-party liability claims that exceed the limits of the policies beneath it — for example a serious injury, a major auto accident, or a sizeable lawsuit — plus the legal costs that come with them.",
+          "doesntCover": "Your own property, professional errors (unless E&O is scheduled underneath), employee injuries beyond employer's liability, and risks the underlying policies exclude.",
+          "whoNeeds": "Businesses with customer foot traffic, vehicles, higher revenue, or contracts that require high liability limits — where a single large claim could exceed standard policy limits.",
+          "consider": "Contracts and landlords frequently require $1M or more in combined liability; an umbrella is usually the most cost-effective way to reach those limits. The insurer will require specified minimum limits on the underlying policies.",
+          "related": ["general-liability", "commercial-property", "commercial-auto"]
         }
       ]
     }
