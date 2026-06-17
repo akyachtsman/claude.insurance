@@ -86,6 +86,7 @@
           "doesntCover": "Employee injuries (workers' compensation), professional mistakes (professional liability), commercial vehicles (commercial auto), and cyber incidents — these are added separately.",
           "whoNeeds": "Small to mid-sized businesses with a physical location, equipment, or inventory that want broad, cost-effective coverage in a single policy.",
           "consider": "Confirm the business-interruption portion reflects how long it would realistically take to reopen. A BOP suits typical small businesses; larger or higher-risk operations often need standalone property and liability policies with higher limits.",
+          "scenario": "A burst pipe floods your shop overnight, ruining $60,000 of inventory and forcing a three-week closure. A BOP covers the damaged stock and roughly $18,000 in lost income while you're shut — and would handle a customer injury claim under the same policy.",
           "related": ["general-liability", "commercial-property", "workers-comp"]
         },
         {
@@ -96,6 +97,7 @@
           "doesntCover": "Your own property damage, employee injuries, professional errors, damage to work you performed, and cyber or data-breach losses.",
           "whoNeeds": "Almost every business. It is the protection that clients, landlords, and venues most often require before they will work with you.",
           "consider": "Clients frequently ask to be named as an 'additional insured' on your policy — make sure yours allows that. Match your limits to the contracts you sign, since many require a minimum amount of coverage.",
+          "scenario": "A client slips on a wet floor during a site visit and breaks a wrist, then sues for $75,000 in medical bills and lost wages. General liability covers the claim and your legal defense — costs that would otherwise come straight from the business.",
           "related": ["bop", "professional-liability", "commercial-umbrella"]
         },
         {
@@ -106,6 +108,7 @@
           "doesntCover": "Flood and earthquake (separate coverage), normal wear and tear, employee theft unless added, and property in transit or vehicles (covered elsewhere).",
           "whoNeeds": "Businesses that own or store meaningful property — a storefront, a workshop, expensive equipment, or significant inventory — especially those that have outgrown a basic BOP.",
           "consider": "Insure property at replacement cost where possible, and keep an up-to-date inventory with values so claims go smoothly. If you lease, check whether your lease makes you responsible for improvements you installed.",
+          "scenario": "An electrical fire destroys $140,000 of equipment and built-out space at your workshop. Commercial property coverage pays to replace the machinery and rebuild the improvements, instead of the loss stalling the business indefinitely.",
           "related": ["bop", "commercial-umbrella"]
         },
         {
@@ -116,6 +119,7 @@
           "doesntCover": "Bodily injury and property damage (that is general liability), intentional wrongdoing or fraud, and cyber breaches unless specifically included.",
           "whoNeeds": "Businesses that give advice or deliver professional services — consultants, agencies, technology and software firms, accountants, healthcare providers, designers, and similar.",
           "consider": "Many of these policies are 'claims-made', meaning they only cover claims filed while the policy is active — so keeping continuous coverage (and considering 'tail' coverage when you switch) matters. Match limits to the size of the projects you take on.",
+          "scenario": "A consultant's recommendation is blamed for a client's $200,000 revenue shortfall, and the client sues for negligence. Professional liability (E&O) covers the defense and any settlement — even though the work was done in good faith.",
           "related": ["general-liability", "cyber"]
         },
         {
@@ -126,6 +130,7 @@
           "doesntCover": "Injuries to owners in some states unless they opt in, independent contractors (usually), injuries from intoxication or horseplay, and ordinary business liability.",
           "whoNeeds": "Almost any business with employees. It is legally required in nearly every state once you have one or more employees, with rules that vary by state.",
           "consider": "Misclassifying employees as contractors to avoid premiums can lead to serious penalties. Premiums are based on payroll and job risk, so accurate job classifications and a focus on workplace safety keep costs down.",
+          "scenario": "A warehouse employee injures their back lifting stock and is out for two months. Workers' compensation pays the roughly $28,000 in medical care and lost wages, and shields the business from being sued over the injury.",
           "related": ["general-liability", "bop"]
         },
         {
@@ -136,6 +141,7 @@
           "doesntCover": "Future lost profits beyond covered downtime, the cost of upgrading systems after an incident, and losses from poor security you failed to maintain as required by the policy.",
           "whoNeeds": "Any business that stores customer or payment data, relies on online systems, or would be disrupted by an outage — which today is most businesses, not just tech companies.",
           "consider": "Insurers increasingly require basic safeguards (multi-factor authentication, backups, employee training) before they will quote. Distinguish 'first-party' coverage (your own costs) from 'third-party' coverage (claims by others) and make sure you have both.",
+          "scenario": "Ransomware locks your systems and a breach exposes customer records. Investigation, customer notification, and recovery run to $95,000. Cyber liability covers those response costs and the resulting claims — exposures a standard policy excludes.",
           "related": ["professional-liability", "general-liability"]
         },
         {
@@ -146,6 +152,7 @@
           "doesntCover": "Purely personal use under some policies, wear and tear and mechanical breakdown, and cargo or tools inside the vehicle unless specifically added.",
           "whoNeeds": "Any business that owns vehicles, or whose employees drive for work — including deliveries, client visits, or running errands in personal cars.",
           "consider": "Even with no company-owned vehicles, 'hired and non-owned' auto coverage protects you when staff drive their own cars for business. After an at-fault accident a personal insurer may deny a claim once it learns the trip was for work.",
+          "scenario": "An employee runs a red light on a delivery and causes a collision with $110,000 in injuries and vehicle damage. Commercial auto covers it; a personal policy would deny the claim once it learns the trip was for work.",
           "related": ["general-liability", "commercial-umbrella"]
         },
         {
@@ -156,6 +163,7 @@
           "doesntCover": "Your own property, professional errors (unless E&O is scheduled underneath), employee injuries beyond employer's liability, and risks the underlying policies exclude.",
           "whoNeeds": "Businesses with customer foot traffic, vehicles, higher revenue, or contracts that require high liability limits — where a single large claim could exceed standard policy limits.",
           "consider": "Contracts and landlords frequently require $1M or more in combined liability; an umbrella is usually the most cost-effective way to reach those limits. The insurer will require specified minimum limits on the underlying policies.",
+          "scenario": "A serious customer injury results in a $2 million judgment, but your general liability tops out at $1 million. A commercial umbrella absorbs the remaining $1 million that would otherwise threaten the business's assets.",
           "related": ["general-liability", "commercial-property", "commercial-auto"]
         }
       ]

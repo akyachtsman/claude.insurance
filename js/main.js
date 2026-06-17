@@ -6,7 +6,8 @@ import { el, mount } from "./dom.js";
 import { renderLanding } from "./views/landing.js";
 import { renderSection } from "./views/section.js";
 import { renderCoverage } from "./views/coverage.js";
-import { renderPlaceholder } from "./views/placeholder.js";
+import { renderQualify } from "./views/qualify.js";
+import { renderSummary } from "./views/summary.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -44,9 +45,9 @@ async function dispatch(parts, params) {
     case "coverage":
       return renderCoverage(params, sub);
     case "qualify":
-      return renderPlaceholder(params, "qualify");
+      return renderQualify(params);
     case "summary":
-      return renderPlaceholder(params, "summary");
+      return renderSummary(params);
     case "hub": // back-compat with the old default route
       location.replace("#/residential");
       return;
@@ -67,6 +68,15 @@ function focusMain() {
   const app = document.getElementById("app");
   if (app) app.focus({ preventScroll: true });
 }
+
+// Delegated navigation for non-anchor controls (e.g. the nav CTA button).
+document.addEventListener("click", (e) => {
+  const trigger = e.target.closest("[data-go]");
+  if (trigger) {
+    e.preventDefault();
+    go(`#${trigger.getAttribute("data-go")}`);
+  }
+});
 
 window.addEventListener("hashchange", route);
 window.addEventListener("DOMContentLoaded", route);
