@@ -28,7 +28,8 @@ One-time color-scheme choice from `directives/design.md` → "Color Schemes"
 - `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/` — *(planned)* migration (`leads` + `rule_settings`, RLS) and `notify-lead` Edge Function
+- `supabase/` — *(prepared, not yet provisioned)* `migrations/0001_init.sql` (`leads` + `rule_settings`, RLS) and `functions/notify-lead` Edge Function; provisioning runbook in `supabase/README.md`
+- `js/config.js` — client-safe Supabase URL + anon key (empty until provisioned; service-role key never here)
 
 ## Required Commands
 | Purpose | Command |

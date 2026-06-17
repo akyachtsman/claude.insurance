@@ -102,6 +102,13 @@ function renderContact() {
     ]));
   }
 
+  // Honeypot: hidden from humans (and assistive tech), but bots tend to fill every
+  // field. A filled value is dropped before reaching the database.
+  const honeypot = el("input", {
+    attrs: { type: "text", id: "contact-company", name: "company", tabindex: "-1", autocomplete: "off", "aria-hidden": "true" },
+  });
+  container.appendChild(el("div", { class: "visually-hidden", attrs: { "aria-hidden": "true" } }, [honeypot]));
+
   const errorBox = el("p", { class: "error" });
   container.appendChild(errorBox);
 
@@ -115,7 +122,7 @@ function renderContact() {
         const phone = inputs.phone.value.trim();
         if (!name) return showError(errorBox, "Please enter a name.");
         if (!email && !phone) return showError(errorBox, "Please add an email or a phone number.");
-        session.contact = { name, email: email || null, phone: phone || null };
+        session.contact = { name, email: email || null, phone: phone || null, honeypot: honeypot.value.trim() };
         go("#/summary");
       },
     },

@@ -49,7 +49,7 @@ export async function renderSummary() {
     sendBtn.disabled = true;
     status.textContent = "Sending…";
     try {
-      await submitLead(buildLead(session, needs, false));
+      await submitLead(buildLead(session, needs, false), { honeypot: session.contact.honeypot });
       status.textContent = "Sent. A broker will be in touch.";
     } catch (err) {
       sendBtn.disabled = false;
