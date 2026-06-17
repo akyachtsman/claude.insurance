@@ -1,158 +1,174 @@
-# Plan — Broker-Branded Insurance App
+# Plan — Broker-Branded Insurance App (Rebuild)
 
 **Phase:** 3 (plan) · HOW
 **Feature slug:** `001-broker-insurance-app`
-**Reads:** `spec.md` (incl. resolved §10 Clarifications)
-**Constitution:** `global.md` (plain HTML+JS, **no framework / no build / no npm runtime
-deps**, iPad-Safari target, `textContent` for dynamic data), `design.md` (slate-blue
-theme, components, editorial + number/date formatting), `data.md` (Supabase, **RLS
-always on**, service-role/secrets server-side only), `test.md` (S1–S4 + project
-scenarios, html-validate, workflow YAML check).
+**Reads:** `spec.md` (incl. §10 Clarifications) + `research.md` (Parts 1 & 2)
+**Supersedes:** the original minimal plan for this slug.
+**Constitution:** imported directives in `CLAUDE.md` (`global.md`, `design.md`,
+`data.md`, `test.md`) are binding. This plan adds **no scope** beyond the spec.
 
-This plan introduces **no scope the spec didn't ask for**. Each decision cites the
-requirement it serves.
+> **Ambition bar (binding):** Expressive Mode, benchmarked to Lemonade + Policygenius.
+> Breadth preferred (5 sections + 14 coverages). Not trimmed to a minimal MVP. The
+> finish line is `research.md` Part 2's polish bar, not "passes tests."
 
 ---
 
-## 1. Architecture at a glance
-A **static single-page app on GitHub Pages** (no build step) that talks to **Supabase**
-for the two things that need a backend: storing leads and holding broker-editable rule
-thresholds. Knowledge-hub content ships as **static JSON in the repo** (no DB needed to
-read it). Broker email notification is a **Supabase Edge Function** fired by a database
-webhook on lead insert.
+## 1. Stack & key decisions (with trade-offs)
 
-```
-GitHub Pages (static)                         Supabase (data.md)
-┌─────────────────────────────┐               ┌───────────────────────────┐
-│ index.html (app shell)      │   anon key    │ leads        (insert-only)│
-│ /js  app modules (ES, no    │──────────────▶│ rule_settings(public read)│
-│      bundler)               │   read/insert └─────────────┬─────────────┘
-│ /css design-system + theme  │                             │ db webhook on insert
-│ /content/*.json  hub + Qs   │               ┌─────────────▼─────────────┐
-│ /js/rules.js  needs engine  │               │ Edge Function: notify-lead│
-└─────────────────────────────┘               │  → email provider (secret)│
-        served at /claude.insurance/          └───────────────────────────┘
-```
-
-**Why static + Supabase (not a server framework):** `global.md` forbids
-build/framework/npm-runtime; `data.md` makes Supabase the sanctioned backend. A static
-client with the **anon key** (publishable, RLS-guarded) is the documented pattern. Only
-the email step needs a secret, which lives in the Edge Function — never client-side.
-
-## 2. Tech stack
-| Concern | Choice | Rationale / trade-off |
+| Decision | Choice | Why / trade-off |
 |---|---|---|
-| Markup/logic | Plain HTML + vanilla **ES modules** (`<script type="module">`), no bundler | `global.md` hard rule; Pages serves modules natively. Trade-off: manual module wiring, no tree-shaking — fine at this size. |
-| Styling | Hand-rolled CSS using `design.md` tokens; `data-theme="slate-blue"` on `<html>` | FR-X3. Single stylesheet + CSS custom properties; no Tailwind/SCSS. |
-| Routing | Hash-based client routing (`#/hub`, `#/qualify`, …) | No server rewrites needed on Pages; back/forward + deep links work. Trade-off: `#` URLs (acceptable). |
-| Backend | Supabase (Postgres + RLS + Edge Functions) | `data.md`. Leads (v1) now; accounts+assets (v2) later on same project. |
-| Email | Supabase Edge Function → transactional email provider (e.g. Resend) via DB webhook | Keeps the API key server-side (`data.md`). Provider chosen at implement; abstracted behind the function. |
-| Hosting/CI | GitHub Pages + existing `qa.yml` (Static Checks + Playwright) | Already scaffolded; no change. |
-| Content | Static JSON in `/content` (hub topics, questionnaire schema) | Versioned, PR-reviewable, html-validate-independent; no DB read path for content. |
+| **Framework / build** | **Plain HTML + vanilla ES modules, no build step** | Constitution default (`global.md`); zero-config GitHub Pages hosting; full control over inline SVG + motion. Trade-off: we hand-roll a small component layer — mitigated by disciplined `js/components/` structure. |
+| **Routing** | **Hash router** (extend existing `main.js`) | Hash works on GitHub Pages with no server rewrites; existing pattern. Extend to deep, shareable routes (FR-X7). Trade-off: hash URLs over clean paths — acceptable for Pages. |
+| **Iconography** | **Inline SVG `<symbol>` sprite in `index.html`, referenced via `<use>`** | Author-controlled static markup (not user data) → **no runtime `innerHTML`** (FR-X4); cached once; one icon per concept (FR-X5). Trade-off: sprite lives in the shell — kept organized + commented. |
+| **Illustration** | **Inline SVG built via a `createElementNS` helper** (`js/svg.js`) for hero/section art | Keeps the innerHTML ban intact; owned/in-repo (C-Q5); themeable via `currentColor`/tokens. Trade-off: more verbose than raw SVG strings — helper keeps it terse. |
+| **Motion** | **IntersectionObserver scroll-reveal + count-up**, `prefers-reduced-motion`-gated (`js/motion.js`) | Tasteful reveals per `design.md`; reduced-motion → reveal immediately, no animation (FR-H3/FR-X6/SC8). |
+| **Backend** | **STUB `supabase.js` (unchanged) for v1** | C-Q4 "stub first." `submitLead`/`fetchRules` already stubbed; live provisioning is a later pass governed by `data.md`. |
+| **Rules engine** | **Reuse `js/rules.js` as-is (pure, thresholds from settings)** | Already constitution-compliant (FR-Q6, SC7). Extend only if questionnaire depth changes — additively, thresholds still from `rule-defaults.json`/`rule_settings`. |
+| **Data safety** | **`textContent` only via `dom.js`; SVG via sprite/`createElementNS`** | `global.md` no-`innerHTML` rule (FR-X4). |
+| **CSS** | **Split token + layered stylesheets, linked in `index.html`** | No bundler, so multiple `<link>`s: `tokens.css` (extended) + `base.css` + `components.css` + `views.css` + `motion.css`. Trade-off: a few more requests — fine for a static site, clearer than one mega-file. |
 
-## 3. Module structure (repo layout)
+## 2. Constitution check
+- `global.md`: plain HTML/JS, no framework/build ✓; `textContent` only ✓; `claude/`
+  branch + PR-to-main + Pre-Push gate ✓.
+- `design.md`: **Expressive Mode** (hero, display scale `--font-3xl…6xl`, inline-SVG
+  icons/imagery, section rhythm, considered states, `prefers-reduced-motion`) ✓;
+  `slate-blue` tokens retained ✓; tap targets ≥44px, inputs ≥16px, no hover-only ✓;
+  editorial voice + number/date formatting via `format.js` ✓.
+- `data.md`: STUB now; when provisioned — anon key only, RLS INSERT-only on `leads`, no
+  SELECT, secrets server-side in `notify-lead` ✓ (deferred pass).
+- `test.md`: `node --test` for rules; html-validate; Playwright S1–S5; reports to
+  `.agent-reports/` ✓.
+- **No violations.** No service-role key client-side; no new secrets; no scope beyond spec.
+
+## 3. Architecture & file layout
+
 ```
-index.html                     app shell, theme attr, mounts router
+index.html            app shell: <header> site nav, <main id="app">, <footer> trust strip,
+                       + inline SVG <symbol> sprite (icons). data-theme="slate-blue".
 css/
-  tokens.css                   design.md color/spacing/type tokens (slate-blue)
-  app.css                      components (cards, steps, progress, buttons)
+  tokens.css          + Expressive display scale (--font-3xl..6xl), section/full-bleed widths
+  base.css            reset, typography, base layout, a11y (focus, reduced-motion base)
+  components.css       buttons, cards, hero, section bands, stat/trust strips, accordion,
+                       progress, choice controls, tooltip, form fields
+  views.css           per-view layout (landing, section index, coverage, qualify, summary)
+  motion.css          scroll-reveal/transition classes (paired with js/motion.js)
 js/
-  main.js                      bootstrap + hash router
-  views/hub.js                 renders hub from content/coverage.json
-  views/qualify.js             questionnaire state machine (branch + steps)
-  views/summary.js             needs/gap result + "this is a lead, not a quote"
-  rules.js                     pure needs/gap engine (input answers + thresholds)
-  supabase.js                  thin client wrapper (anon key, insert lead, read rules)
-  format.js                    design.md number/date/currency formatting helpers
+  main.js             router (extended routes + focus mgmt + scroll restore)
+  dom.js              (keep) el/clear/mount — textContent-only
+  svg.js              NEW createElementNS helpers: svg(), useIcon(name)
+  icons.js            NEW concept→symbol-id registry (one icon per coverage + UI)
+  motion.js           NEW IntersectionObserver reveal + count-up, reduced-motion aware
+  format.js           (keep/extend) currency, ranges, plurals — editorial formatting
+  rules.js            (keep) computeNeeds(profile, settings); extend additively if needed
+  rules.test.mjs      (extend) cover new/branch cases
+  supabase.js         (keep) STUB fetchRules/submitLead; lead shape documented
+  content.js          NEW small loader/cache for content/*.json (fetch once, memoize)
+  components/
+    layout.js         site header/nav (active state), footer + trust strip, page chrome
+    hero.js           hero(headline, promise, cta, illustration)
+    sections.js       sectionBand(), howItWorks(), statStrip(), featureGrid()
+    card.js           coverageCard(), needCard()
+    accordion.js      FAQ / "how it compares" / anchored sub-sections
+    trust.js          recurring "lead not a quote / anonymous / no data sale" strip
+    glossary.js       inline term tooltip (tap + focus accessible)
+    progress.js       questionnaire progress + back control
+  views/
+    landing.js        NEW expressive home (hero → how-it-works → bands → stats → trust → CTA)
+    section.js        NEW residential/commercial index (intro + coverage card grid)
+    coverage.js       NEW data-driven explainer (multi-section + anchors + inline compare + CTA)
+    qualify.js        REBUILT state machine (deferred-PII, inline glossary, progress/back,
+                       honeypot, "assembling your needs" transition)
+    summary.js        REBUILT framed/tiered needs result (rationale shown) + disclaimer + submit
 content/
-  coverage.json                hub topics (residential: home, auto; commercial: BOP, GL)
-  questionnaire.json           branched question schema + inline term glossary
-supabase/
-  migrations/0001_init.sql     leads + rule_settings tables, RLS, seed defaults
-  functions/notify-lead/       edge function (email on insert)
-.github/scripts/ui-tests/      app.spec.js scenarios (S1–S4 + S5+ project rows)
+  coverage.json       EXTEND: add `scenario` (+ optional `comparesWith`, `iconKey`) per 14
+  questionnaire.json  EXTEND: deepen to ~6–10 steps/branch; per-step glossary refs
+  rule-defaults.json  (keep) thresholds the engine reads
 ```
 
-## 4. Data model (Supabase)
-**`leads`** — captures a qualification outcome (FR-B5/B6/B7/B8).
-| col | type | notes |
+## 4. Routing map (hash; deep-linkable — FR-X7)
+| Route | View | Notes |
 |---|---|---|
-| id | uuid pk default gen_random_uuid() | |
-| created_at | timestamptz default now() | |
-| domain | text check in ('residential','commercial') | FR-B1 |
-| industry | text null | commercial only (FR-B2) |
-| answers | jsonb | full questionnaire responses |
-| needs | jsonb | computed prioritized needs/gaps (FR-B5) |
-| contact_name | text | usable-lead min (C8) |
-| contact_email | text null | one of email/phone required (C8) |
-| contact_phone | text null | |
-| is_partial | boolean default false | FR-B7/B8 |
+| `#/` (and empty) | `landing` | New default (was `#/hub`). |
+| `#/residential` | `section` | Residential index (6 coverages). |
+| `#/commercial` | `section` | Commercial index (8 coverages). |
+| `#/coverage/:id` | `coverage` | One of 14; reads `coverage.json`; unknown id → section/landing. |
+| `#/qualify` | `qualify` | Optional `?domain=` / `?from=` to carry hub context (S-K4/FR-K4). |
+| `#/summary` | `summary` | Needs result + lead submit. |
 
-**`rule_settings`** — broker-editable thresholds (C3 / FR-B9 / FR-C3).
-| col | type | notes |
-|---|---|---|
-| id | int pk default 1 (singleton) | |
-| settings | jsonb | coverage-ratio floors, category sublimits, min-vs-adequate limits |
-| updated_at | timestamptz default now() | |
-Seeded with sensible US defaults in the migration; broker edits via Supabase dashboard
-until a broker UI exists (no broker UI in v1 per C1).
+Router adds: move keyboard focus to the view heading on change (a11y), scroll-to-top,
+graceful unknown-route fallback (existing try/catch kept).
 
-**RLS (always on, `data.md`):**
-- `leads`: anon role **INSERT only** (with column/shape checks); **no SELECT** for anon
-  (broker reads via dashboard/service role + email). Prevents lead harvesting.
-- `rule_settings`: anon role **SELECT only**; no writes from client.
-- Service-role key used only inside the Edge Function (email send), never shipped.
+## 5. Data shapes
+- **Coverage (extended)** — existing fields + `scenario: string` (a "what-if" with a
+  dollar anchor, plain language), optional `comparesWith: [{id, how}]` (inline contrast,
+  C-Q8), optional `iconKey: string`. No user data → render still via `textContent`.
+- **Questionnaire** — existing branch/step schema; steps gain optional `glossary: [term]`
+  for inline tooltips; ~6–10 steps/branch (C-Q9). Commercial keeps industry-first step
+  with curated ~8–12 list.
+- **Profile** (in-memory) — `{ domain, answers: { [stepId]: {value, amount?, professional?} } }`
+  (unchanged shape consumed by `rules.js`).
+- **Lead** (to `submitLead`) — `{ domain, answers, needs, contact:{name, email?, phone?},
+  meta:{ submittedAt, partial:boolean } }`. Honeypot validated client-side before submit;
+  usable-lead minimum = name + (email|phone) + domain (FR-L4).
 
-**v2 (asset protection) — designed-for, not built now:** add `app_users`
-(client-auth PIN/login per `data.md`), `assets`, and per-user RLS; reuse `rule_settings`
-for asset gap flags. Called out so v1 schema choices don't block v2.
+## 6. Expressive design system (how we hit the bar)
+- **Type:** add display scale to `tokens.css` (`--font-3xl:30 / 4xl:40 / 5xl:56 /
+  6xl:72`), weight 600, line-height 1.05–1.15 for hero/section openers (`design.md`).
+- **Color:** keep the single `slate-blue` accent for action/identity only; depth from
+  background variation (`--color-bg`/`--color-surface`/`--color-accent-light`) per band.
+  A slightly deeper Commercial sub-register via background/accent-light layering (no new
+  accent) per `research.md` Coalition note.
+- **Sections:** full-bleed bands with generous rhythm; alternating backgrounds;
+  one-idea-per-band landing (research Part 2 polish bar #2).
+- **Icons/illustration:** one inline-SVG icon per coverage + UI set (sprite); 2–4 larger
+  hero/section illustrations built with `svg.js`, colored via tokens/`currentColor`.
+- **Motion:** scroll-reveal fade/slide-up on bands; animated stat count-up; the qualify→
+  summary "assembling your needs" transition (considered loading state). All gated by
+  `prefers-reduced-motion`.
+- **States:** designed empty (no needs yet), loading (assembling), success (lead sent),
+  and error (`.error`) states — SC5.
 
-## 5. Key flows
-**Knowledge hub (FR-A*)** — `hub.js` loads `coverage.json`, renders two sections
-(Residential/Commercial) → topic → structured explainer (definition / covers /
-doesn't / who-needs). Every explainer has a CTA into `#/qualify?topic=…` (FR-A4). All
-dynamic text via `textContent` (FR-X4).
+## 7. Requirements → design trace (coverage check)
+- Landing FR-H1/H2/H3 → `views/landing.js` + `components/{hero,sections,trust}.js` + motion.
+- Hub FR-K1…K6, S-K1…K5 → `views/section.js`, `views/coverage.js`, extended
+  `coverage.json` (scenario + inline compare), accordion/anchors, CTA into qualify.
+- Qualify FR-Q1…Q7, S-Q1…Q6 → rebuilt `views/qualify.js` + `progress.js` + `glossary.js`
+  + honeypot; deepened `questionnaire.json`; `rules.js` reused.
+- Summary FR-L1…L5, S-L1…L5 → rebuilt `views/summary.js` (framed/tiered + rationale +
+  disclaimer) + `supabase.js` stub submit + lead shape.
+- Cross-cutting FR-X1…X7 → anonymous (no auth code), US copy, `slate-blue`,
+  `textContent`/sprite, reduced-motion, deep routes.
+- Tests SC6/SC7/SC8 → `rules.test.mjs`, html-validate, Playwright S1–S5, reduced-motion check.
 
-**Qualification (FR-B*)** — `qualify.js` is a state machine over `questionnaire.json`:
-1. Branch select → residential | commercial (FR-B1).
-2. Commercial: industry early, from a curated ~8–12 list (C7), adapts later steps (FR-B2).
-3. One step at a time, inline term glossary, progress bar (FR-B3).
-4. **Deferred PII** — contact step only after substantive questions (FR-B4).
-5. `rules.js` computes prioritized needs/gaps from answers + `rule_settings` (FR-B5/B9).
-6. `summary.js` shows the prioritized result, **explicitly labelled "a lead for your
-   broker — not a quote, price, or bound policy"** (SC3, non-goals).
-7. `supabase.js` inserts the lead (full or partial w/ contact → C8/FR-B8); insert fires
-   the `notify-lead` webhook → broker email (FR-B7).
+## 8. Build sequencing (phase 4 `tasks` will expand; ambition NOT trimmed)
+A deliberate order that keeps the app runnable at each step — *all of it ships in v1*:
+1. **Foundation** — extend `tokens.css` (display scale) + `base.css`; app shell
+   (header/nav/footer/sprite); `svg.js`, `icons.js`, `motion.js`, `content.js`; extend router.
+2. **Knowledge hub** — `coverage.json` scenarios (×14) + `section.js` + `coverage.js`
+   (data-driven, the reusable template) + components (card, accordion, trust).
+3. **Landing** — `landing.js` + hero/sections/stat-strip/trust, wired to hub + qualify.
+4. **Qualification** — rebuilt `qualify.js` (deferred-PII, progress/back, inline
+   glossary, honeypot, transition); deepen `questionnaire.json`; extend `rules.js`/tests.
+5. **Summary** — rebuilt framed/tiered result + rationale + disclaimer + stub submit.
+6. **Polish pass** — motion/reduced-motion, empty/loading/success/error states,
+   responsive + iPad Safari, a11y/focus, against the Lemonade/Policygenius bar (SC5).
+7. **QA** — `qa-pipeline` (test-verifier → ui-tester S1–S5 → code review → security if
+   relevant → pr-readiness); html-validate + rules tests in Pre-Push gate.
 
-**Needs/gap engine (`rules.js`)** — pure, deterministic, unit-testable: `(answers,
-settings) → needs[]`. No thresholds hard-coded; all read from `rule_settings.settings`
-(C3). Same engine reused for v2 asset gap flags.
+## 9. Risks & mitigations
+- **Expressive bar vs vanilla effort** → component layer + design tokens keep it DRY;
+  reuse one coverage template for all 14.
+- **Motion/perf on iPad Safari** → IntersectionObserver (well-supported), reduced-motion
+  fallback, lazy-reveal; no heavy libs.
+- **Content authoring volume (14 scenarios)** → schema-driven; author in `coverage.json`,
+  one template renders all.
+- **Scope creep** → plan traces strictly to spec; contrast = inline (C-Q8), no asset
+  protection (v2), no backend build (C-Q4).
 
-## 6. Constitution compliance check
-- ✅ No framework/build/npm-runtime — ES modules + static CSS (`global.md`).
-- ✅ `textContent` for all backend/user data; no `innerHTML` (`global.md`, FR-X4).
-- ✅ iPad-Safari: hash routing, ≥16px inputs, no hover-only affordances, tap targets
-  (`design.md`, FR-A5/B10).
-- ✅ Supabase RLS always on; secret only in Edge Function (`data.md`).
-- ✅ slate-blue theme via `data-theme` + tokens (`design.md`, FR-X3).
-- ✅ Tests: extends existing Playwright kit; html-validate + workflow-YAML gates already
-  wired (`test.md`).
-- ⚠️ **Accepted trade-off (record in CLAUDE.md §Security):** anon key + lead-insert is
-  public by design; abuse mitigated by RLS insert-only shape checks + (optional) a
-  lightweight turnstile/honeypot. No broker UI in v1 → broker reads leads via Supabase
-  dashboard + email.
+## 10. Out of scope (restate)
+Asset protection (v2); payments/purchase/binding/real-time quoting; broker UI; accounts/
+login; live Supabase provisioning (separate follow-up pass); contrast-pair pages;
+non-US framing.
 
-## 7. Risks / open decisions for implement
-- **Email provider** (Resend vs. Supabase SMTP) — pick at implement; isolated in
-  `notify-lead`. No spec impact.
-- **Spam on public insert** — start with honeypot field + RLS shape checks; revisit
-  Turnstile if abused. (Not a spec requirement; noted.)
-- **Supabase project provisioning** — needs a project + secrets in CI/Pages env; first
-  implement task. Uses Supabase MCP per `data.md`.
-- **rule_settings editing UX** — dashboard-only in v1 (acceptable per "no broker UI");
-  broker config screen is a v2 candidate.
-
-## 8. Mapping to success criteria
-SC1 → hub+qualify flow on iPad Safari (Playwright S-row). SC2 → `leads` row contents +
-`notify-lead`. SC3 → summary copy assertion. SC4 → `coverage.json` completeness +
-editorial check. SC5 → v2. SC6 → design-system + S1–S4 suite with slate-blue.
+**Phase 3 complete. ⏸ Awaiting user approval before Phase 4 (`tasks`) + Phase 6
+(`implement`).**
