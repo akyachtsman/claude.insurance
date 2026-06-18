@@ -1,0 +1,100 @@
+/* base.css — reset, root layout, typography, accessibility primitives.
+   Built on tokens.css. Expressive Mode foundation shared by all views. */
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+main { flex: 1 0 auto; outline: none; }
+
+img, svg { display: block; max-width: 100%; }
+
+a { color: var(--color-accent); text-decoration: none; }
+a:hover { color: var(--color-accent-hover); }
+
+h1, h2, h3, h4 { margin: 0; color: var(--color-text-primary); }
+
+p { margin: 0; }
+
+/* Shared layout container. */
+.container {
+  width: 100%;
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}
+
+/* Display headings (Expressive). */
+.display {
+  font-weight: 600;
+  line-height: var(--leading-display);
+  letter-spacing: -0.02em;
+}
+.display-6xl { font-size: var(--font-6xl); }
+.display-5xl { font-size: var(--font-5xl); }
+.display-4xl { font-size: var(--font-4xl); }
+.display-3xl { font-size: var(--font-3xl); }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.lede {
+  font-size: var(--font-lg);
+  color: var(--color-text-secondary);
+  max-width: var(--maxw-prose);
+}
+
+/* Accessibility helpers. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute; left: var(--space-3); top: -48px;
+  background: var(--color-accent); color: #fff;
+  padding: var(--space-2) var(--space-4); border-radius: var(--radius-md);
+  z-index: 100; transition: top 0.15s;
+}
+.skip-link:focus { top: var(--space-3); color: #fff; }
+
+:focus-visible {
+  outline: 3px solid var(--color-accent-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.icon { display: inline-block; vertical-align: middle; }
+
+/* Sprite host (hidden, holds <symbol> defs). */
+.svg-sprite { position: absolute; width: 0; height: 0; }
+
+/* Small spacing/layout utilities (avoid inline styles). */
+.u-mt-sm { margin-top: var(--space-3); }
+.u-mt-md { margin-top: var(--space-4); }
+.btn-row.is-center { justify-content: center; }

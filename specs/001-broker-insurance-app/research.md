@@ -161,3 +161,187 @@ policygenius.com, nerdwallet.com/insurance & /business/insurance, thezebra.com,
 lemonade.com, coverwallet.com, nextinsurance.com, hiscox.com, insureon.com, and
 third-party teardowns/reviews (NerdWallet, MoneyGeek, U.S. News, Trustpilot,
 FitSmallBusiness, AdvisorSmith, UX case studies). All public; patterns synthesized, not copied.
+
+---
+
+# Part 2 — Experiential & Visual Discovery (2026-06-17)
+
+**Status:** Second discovery pass for the **rebuild**. Feeds `/sdd-loop specify`.
+**Why this pass:** the original discovery (Part 1) is strong on IA/flows but explicitly
+*not* visually verified. The rebuild brief raises the bar to an **Expressive Mode**
+experience (real hero/landing, display type scale, inline-SVG iconography + imagery,
+polished multi-section pages, tasteful scroll motion) benchmarked to **Lemonade** and
+**Policygenius**. This pass studied the **visual/experiential craft** (hero treatment,
+visual language, layout richness, imagery/iconography, motion) and the **deeper coverage
+taxonomy** the rebuild requires.
+
+> **Scope deltas from Part 1 (per rebuild brief):**
+> - **Asset protection → v2** (out of v1 scope; Part 1 treated it as a third facet).
+> - **Deeper sections.** Residential = home, auto, **renters, umbrella, life, flood**.
+>   Commercial = **BOP, general liability, commercial property, professional liability,
+>   workers' comp, cyber, commercial auto, umbrella**.
+> - **In-app purchase / payments / real-time quoting** remain non-goals.
+
+## Method & caveats (Part 2)
+Eight references analyzed in parallel against an **experiential rubric** (hero/first
+impression · visual language · layout richness & section patterns · imagery/iconography
+· motion/interaction · education depth · trust/conversion). **Public pages only;
+ToS/robots respected; patterns synthesized, not cloned.** Nearly all first-party sites
+returned **HTTP 403** to automated fetches, so visual-craft specifics lean on design
+teardowns, UX case studies, brand/press write-ups, and verified URL taxonomy. **IA,
+copy, flow, and content depth are high-confidence; exact hex/typeface/motion tokens are
+inferred** — flagged where it matters and worth a manual Mobbin/browser pass before
+final visual polish.
+
+## Targets (Part 2)
+| # | Site(s) | Role in this pass |
+|---|---------|-------------------|
+| 1 | **Lemonade** | Consumer-expressive **polish bar** — illustration, 3-color discipline, conversational intake |
+| 2 | **Policygenius** | Editorial-marketplace **polish bar** — display type, "how it works", contrast-pair needs result |
+| 3 | The Zebra | Playful brand, ZIP-first deferred-PII funnel, tiered output, in-context micro-education |
+| 4 | Ethos / Ladder | Modern **life** insurance — sensitive-product hero, persistent CTA, calculator-as-destination |
+| 5 | NerdWallet Insurance | Hub **content-craft** — one-concept-per-page template, contrast pairs, residential/commercial split |
+| 6 | NEXT Insurance | Modern **SMB/commercial** — industry-first IA, coverage×trade pages, live package building |
+| 7 | Hiscox | Commercial **scenario education** — profession-first 20-sec selector, "what if" stories + $ anchors |
+| 8 | Coalition / Vouch | Design-forward **B2B/cyber** — promise-first hero, active-risk data module, proof-stat bands |
+
+## The polish/richness bar (what the build MUST hit)
+Synthesized across all eight; this is the explicit standard the rebuild is held to —
+research must raise the *look*, not just the flow.
+
+1. **A real hero, not a form.** Full-width opening: a calm, confident display headline +
+   one-line promise + a single dominant CTA + a supporting visual (inline-SVG
+   illustration/graphic). One big idea, one action (Lemonade, Policygenius, Ethos).
+2. **One-idea-per-band landing rhythm.** Vertical scroll of alternating, breathing
+   sections — hero → "how it works" (numbered + inline-SVG icons) → value/section bands →
+   **stat/proof strip** → trust → repeat-CTA. Varied backgrounds for depth; generous
+   whitespace; premium through restraint (Lemonade, Policygenius, Ethos, Coalition).
+3. **Disciplined token system.** One ink, one neutral ground, **one decisive accent**
+   used only for action/identity — our `slate-blue`; resist a second accent. Let a strong
+   **display type scale** + whitespace carry hierarchy (Lemonade, NerdWallet). Restraint
+   reads as authority for insurance.
+4. **Inline-SVG iconography + owned illustration/imagery.** One consistent icon per
+   concept; rounded/dimensional illustration or purposeful photography to carry warmth —
+   **no stock-photo soup, no icon fonts/CDNs** (Lemonade illustration; Hiscox/Ethos
+   real-people photography where the product is human).
+5. **Tasteful scroll motion.** Scroll-reveal fades/slide-ups on section bands, **animated
+   stat count-ups**, gentle data/diagram animation (esp. cyber "risk picture"). Always
+   honor `prefers-reduced-motion`; no bounce/spin/flash (all; Coalition motion).
+6. **Considered states.** Designed empty/loading/success states — e.g. a short scripted
+   "searching/assembling your needs" reveal between questionnaire and summary makes the
+   result feel earned (The Zebra loader; Lemonade conversational cadence).
+
+## Experiential patterns to adopt, by surface (synthesize — do NOT clone)
+
+### Landing / home
+- **Editorial display hero** with one promise + one CTA + supporting inline-SVG visual
+  (Policygenius "smarter way" register; Lemonade restraint).
+- **Three-step "how it works"** band with inline-SVG icons that visually narrates the
+  deferred-PII story: *learn → see your needs → connect with a licensed broker*
+  (Policygenius, Ethos — interleave short proof between steps).
+- **Stat/proof band as trust currency** (counts/outcomes, animated count-up) instead of a
+  partner-logo wall — fits an anonymous, no-login app (Lemonade, Coalition, Hiscox).
+- **Recurring trust strip component**: "anonymous · we never sell your data · no sales
+  calls · this is a lead summary, not a quote" — rendered as a calm designed band, not
+  fine print (Policygenius, The Zebra, Ethos). Maps to our anon/RLS INSERT-only posture.
+- **Persistent/sticky primary CTA** on long Expressive pages (Ladder/Ethos "Get my price").
+
+### Knowledge hub (Residential + Commercial)
+- **Mirror the residential/commercial split** as two parallel trees with identical verbs
+  and an identical page template — same mental model, different domain (NerdWallet).
+- **Codify a coverage-page template** as a content schema and render every coverage
+  identically in Expressive Mode:
+  `definition → covers[] → excludes[] (what it does NOT cover) → whoNeedsIt →
+  typicalCost{amount, table} → scenario → faqs[]` (NerdWallet template + Hiscox/Lemonade
+  voice). Make the **covered/not-covered two-column block** and a cost/limits table the
+  hero visual — tables beat decoration for comprehension.
+- **Contrast-pair explainers** as a first-class page type ("X vs Y — do you need both?":
+  collision vs comprehensive, HO-3 vs HO-5, term vs whole life, GL vs professional
+  liability, GL vs workers' comp) — convert ambiguity to decisions, cross-link both
+  sides (NerdWallet).
+- **Scenario stories with dollar anchors** as the core education unit, esp. Commercial:
+  each coverage gets one concrete "what if" claim narrative + a $ figure (Hiscox, Lemonade).
+- **In-context micro-education**: glossary as inline tooltips on questionnaire fields, not
+  a separate page — teach where confusion happens (The Zebra).
+- **Sticky TOC + anchor nav + FAQ accordion** for long pages; a calculator/estimator as
+  the single interactive centerpiece — useful motion, not spectacle (NerdWallet,
+  Policygenius, Ethos/Ladder).
+
+### Guided qualification → lead
+- **Deferred-PII, context-first start** — substantive coverage/business questions first,
+  one at a time, branching; contact (name/email/phone) only at the **final** step
+  (Lemonade Maya, The Zebra ZIP-first, Hiscox 20-sec selector). Matches our `qualify.js`
+  state machine and the S5 scenario.
+- **Visible progress + back/forward** — explicitly *fix* the gap Policygenius/Lemonade
+  long flows have. Cheap polish win our state machine owns.
+- **Industry/profession-first routing for Commercial** — first question is the trade; it
+  conditions everything after and pre-seeds likely coverages (NEXT, Hiscox, NerdWallet
+  BOP eligibility framing). A **by-profession / coverage×trade** on-ramp pre-fills the
+  profile.
+- **Conditional gap prompts** driven by answers ("employees → workers' comp"; "own the
+  building → commercial property") — sourced from broker-editable `rule_settings`, never
+  hard-coded (CoverWallet, NEXT).
+- **"Minimum vs adequate limits" framing** per coverage with concrete by-trade gap
+  scenarios — the narrative core of our gap engine (NEXT, Hiscox).
+- **Active-risk / "risk picture" module** for cyber — a scroll-revealed inline-SVG
+  exposure motif paired with the needs output; make the *data* the visual (Coalition).
+
+### Lead summary (result)
+- **Contrast-pair / tiered needs result** — render `rules.js` output as framed cards
+  (*Essential vs Recommended*, à la Policygenius "Optimal vs On-a-budget"; The Zebra
+  Min/Better/Best) with one pre-recommended and the **rationale shown** — not a flat list.
+- **Pedagogical output** — show the *method* (what drives each recommendation) so the
+  result teaches the "why," echoing the calculator pattern (Policygenius, Ladder DIME).
+- **Honest "lead summary, not a quote/bind" framing** kept prominent — our differentiator
+  and trust safeguard (all; reinforced by competitors' lead-gen trust backlash in Part 1).
+
+## Visual register notes (token-level, inferred — verify before final polish)
+- **Lemonade:** ruthless 3-color discipline (charcoal ink + neutral ground + one
+  decisive accent), rounded/dimensional shapes, soft low-contrast elevation, commissioned
+  illustration over photography. *Our translation:* slate-blue accent, large radii,
+  owned inline-SVG illustration.
+- **Policygenius/Ethos/Ladder:** calm slate/teal base + one warm CTA accent, strong
+  **editorial display type**, lots of white, soft radii/light elevation, real-people
+  photography for human products (life). Persistent CTA on long pages.
+- **NerdWallet:** maximal restraint — one accent reserved for action/identity, type +
+  whitespace do all hierarchy work, **the table is the hero visual**.
+- **Hiscox:** "established but modern" — stability neutral + one energetic accent,
+  profession photography. *Our translation:* slate for trust + one warm accent (do NOT
+  copy Hiscox red).
+- **Coalition/Vouch:** deeper tech-forward sub-register for Commercial/cyber (navy base +
+  one decisive accent), abstract data-viz motifs, animated diagrams. *Our translation:* a
+  slightly deeper Commercial sub-register within the same `slate-blue` token system.
+
+## Updated open questions for `clarify` (rebuild)
+Carried/!revised from Part 1, pruned to the v1 rebuild scope (asset protection deferred):
+1. **Auth/accounts** — confirm the rebuild stays **fully anonymous** (no login) for hub +
+   questionnaire + lead, per current CLAUDE.md security model. (Part 1 Q1, now that asset
+   protection is v2, anonymous-throughout is the likely answer.)
+2. **Lead delivery mechanism** — Supabase `leads` INSERT + `notify-lead` email Edge
+   Function only, no broker UI in v1 (per CLAUDE.md)? Confirm this is the rebuild's
+   delivery path. (Part 1 Q2/Q5.)
+3. **Suggestion rules** — keep broker-editable thresholds in `rule_settings` /
+   `rule-defaults.json` (per CLAUDE.md), fixed for v1 UI? Confirm no broker-tuning UI in
+   v1. (Part 1 Q4.)
+4. **Geographic scope** — US-centric coverage concepts/terminology and "minimum vs
+   adequate" rules; confirm US-only for v1. (Part 1 Q6.)
+5. **Imagery production** — Expressive Mode wants owned illustration/imagery. Confirm
+   **inline-SVG illustration/iconography built in-repo** (no external image CDNs, no
+   stock licensing) is acceptable as the imagery strategy, given GitHub Pages hosting.
+6. **Backend timing** — build front-end first against the existing STUB Supabase client
+   (per CLAUDE.md "Supabase provisioning deferred"), or provision Supabase as part of this
+   rebuild? Affects whether lead submit is live or stubbed at first merge.
+7. **Coverage depth per page** — full NerdWallet-style template (definition → covers →
+   excludes → who needs it → typical cost + table → scenario → FAQ) for **all 14**
+   coverages in v1, or a subset deep + the rest stubbed? Sets the content-authoring bar.
+
+## Sources (Part 2)
+All public; patterns synthesized, not copied. Primary references: lemonade.com,
+policygenius.com, thezebra.com, ethos.com/ethoslife.com, ladderlife.com,
+nerdwallet.com/insurance & /business/insurance, nextinsurance.com, hiscox.com,
+coalitioninc.com, vouch.us — plus design teardowns/case studies and brand/press
+write-ups (Webstacks, Shadow Digital, Learners.ai, UX Reactor, dt-ux.com, Medium
+Design Bootcamp, Casimir Effect motion portfolio, Landingi/Unbounce LP galleries,
+brandfetch/logotyp/1000logos brand-asset refs, U.S. News, MoneyGeek, NerdWallet,
+Trustpilot, ZenBusiness). Most first-party pages 403'd automated fetch; visual-token
+specifics inferred and flagged for a manual Mobbin/browser verification pass.

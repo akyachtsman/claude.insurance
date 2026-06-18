@@ -383,3 +383,79 @@ test('S5: residential flow reaches a summary framed as a lead, not a quote', asy
 
   expect(errors, `JS errors during flow: ${errors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO 6 — Commercial qualification flow ends in a broker lead, not a quote
+// Source: CLAUDE.md § Project-Specific Test Scenarios (S6)
+// Mirrors S5 for the business branch; uses phone (not email) as the contact method.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S6: commercial flow reaches a summary framed as a lead, not a quote', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+
+  await page.goto('./');
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  await page.getByRole('button', { name: /find what coverage i need/i }).click();
+  await page.getByRole('button', { name: /for my business/i }).click();
+  for (let i = 0; i < 12; i++) {
+    if (await page.locator('#contact-name').isVisible().catch(() => false)) break;
+    await page.locator('.choices .choice').first().click();
+    await page.waitForTimeout(150);
+  }
+
+  await page.locator('#contact-name').fill('Test Business');
+  await page.locator('#contact-phone').fill('5551234567'); // phone-only contact path
+  await page.getByRole('button', { name: /see my coverage needs/i }).click();
+
+  await expect(page.locator('.need').first()).toBeVisible();
+  await expect(page.locator('.disclaimer')).toContainText(/not a quote/i);
+  expect(errors, `JS errors during flow: ${errors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO 7 — Deep-linking the summary with no profile shows an empty state
+// Source: CLAUDE.md § Project-Specific Test Scenarios (S7)
+// The store is in-memory, so a refresh/deep-link on #/summary must degrade to a
+// friendly empty state, never a crash or a blank page.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S7: summary deep-link with no answers shows an empty state, not an error', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+
+  await page.goto('./#/summary');
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  await expect(page.getByText(/no summary yet/i)).toBeVisible();
+  expect(errors, `JS errors: ${errors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO 8 — Contact step validation (deferred-PII guardrails)
+// Source: CLAUDE.md § Project-Specific Test Scenarios (S8)
+// A usable lead needs a name + at least one contact method; the step enforces it.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S8: contact step requires a name and a contact method', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('./');
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  await page.getByRole('button', { name: /find what coverage i need/i }).click();
+  await page.getByRole('button', { name: /for my household/i }).click();
+  for (let i = 0; i < 8; i++) {
+    if (await page.locator('#contact-name').isVisible().catch(() => false)) break;
+    await page.locator('.choices .choice').first().click();
+    await page.waitForTimeout(150);
+  }
+
+  // Submit empty → an error is shown and we stay on the contact step.
+  await page.getByRole('button', { name: /see my coverage needs/i }).click();
+  await expect(page.locator('.error')).toBeVisible();
+
+  // Name but no contact method → a contact-method error.
+  await page.locator('#contact-name').fill('No Contact');
+  await page.getByRole('button', { name: /see my coverage needs/i }).click();
+  await expect(page.locator('.error')).toContainText(/email or phone/i);
+  await expect(page.locator('#contact-name')).toBeVisible(); // still on the step
+});
