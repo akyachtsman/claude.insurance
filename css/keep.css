@@ -36,7 +36,9 @@ body.in-keep { background: var(--color-bg); }
 .k-wrap { max-width: var(--maxw-wide); margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-16); }
 .k-wrap--narrow { max-width: 760px; }
 .k-crumbs { font: 700 14px var(--font-sans); color: var(--color-text-secondary); margin-bottom: var(--space-5); }
-.k-crumbs a:hover { color: var(--color-accent); }
+.k-crumbs a { color: var(--color-accent); }
+.k-crumbs a:hover { text-decoration: underline; }
+.k-backrow { margin-bottom: var(--space-3); }
 .k-h1 { font: 700 30px var(--font-display); letter-spacing: -.01em; }
 .k-sub { font: 600 16px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-1); margin-bottom: var(--space-6); }
 
