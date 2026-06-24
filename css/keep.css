@@ -64,9 +64,10 @@ body.in-keep { background: var(--color-bg); }
 /* ── Entities relationship map ──────────────────────────────────────────────── */
 .k-relmap { background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-5); margin: 10px 0 var(--space-6); overflow-x: auto; }
 .k-relsvg { width: 100%; height: auto; display: block; min-width: 520px; }
-.k-relnode { cursor: pointer; }
-.k-relnode:hover rect, .k-relnode:focus-visible rect { stroke: var(--color-accent); stroke-width: 2.5; }
-.k-relnode:focus { outline: none; }
+.k-relnode--link { cursor: pointer; }
+.k-relnode--link:hover rect, .k-relnode--link:focus-visible rect { stroke: var(--color-accent); stroke-width: 2.5; }
+.k-relnode--link:focus { outline: none; }
+.k-relcaption { text-align: center; font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 6px; }
 
 /* ── Entities index ─────────────────────────────────────────────────────────── */
 .k-ent-grid { display: grid; gap: 14px; margin-bottom: 14px; }
