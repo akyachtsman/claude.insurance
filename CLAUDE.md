@@ -15,20 +15,22 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 - **Branch policy:** Develop on a `claude/<name>` feature branch; PRs target `main`
 
 ## Design Theme
-One-time color-scheme choice from `directives/design.md` → "Color Schemes"
-(changeable later). Set this field, and set `data-theme` on the app's root
-`<html>` to match.
-- **Design Theme:** `slate-blue`
+Project identity is **"Direction C" (Soft consumer)** — Quicksand (display) +
+Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
+`css/fonts/`. Set via `data-theme="harbor"` on root `<html>`; tokens in
+`css/tokens.css`. Marketing site and the Keep portal share this one identity.
+- **Design Theme:** `harbor` (Direction C — violet/soft)
 
 ## Application Architecture
-- `index.html` — app shell; sets `data-theme="slate-blue"`, loads `js/main.js` (ES module)
-- `js/main.js` — hash router (`#/hub`, `#/qualify`, `#/summary`)
-- `js/views/` — `hub.js` (knowledge hub), `qualify.js` (questionnaire state machine, deferred PII), `summary.js` (needs result + lead submit)
+- `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
+- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep`, `#/keep/login`, `#/keep/entity/:id`, `#/keep/add-asset`, `#/keep/asset/:id`). Toggles `body.in-keep` to swap site chrome.
+- `js/views/` — `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`, and `keep.js` (the authenticated portal: login, dashboard, entity detail, add-asset, coverage analysis)
+- **The Keep (v2, demo/stub):** invite-only client portal — entities (`Me` default + businesses) → assets → coverage analysis. `js/keep/data.js` (sample entities/assets, STUB), `js/keep/analysis.js` (asset → coverage analysis; reuses `rules.js` for risk-based recommendations; tests `js/keep/analysis.test.mjs`), `css/keep.css` (Direction C portal styles, `k-` prefixed). No real auth/persistence yet — a demo ribbon makes that explicit; reachable by URL, unlinked from the public nav.
 - `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
 - `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/` — *(planned)* migration (`leads` + `rule_settings`, RLS) and `notify-lead` Edge Function
+- `supabase/` — *(planned)* migration (`leads` + `rule_settings`, RLS) and `notify-lead` Edge Function. The Keep's real auth + per-user entities/assets is the next backend phase.
 
 ## Required Commands
 | Purpose | Command |

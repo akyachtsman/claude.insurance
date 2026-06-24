@@ -1,18 +1,28 @@
 /* tokens.css — design system tokens.
-   Theme: slate-blue (set via data-theme on <html>). Values are verbatim from
-   the design directive's slate-blue scheme; shadows/radii are theme-independent. */
+   Identity: "Direction C" (Soft consumer) — set via data-theme="harbor" on <html>.
+   Quicksand (display) + Nunito (body), violet accent, soft tints, large radii.
+   Shadows are theme-independent. Self-hosted fonts (OFL) live in css/fonts/. */
+
+/* ── Self-hosted fonts (no network at runtime) ──────────────────────────────── */
+@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/quicksand-600.woff2") format("woff2"); }
+@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/quicksand-700.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/nunito-400.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/nunito-600.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/nunito-700.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 800; font-display: swap; src: url("fonts/nunito-800.woff2") format("woff2"); }
 
 :root {
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 22px;
+  /* Larger, softer radii for the rounded "Soft consumer" language. */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.08), 0 4px 6px rgba(0, 0, 0, 0.04);
-  --shadow-xl: 0 24px 48px -12px rgba(20, 41, 82, 0.18), 0 8px 16px -8px rgba(20, 41, 82, 0.12);
+  --shadow-sm: 0 1px 3px rgba(35, 29, 58, 0.08), 0 1px 2px rgba(35, 29, 58, 0.06);
+  --shadow-md: 0 6px 14px rgba(60, 40, 120, 0.10), 0 2px 6px rgba(60, 40, 120, 0.07);
+  --shadow-lg: 0 14px 30px rgba(60, 40, 120, 0.14), 0 5px 12px rgba(60, 40, 120, 0.08);
+  --shadow-xl: 0 26px 54px -16px rgba(108, 75, 245, 0.30), 0 10px 20px -10px rgba(108, 75, 245, 0.18);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -26,8 +36,8 @@
   --space-16: 80px;
   --space-20: 112px;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif;
+  --font-sans: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Quicksand", "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   /* Body / utility type (<=24px utility cap). */
   --font-sm: 14px;
@@ -36,8 +46,7 @@
   --font-xl: 20px;
   --font-2xl: 24px;
 
-  /* Expressive display scale (design.md) — heroes & section openers beyond 24px.
-     Weight 600, tight line-height (1.05-1.15). Fluid via clamp() for responsiveness. */
+  /* Expressive display scale — heroes & section openers beyond 24px. */
   --font-3xl: clamp(26px, 3.4vw, 30px);
   --font-4xl: clamp(30px, 4.4vw, 40px);
   --font-5xl: clamp(38px, 6vw, 56px);
@@ -45,21 +54,29 @@
   --leading-display: 1.08;
 
   /* Layout widths. */
-  --maxw-content: 720px;   /* reading measure (explainer body) */
-  --maxw-wide: 1120px;     /* marketing container */
-  --maxw-prose: 640px;     /* hero/section copy measure */
+  --maxw-content: 720px;
+  --maxw-wide: 1120px;
+  --maxw-prose: 640px;
 }
 
-[data-theme="slate-blue"] {
-  --color-bg: #EDF1F8;
+[data-theme="harbor"] {
+  --color-bg: #F6F3FF;
   --color-surface: #FFFFFF;
-  --color-border: #DAE2EE;
-  --color-border-hover: #BFCBDF;
-  --color-text-primary: #181B22;
-  --color-text-secondary: #5F6573;
-  --color-accent: #1565C0;
-  --color-accent-hover: #114F98;
-  --color-accent-light: #E5EEF8;
-  --color-accent-ring: rgba(21, 101, 192, 0.13);
-  --color-danger: #C0392B;
+  --color-border: #ECE7FB;
+  --color-border-hover: #D7CEF6;
+  --color-text-primary: #231D3A;
+  --color-text-secondary: #5F5880;
+  --color-accent: #5B3EE6;
+  --color-accent-hover: #4A2CC9;
+  --color-accent-light: #EFEAFE;
+  --color-accent-ring: rgba(91, 62, 230, 0.22);
+  --color-danger: #C42847;
+
+  /* Status palette (shared by marketing + the Keep). */
+  --color-ok: #0E8E66;
+  --color-ok-bg: #DEFAEF;
+  --color-gap: #D32F4A;
+  --color-gap-bg: #FFE6EA;
+  --color-warn: #B5660A;
+  --color-warn-bg: #FFF1DE;
 }

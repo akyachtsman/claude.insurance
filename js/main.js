@@ -8,6 +8,10 @@ import { renderSection } from "./views/section.js";
 import { renderCoverage } from "./views/coverage.js";
 import { renderQualify } from "./views/qualify.js";
 import { renderSummary } from "./views/summary.js";
+import {
+  renderKeepLogin, renderKeepDashboard, renderKeepEntity,
+  renderKeepAsset, renderKeepAddAsset,
+} from "./views/keep.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -20,6 +24,9 @@ async function route() {
   const [pathPart, query] = raw.split("?");
   const parts = pathPart.split("/").filter(Boolean); // ["coverage","home"]
   const params = new URLSearchParams(query || "");
+
+  // The Keep portal swaps the public site chrome for its own (CSS via body class).
+  document.body.classList.toggle("in-keep", parts[0] === "keep");
 
   try {
     await dispatch(parts, params);
@@ -48,11 +55,33 @@ async function dispatch(parts, params) {
       return renderQualify(params);
     case "summary":
       return renderSummary(params);
+    case "keep":
+      return dispatchKeep(parts.slice(1));
     case "hub": // back-compat with the old default route
       location.replace("#/residential");
       return;
     default:
       return renderLanding();
+  }
+}
+
+// The Keep sub-router: #/keep, #/keep/login, #/keep/add-asset,
+// #/keep/entity/:id, #/keep/asset/:id.
+function dispatchKeep(rest) {
+  const [sub, id] = rest;
+  switch (sub) {
+    case undefined:
+      return renderKeepDashboard();
+    case "login":
+      return renderKeepLogin();
+    case "add-asset":
+      return renderKeepAddAsset();
+    case "entity":
+      return renderKeepEntity({}, id);
+    case "asset":
+      return renderKeepAsset({}, id);
+    default:
+      return renderKeepDashboard();
   }
 }
 

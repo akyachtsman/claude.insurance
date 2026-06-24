@@ -65,12 +65,12 @@ export function heroArt() {
 
   const defs = s("defs", {}, [
     s("linearGradient", { id: "g-shield", x1: "0", y1: "0", x2: "0", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#1f3b6e" }),
-      s("stop", { offset: "1", "stop-color": "#1565C0" }),
+      s("stop", { offset: "0", "stop-color": "#6C4BF5" }),
+      s("stop", { offset: "1", "stop-color": "#46C2FF" }),
     ]),
     s("linearGradient", { id: "g-blob", x1: "0", y1: "0", x2: "1", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#E5EEF8" }),
-      s("stop", { offset: "1", "stop-color": "#D7E6F8" }),
+      s("stop", { offset: "0", "stop-color": "#EFEAFE" }),
+      s("stop", { offset: "1", "stop-color": "#FBEAF5" }),
     ]),
   ]);
   svg.appendChild(defs);
@@ -83,11 +83,11 @@ export function heroArt() {
 
   // Floating "covered item" chips (rounded rects with check marks).
   const chip = (x, y, name) => s("g", { transform: `translate(${x} ${y})` }, [
-    s("rect", { x: 0, y: 0, width: 96, height: 40, rx: 14, fill: "#FFFFFF", stroke: "#DAE2EE", "stroke-width": "1.5" }),
-    s("circle", { cx: 22, cy: 20, r: 11, fill: "#E5EEF8" }),
-    useIcon(name, 14, 15, 13, "#1565C0"),
-    s("rect", { x: 40, y: 13, width: 44, height: 5, rx: 2.5, fill: "#C7D6EC" }),
-    s("rect", { x: 40, y: 23, width: 30, height: 5, rx: 2.5, fill: "#DDE7F4" }),
+    s("rect", { x: 0, y: 0, width: 96, height: 40, rx: 14, fill: "#FFFFFF", stroke: "#ECE7FB", "stroke-width": "1.5" }),
+    s("circle", { cx: 22, cy: 20, r: 11, fill: "#EFEAFE" }),
+    useIcon(name, 14, 15, 13, "#5B3EE6"),
+    s("rect", { x: 40, y: 13, width: 44, height: 5, rx: 2.5, fill: "#D7CEF6" }),
+    s("rect", { x: 40, y: 23, width: 30, height: 5, rx: 2.5, fill: "#ECE7FB" }),
   ]);
   svg.appendChild(chip(20, 92, "auto"));
   svg.appendChild(chip(360, 150, "umbrella"));
@@ -100,7 +100,7 @@ export function heroArt() {
   }));
   svg.appendChild(s("path", {
     d: "M240 96l84 34v58c0 56-37 96-84 110z",
-    fill: "#114F98", opacity: "0.35",
+    fill: "#4A2CC9", opacity: "0.35",
   }));
 
   // House inside the shield.
@@ -111,7 +111,7 @@ export function heroArt() {
   ]));
   // Check seal.
   svg.appendChild(s("circle", { cx: 296, cy: 232, r: 22, fill: "#FFFFFF" }));
-  svg.appendChild(s("path", { d: "M286 232l7 7 13-14", fill: "none", stroke: "#1565C0", "stroke-width": "5", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  svg.appendChild(s("path", { d: "M286 232l7 7 13-14", fill: "none", stroke: "#5B3EE6", "stroke-width": "5", "stroke-linecap": "round", "stroke-linejoin": "round" }));
 
   return svg;
 }
