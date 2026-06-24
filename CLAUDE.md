@@ -51,7 +51,7 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
 
 ## Project-Specific Coding Standards
-- [Add project-specific rules here]
+- **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
 
 ## Agent Workflow
 1. Use a `claude/<name>` feature branch
