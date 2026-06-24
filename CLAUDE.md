@@ -30,7 +30,14 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/` — *(planned)* migration (`leads` + `rule_settings`, RLS) and `notify-lead` Edge Function. The Keep's real auth + per-user entities/assets is the next backend phase.
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` + `entities` + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. The `notify-lead` / `notify-renewal` Edge Functions are still to come.
+
+## Backend (Supabase — provisioned)
+- **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
+- **Auth:** Supabase Auth (broker invite + password). RLS keys on `auth.uid()`.
+- **Write model:** clients have full CRUD on their **own** entities/assets; `policies` are **read-only to clients** (broker-written via service-role, the system of record).
+- **Keys:** publishable/anon key → client (safe in browser, RLS is the guard); `service_role` key → `DB_SERVICE_KEY` GitHub secret, server-side only. `DB_URL` = the project URL.
+- **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end still runs on the STUB client until `js/supabase.js` is wired to the live project — that's the next step.
 
 ## Required Commands
 | Purpose | Command |
