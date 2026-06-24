@@ -583,22 +583,94 @@ export function renderKeepPolicy(params, id) {
 }
 
 export function renderKeepDocuments() {
-  const rows = [];
-  for (const ent of SAMPLE.entities)
-    for (const a of ent.assets)
+  // Build the Entity -> Asset -> Policy -> documents hierarchy so a document is
+  // found the same way it's filed.
+  const entityBlocks = [];
+  let total = 0;
+  for (const ent of SAMPLE.entities) {
+    const assetBlocks = [];
+    let entCount = 0;
+    for (const a of ent.assets) {
+      const policyBlocks = [];
+      let assetCount = 0;
       for (const p of a.policies || []) {
         if (!p.documents || !p.documents.length) continue;
-        rows.push(el("div", { class: "k-grp" }, [
-          el("div", { class: "k-grp__h" }, [icon(p.icon || "doc", { size: 15 }), el("span", { text: `${p.line} — ${a.name}` })]),
-          el("div", {}, p.documents.map((d) =>
-            el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${p.id}` } }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
+        const links = p.documents.map((d) => {
+          const match = `${d} ${p.line} ${a.name} ${ent.name}`.toLowerCase();
+          return el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${p.id}`, "data-doc": match } }, [icon("doc", { size: 15 }), el("span", { text: d })]);
+        });
+        assetCount += p.documents.length;
+        policyBlocks.push(el("div", { class: "k-doc-policy" }, [
+          el("div", { class: "k-doc-policy__name", text: p.line }),
+          el("div", { class: "k-doc-links" }, links),
         ]));
       }
+      if (!policyBlocks.length) continue;
+      entCount += assetCount;
+      const meta = ASSET_META[a.type] || { cic: "home", icon: "shield" };
+      assetBlocks.push(el("div", { class: "k-doc-asset" }, [
+        el("div", { class: "k-doc-asset__h" }, [
+          el("span", { class: `k-cic k-cic--${meta.cic}` }, [icon(meta.icon, { size: 22 })]),
+          el("div", {}, [
+            el("div", { class: "k-doc-asset__name", text: a.name }),
+            el("div", { class: "k-doc-asset__meta", text: `${assetCount} document${assetCount === 1 ? "" : "s"}` }),
+          ]),
+        ]),
+        ...policyBlocks,
+      ]));
+    }
+    if (!assetBlocks.length) continue;
+    total += entCount;
+    const avatar = ent.kind === "business"
+      ? el("span", { class: "k-bigav k-bigav--biz k-bigav--sm" }, [icon(ent.icon || "briefcase", { size: 22 })])
+      : el("span", { class: "k-bigav k-bigav--sm", text: ent.initials });
+    entityBlocks.push(el("section", { class: "k-doc-entity" }, [
+      el("div", { class: "k-doc-entity__h" }, [
+        avatar,
+        el("div", {}, [
+          el("div", { class: "k-doc-entity__name", text: ent.name }),
+          el("div", { class: "k-doc-entity__meta", text: `${entCount} document${entCount === 1 ? "" : "s"}` }),
+        ]),
+      ]),
+      ...assetBlocks,
+    ]));
+  }
+
+  const empty = el("div", { class: "k-docs-empty", attrs: { hidden: "" }, text: "No documents match your search." });
+  const search = el("input", { class: "k-docsearch", attrs: { type: "search", placeholder: "Search documents by name, policy, or asset…", "aria-label": "Search documents" } });
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase();
+    let any = false;
+    for (const ent of entityBlocks) {
+      let entVis = false;
+      ent.querySelectorAll(".k-doc-asset").forEach((as) => {
+        let asVis = false;
+        as.querySelectorAll(".k-doc-policy").forEach((pol) => {
+          let polVis = false;
+          pol.querySelectorAll(".k-doclink").forEach((link) => {
+            const show = !q || (link.dataset.doc || "").includes(q);
+            link.hidden = !show;
+            if (show) polVis = true;
+          });
+          pol.hidden = !polVis;
+          if (polVis) asVis = true;
+        });
+        as.hidden = !asVis;
+        if (asVis) entVis = true;
+      });
+      ent.hidden = !entVis;
+      if (entVis) any = true;
+    }
+    empty.hidden = any;
+  });
+
   const view = page("documents", [
     backLink("#/keep", "dashboard"),
     el("h1", { class: "k-h1", text: "Documents" }),
-    el("p", { class: "k-sub", text: "Every document your broker has on file, grouped by policy." }),
-    ...(rows.length ? rows : [el("div", { class: "k-empty", text: "No documents on file yet." })]),
+    el("p", { class: "k-sub", text: "All your documents, filed by entity and asset." }),
+    total ? search : null,
+    ...(entityBlocks.length ? entityBlocks : [el("div", { class: "k-empty", text: "No documents on file yet." })]),
+    empty,
   ], { narrow: true });
   mount(view);
 }
