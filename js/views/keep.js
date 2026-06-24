@@ -25,9 +25,85 @@ function ribbon() {
   ]);
 }
 
+// ── App-bar menus (click-to-open popovers) ───────────────────────────────────
+function closeKeepMenus() {
+  document.querySelectorAll(".k-pop.is-open").forEach((p) => {
+    p.classList.remove("is-open");
+    const t = p.querySelector("[aria-expanded]");
+    if (t) t.setAttribute("aria-expanded", "false");
+  });
+}
+if (typeof document !== "undefined" && !document.__keepMenusInit) {
+  document.__keepMenusInit = true;
+  document.addEventListener("click", (e) => { if (!e.target.closest(".k-pop")) closeKeepMenus(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeKeepMenus(); });
+}
+
+function popover(trigger, panel, alignRight) {
+  const wrap = el("div", { class: `k-pop${alignRight ? " k-pop--right" : ""}` });
+  trigger.setAttribute("aria-haspopup", "true");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const open = !wrap.classList.contains("is-open");
+    closeKeepMenus();
+    if (open) { wrap.classList.add("is-open"); trigger.setAttribute("aria-expanded", "true"); }
+  });
+  wrap.appendChild(trigger);
+  wrap.appendChild(panel);
+  return wrap;
+}
+
+// Notifications come from policies that are expiring or lapsed (the renewal signal).
+function buildNotifications() {
+  const out = [];
+  for (const ent of SAMPLE.entities)
+    for (const a of ent.assets)
+      for (const p of a.policies || []) {
+        const k = policyKind(p.renewalInDays);
+        if (k === "warn") out.push({ kind: "warn", text: `${p.line} expires in ${p.renewalInDays} days`, sub: `${a.name} · renew soon`, href: `#/keep/policy/${p.id}` });
+        else if (k === "exp") out.push({ kind: "exp", text: `${p.line} has lapsed`, sub: `${a.name} · action needed`, href: `#/keep/policy/${p.id}` });
+      }
+  return out;
+}
+
+function notifMenu() {
+  const items = buildNotifications();
+  const trigger = el("button", { class: "k-iconbtn", attrs: { type: "button", "aria-label": `Notifications${items.length ? ` (${items.length})` : ""}` } },
+    [icon("bell", { size: 20 }), items.length ? el("span", { class: "k-dot" }) : null]);
+  const panel = el("div", { class: "k-menu k-notif" }, [
+    el("div", { class: "k-notif__title", text: `Notifications${items.length ? ` · ${items.length}` : ""}` }),
+    ...(items.length
+      ? items.map((n) => el("a", { class: "k-notif__item", attrs: { href: n.href } }, [
+          el("span", { class: `k-notif__dot k-notif__dot--${n.kind}` }, [icon("alert", { size: 16 })]),
+          el("div", {}, [el("div", { class: "k-notif__txt", text: n.text }), el("div", { class: "k-notif__sub", text: n.sub })]),
+        ]))
+      : [el("div", { class: "k-notif__empty", text: "You're all caught up." })]),
+  ]);
+  return popover(trigger, panel, true);
+}
+
+function accountMenu() {
+  const trigger = el("button", { class: "k-av k-av--btn", attrs: { type: "button", "aria-label": "Account menu" } }, [el("span", { text: SAMPLE.user.initials })]);
+  const panel = el("div", { class: "k-menu" }, [
+    el("div", { class: "k-menu__head" }, [
+      el("span", { class: "k-av" }, [el("span", { text: SAMPLE.user.initials })]),
+      el("div", {}, [
+        el("div", { class: "k-menu__name", text: SAMPLE.user.name }),
+        el("div", { class: "k-menu__email", text: "jordan.m@example.com" }),
+      ]),
+    ]),
+    el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
+    el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
+    el("div", { class: "k-menu__sep" }),
+    el("button", { class: "k-menu__item k-menu__danger", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
+  ]);
+  return popover(trigger, panel, true);
+}
+
 function appBar(active) {
-  const link = (label, href, key) =>
-    el("a", { class: key === active ? "on" : "", attrs: { href } }, [el("span", { text: label })]);
+  const link = (label, href, key) => el("a", { class: key === active ? "on" : "", attrs: { href } }, [el("span", { text: label })]);
   return el("header", { class: "k-bar" }, [
     el("div", { class: "k-bar__in" }, [
       el("a", { class: "k-brand", attrs: { href: "#/keep", "aria-label": "The Keep — dashboard" } }, [
@@ -38,14 +114,9 @@ function appBar(active) {
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Dashboard", "#/keep", "dashboard"),
         link("Entities", "#/keep", "entities"),
-        link("Documents", "#/keep", "documents"),
+        link("Documents", "#/keep/documents", "documents"),
       ]),
-      el("div", { class: "k-bar__rt" }, [
-        el("button", { class: "k-iconbtn", attrs: { type: "button", "aria-label": "Notifications" } }, [
-          icon("bell", { size: 20 }), el("span", { class: "k-dot" }),
-        ]),
-        el("span", { class: "k-av", text: SAMPLE.user.initials }),
-      ]),
+      el("div", { class: "k-bar__rt" }, [notifMenu(), accountMenu()]),
     ]),
   ]);
 }
@@ -434,4 +505,46 @@ export function renderKeepPolicy(params, id) {
   sections.push(grp("doc", "Documents & history", docs));
 
   mount(page("entities", sections, { narrow: true }));
+}
+
+export function renderKeepDocuments() {
+  const rows = [];
+  for (const ent of SAMPLE.entities)
+    for (const a of ent.assets)
+      for (const p of a.policies || []) {
+        if (!p.documents || !p.documents.length) continue;
+        rows.push(el("div", { class: "k-grp" }, [
+          el("div", { class: "k-grp__h" }, [icon(p.icon || "doc", { size: 15 }), el("span", { text: `${p.line} — ${a.name}` })]),
+          el("div", {}, p.documents.map((d) =>
+            el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${p.id}` } }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
+        ]));
+      }
+  const view = page("documents", [
+    backLink("#/keep", "dashboard"),
+    el("h1", { class: "k-h1", text: "Documents" }),
+    el("p", { class: "k-sub", text: "Every document your broker has on file, grouped by policy." }),
+    ...(rows.length ? rows : [el("div", { class: "k-empty", text: "No documents on file yet." })]),
+  ], { narrow: true });
+  mount(view);
+}
+
+export function renderKeepAccount() {
+  const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
+  const view = page("account", [
+    backLink("#/keep", "dashboard"),
+    el("h1", { class: "k-h1", text: "Account" }),
+    el("p", { class: "k-sub", text: "Your profile and notification settings." }),
+    el("div", { class: "k-grp" }, [
+      el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
+      pg([["Name", SAMPLE.user.name], ["Email", "jordan.m@example.com"], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
+    ]),
+    el("div", { class: "k-grp" }, [
+      el("div", { class: "k-grp__h" }, [icon("bell", { size: 15 }), el("span", { text: "Renewal reminders" })]),
+      pg([["Email reminders", "On"], ["Schedule", `${REMINDER_SCHEDULE.join(" / ")} days before renewal`], ["Send to", "jordan.m@example.com"]]),
+    ]),
+    el("div", { class: "k-btn-row" }, [
+      el("button", { class: "k-btn k-btn--ghost", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
+    ]),
+  ], { narrow: true });
+  mount(view);
 }

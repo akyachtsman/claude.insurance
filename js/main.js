@@ -11,6 +11,7 @@ import { renderSummary } from "./views/summary.js";
 import {
   renderKeepLogin, renderKeepDashboard, renderKeepEntity,
   renderKeepAsset, renderKeepAddAsset, renderKeepPolicy,
+  renderKeepDocuments, renderKeepAccount,
 } from "./views/keep.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
@@ -82,6 +83,10 @@ function dispatchKeep(rest) {
       return renderKeepAsset({}, id);
     case "policy":
       return renderKeepPolicy({}, id);
+    case "documents":
+      return renderKeepDocuments();
+    case "account":
+      return renderKeepAccount();
     default:
       return renderKeepDashboard();
   }
