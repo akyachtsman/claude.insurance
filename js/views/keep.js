@@ -10,6 +10,76 @@ import { SAMPLE, getEntity, findAsset, findPolicy, ASSET_META } from "../keep/da
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, REMINDER_SCHEDULE } from "../keep/policies.js";
 
+// In-memory reminder preferences (STUB — persisted to the user's profile once the
+// backend is wired). Module singleton, so changes survive navigation in-session.
+const reminderPrefs = { email: true, schedule: [...REMINDER_SCHEDULE] };
+function activeSchedule() {
+  return REMINDER_SCHEDULE.filter((d) => reminderPrefs.schedule.includes(d));
+}
+
+// Status banner shown on the policies list — reflects the saved preference and
+// links to Settings (the controls live there, not here).
+function reminderBanner() {
+  if (!reminderPrefs.email || !activeSchedule().length) {
+    return el("div", { class: "k-remind" }, [
+      el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
+      el("p", {}, [el("b", { text: "Renewal reminders are off. " }), el("span", { text: "Turn them on in " }), el("a", { attrs: { href: "#/keep/account" }, text: "Settings" }), el("span", { text: "." })]),
+    ]);
+  }
+  return el("div", { class: "k-remind" }, [
+    el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
+    el("p", {}, [
+      el("b", { text: "Renewal reminders are on. " }),
+      el("span", { text: `We email ${SAMPLE.user.name.split(" ")[0]} ${activeSchedule().join(", ")} days before each renewal · ` }),
+      el("a", { attrs: { href: "#/keep/account" }, text: "Manage" }),
+    ]),
+  ]);
+}
+
+// Interactive reminder-preference controls for the Account page.
+function buildReminderSettings() {
+  const chips = REMINDER_SCHEDULE.map((d) => {
+    const chip = el("button", { class: `k-chiptog${reminderPrefs.schedule.includes(d) ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(reminderPrefs.schedule.includes(d)) } }, [el("span", { text: `${d} day${d === 1 ? "" : "s"}` })]);
+    chip.addEventListener("click", () => {
+      if (!reminderPrefs.email) return;
+      const i = reminderPrefs.schedule.indexOf(d);
+      if (i >= 0) reminderPrefs.schedule.splice(i, 1); else reminderPrefs.schedule.push(d);
+      const on = reminderPrefs.schedule.includes(d);
+      chip.classList.toggle("on", on);
+      chip.setAttribute("aria-pressed", String(on));
+    });
+    return chip;
+  });
+  const setChipsEnabled = (enabled) => chips.forEach((c) => { if (enabled) c.removeAttribute("disabled"); else c.setAttribute("disabled", "disabled"); });
+  setChipsEnabled(reminderPrefs.email);
+
+  const sw = el("button", { class: `k-switch${reminderPrefs.email ? " on" : ""}`, attrs: { type: "button", role: "switch", "aria-checked": String(reminderPrefs.email), "aria-label": "Email reminders" } }, [
+    el("span", { class: "k-switch__track" }),
+    el("span", { class: "k-switch__label", text: reminderPrefs.email ? "On" : "Off" }),
+  ]);
+  sw.addEventListener("click", () => {
+    reminderPrefs.email = !reminderPrefs.email;
+    sw.classList.toggle("on", reminderPrefs.email);
+    sw.setAttribute("aria-checked", String(reminderPrefs.email));
+    sw.querySelector(".k-switch__label").textContent = reminderPrefs.email ? "On" : "Off";
+    setChipsEnabled(reminderPrefs.email);
+  });
+
+  return el("div", { class: "k-grp" }, [
+    el("div", { class: "k-grp__h" }, [icon("bell", { size: 15 }), el("span", { text: "Renewal reminders" })]),
+    el("div", { class: "k-setrow" }, [
+      el("div", {}, [el("div", { class: "k-setrow__t", text: "Email reminders" }), el("div", { class: "k-setrow__s", text: "Get an email before each policy renews" })]),
+      sw,
+    ]),
+    el("div", { class: "k-setlabel", text: "Remind me before each renewal at:" }),
+    el("div", { class: "k-chiprow" }, chips),
+    el("div", { class: "k-setrow" }, [
+      el("div", {}, [el("div", { class: "k-setrow__t", text: "Send to" }), el("div", { class: "k-setrow__s", text: "jordan.m@example.com" })]),
+    ]),
+    el("p", { class: "k-setnote", text: "Changes apply across all your policies. (Saved to your profile once your account is live.)" }),
+  ]);
+}
+
 // ── small helpers ────────────────────────────────────────────────────────────
 function money(v) {
   if (!v) return "";
@@ -190,10 +260,7 @@ function policySummaryCard(policy) {
 
 function policiesSection(asset) {
   const items = [
-    el("div", { class: "k-remind" }, [
-      el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
-      el("p", {}, [el("b", { text: "Renewal reminders are on. " }), el("span", { text: `We email ${SAMPLE.user.name.split(" ")[0]} ${REMINDER_SCHEDULE.join(", ")} days before each policy's renewal date.` })]),
-    ]),
+    reminderBanner(),
     el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: "Policies maintained by your broker (Rosa Alvarez)" })]),
   ];
   if (!asset.policies || !asset.policies.length) {
@@ -431,7 +498,7 @@ export function renderKeepPolicy(params, id) {
   const kind = policyKind(policy.renewalInDays);
   const statusLabel = kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
     : (kind === "warn" ? "Expiring soon" : "Active");
-  const rinfo = reminderInfo(policy.renewalInDays);
+  const rinfo = reminderInfo(policy.renewalInDays, activeSchedule());
 
   const grp = (ic, title, inner) => el("div", { class: "k-grp" }, [
     el("div", { class: "k-grp__h" }, [icon(ic, { size: 15 }), el("span", { text: title })]),
@@ -501,8 +568,10 @@ export function renderKeepPolicy(params, id) {
     sections.push(grp("handshake", "Mortgagee & interests", pg(policy.interests)));
   }
 
-  const reminderText = ` Renewal reminders: ${REMINDER_SCHEDULE.join(" / ")} days before ${dateFromDays(policy.renewalInDays)}` +
-    (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming");
+  const sched = activeSchedule();
+  const reminderText = (reminderPrefs.email && sched.length)
+    ? ` Renewal reminders: ${sched.join(" / ")} days before ${dateFromDays(policy.renewalInDays)}` + (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming")
+    : " Renewal reminders are off — turn them on in Settings.";
   const docs = el("div", {}, [
     el("div", {}, (policy.documents || []).map((d) => el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
     el("p", { class: "k-note" }, [el("b", { text: "Claims history: " }), el("span", { text: policy.claims || "None" })]),
@@ -544,10 +613,7 @@ export function renderKeepAccount() {
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
       pg([["Name", SAMPLE.user.name], ["Email", "jordan.m@example.com"], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
     ]),
-    el("div", { class: "k-grp" }, [
-      el("div", { class: "k-grp__h" }, [icon("bell", { size: 15 }), el("span", { text: "Renewal reminders" })]),
-      pg([["Email reminders", "On"], ["Schedule", `${REMINDER_SCHEDULE.join(" / ")} days before renewal`], ["Send to", "jordan.m@example.com"]]),
-    ]),
+    buildReminderSettings(),
     el("div", { class: "k-btn-row" }, [
       el("button", { class: "k-btn k-btn--ghost", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
     ]),
