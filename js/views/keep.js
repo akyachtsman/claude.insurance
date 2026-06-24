@@ -55,6 +55,16 @@ function page(active, contentChildren, opts = {}) {
   return el("div", {}, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
 }
 
+// One-level-up affordance shown at the top of each drill-down level.
+function backLink(href, label) {
+  return el("div", { class: "k-backrow" }, [
+    el("a", { class: "k-back", attrs: { href } }, [
+      icon("arrow-right", { size: 18, class: "icon-flip" }),
+      el("span", { text: `Back to ${label}` }),
+    ]),
+  ]);
+}
+
 function cic(asset) {
   const meta = ASSET_META[asset.type] || { cic: "home", icon: "shield" };
   return el("span", { class: `k-cic k-cic--${meta.cic}` }, [icon(meta.icon, { size: 28 })]);
@@ -221,6 +231,7 @@ export async function renderKeepEntity(params, id) {
   const settings = await getRuleDefaults();
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const view = page("entities", [
+    backLink("#/keep", "dashboard"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
@@ -254,6 +265,7 @@ export async function renderKeepAsset(params, id) {
   ]);
 
   const sections = [
+    backLink(`#/keep/entity/${entity.id}`, entity.name),
     el("nav", { class: "k-crumbs" }, [
       el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), el("span", { text: "  ·  " }),
@@ -363,6 +375,7 @@ export function renderKeepPolicy(params, id) {
   }));
 
   const sections = [
+    backLink(`#/keep/asset/${asset.id}`, asset.name),
     el("nav", { class: "k-crumbs" }, [
       el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), el("span", { text: "  ·  " }),
