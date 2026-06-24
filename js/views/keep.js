@@ -5,6 +5,7 @@
 
 import { el, mount } from "../dom.js";
 import { icon } from "../icons.js";
+import { s } from "../svg.js";
 import { getRuleDefaults } from "../content.js";
 import { SAMPLE, getEntity, findAsset, findPolicy, ASSET_META } from "../keep/data.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
@@ -369,6 +370,67 @@ export async function renderKeepDashboard() {
   mount(view);
 }
 
+function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
+function initialsOf(name) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
+
+// Inline-SVG relationship graph: "Me" hub on the left, each business on the right,
+// connected by a labeled edge describing the relationship (role · stake). Nodes
+// are keyboard-focusable and navigate to the entity.
+function relationshipMap() {
+  const me = SAMPLE.entities.find((e) => e.kind === "personal");
+  const biz = SAMPLE.entities.filter((e) => e.kind === "business");
+  const W = 760, rowH = 124, H = Math.max(200, biz.length * rowH + 24);
+  const meCy = H / 2, meRight = 220, bizLeft = 520, bizW = 200, nodeH = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
+  svg.appendChild(s("defs", {}, [
+    s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
+      s("stop", { offset: "0", "stop-color": "#8a6bff" }), s("stop", { offset: "1", "stop-color": "#5b3ee6" }),
+    ]),
+  ]));
+
+  // Edges + labels (drawn under the nodes).
+  biz.forEach((b, i) => {
+    const cyB = (i + 0.5) * (H / biz.length);
+    svg.appendChild(s("path", { d: `M ${meRight} ${meCy} C 370 ${meCy}, 370 ${cyB}, ${bizLeft} ${cyB}`, fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" }));
+    const rel = b.relationship || { role: "Owner", stake: "" };
+    const label = rel.stake ? `${rel.role} · ${rel.stake}` : rel.role;
+    const lw = label.length * 6.4 + 24, ly = (meCy + cyB) / 2;
+    svg.appendChild(s("rect", { x: 370 - lw / 2, y: ly - 13, width: lw, height: 26, rx: 13, fill: "#ffffff", stroke: "#ece7fb" }));
+    svg.appendChild(svgText(label, { x: 370, y: ly + 4, "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#5f5880", "font-family": FS }));
+  });
+
+  const node = (x, cy, w, o) => {
+    const g = s("g", { class: "k-relnode", tabindex: "0", role: "link", "aria-label": o.aria });
+    g.appendChild(s("rect", { x, y: cy - nodeH / 2, width: w, height: nodeH, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
+    const ax = x + 38;
+    g.appendChild(s("circle", { cx: ax, cy, r: 20, fill: o.avFill }));
+    g.appendChild(svgText(o.initials, { x: ax, y: cy + 5, "text-anchor": "middle", "font-size": "14", "font-weight": "800", fill: o.avText, "font-family": FD }));
+    g.appendChild(svgText(o.name, { x: ax + 30, y: cy - 2, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
+    g.appendChild(svgText(o.sub, { x: ax + 30, y: cy + 16, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    const go = () => { location.hash = o.href; };
+    g.addEventListener("click", go);
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    return g;
+  };
+
+  svg.appendChild(node(40, meCy, 180, {
+    fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", initials: "ME",
+    name: me ? me.name : "Me", nameFill: "#fff", sub: "You · personal", subFill: "rgba(255,255,255,.85)",
+    href: "#/keep/entity/me", aria: `Open ${me ? me.name : "Me"}`,
+  }));
+  biz.forEach((b, i) => {
+    const cyB = (i + 0.5) * (H / biz.length);
+    svg.appendChild(node(bizLeft, cyB, bizW, {
+      fill: "#ffffff", stroke: "#ece7fb", avFill: "#defaef", avText: "#0e8e66", initials: initialsOf(b.name),
+      name: b.name, nameFill: "#231d3a", sub: b.label || "Business", subFill: "#5f5880",
+      href: `#/keep/entity/${b.id}`, aria: `Open ${b.name}`,
+    }));
+  });
+
+  return el("div", { class: "k-relmap" }, [svg]);
+}
+
 export async function renderKeepEntities() {
   const settings = await getRuleDefaults();
   const card = (entity) => {
@@ -388,7 +450,10 @@ export async function renderKeepEntities() {
   };
   const view = page("entities", [
     el("h1", { class: "k-h1", text: "Entities" }),
-    el("p", { class: "k-sub", text: "You and the businesses you own. Open one to see its assets and policies." }),
+    el("p", { class: "k-sub", text: "How you and your businesses connect. Tap any node to open it." }),
+    el("div", { class: "k-lbl", text: "Relationship map" }),
+    relationshipMap(),
+    el("div", { class: "k-lbl", text: "All entities" }),
     el("div", { class: "k-ent-grid" }, SAMPLE.entities.map(card)),
     el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
   ]);

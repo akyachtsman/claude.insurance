@@ -162,6 +162,7 @@ export const SAMPLE = {
       label: "LLC",
       icon: "briefcase",
       meta: "EIN ••–•••4821 · Food service",
+      relationship: { role: "Managing member", stake: "100%" },
       assets: [
         {
           id: "harbor-dr",
