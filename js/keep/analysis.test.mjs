@@ -10,13 +10,14 @@ const SETTINGS = {
   commercial: { workersCompMinEmployees: 1, umbrellaRevenue: 2000000 },
 };
 
-test("home in a flood zone above the umbrella threshold has flood + umbrella gaps", () => {
+test("home above the umbrella threshold shows umbrella as the gap; flood is in place", () => {
   const { asset } = findAsset("home-marina");
   const a = analyzeAsset(asset, SETTINGS);
   assert.ok(a.mustHave.every((c) => c.status === "in-place"), "core coverages are in place");
-  const recIds = a.recommended.filter((c) => c.status === "gap").map((c) => c.id);
-  assert.deepEqual(recIds.sort(), ["flood", "umbrella"], "engine surfaces flood + umbrella as gaps");
-  assert.equal(a.gaps, 2);
+  assert.equal(a.recommended.find((c) => c.id === "flood").status, "in-place", "flood policy on file → in place");
+  const recGaps = a.recommended.filter((c) => c.status === "gap").map((c) => c.id);
+  assert.deepEqual(recGaps, ["umbrella"], "umbrella is the remaining gap");
+  assert.equal(a.gaps, 1);
 });
 
 test("an uninsured asset reports as Not insured", () => {
@@ -39,15 +40,16 @@ test("a suggestion-only asset reports a recommendation, not a gap", () => {
 test("thresholds are read from settings — raising the umbrella floor drops that gap", () => {
   const { asset } = findAsset("home-marina");
   const lifted = { ...SETTINGS, residential: { ...SETTINGS.residential, umbrellaHomeValue: 1000000 } };
-  const ids = analyzeAsset(asset, lifted).recommended.filter((c) => c.status === "gap").map((c) => c.id);
-  assert.ok(!ids.includes("umbrella"), "umbrella no longer recommended above the new floor");
-  assert.ok(ids.includes("flood"), "flood still recommended");
+  const a = analyzeAsset(asset, lifted);
+  const gapIds = a.recommended.filter((c) => c.status === "gap").map((c) => c.id);
+  assert.ok(!gapIds.includes("umbrella"), "umbrella no longer recommended above the new floor");
+  assert.equal(a.gaps, 0, "no gaps once umbrella drops (flood already on file)");
 });
 
 test("entity summary aggregates assets and gaps", () => {
   const me = getEntity("me");
   const sum = entitySummary(me, SETTINGS);
   assert.equal(sum.assets, 4);
-  assert.equal(sum.gaps, 4); // home (2) + watercraft (2)
-  assert.ok(sum.inPlace >= 6);
+  assert.equal(sum.gaps, 3); // home: umbrella (1) + watercraft: hull + liability (2)
+  assert.ok(sum.inPlace >= 7);
 });

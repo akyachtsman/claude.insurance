@@ -10,7 +10,7 @@ import { renderQualify } from "./views/qualify.js";
 import { renderSummary } from "./views/summary.js";
 import {
   renderKeepLogin, renderKeepDashboard, renderKeepEntity,
-  renderKeepAsset, renderKeepAddAsset,
+  renderKeepAsset, renderKeepAddAsset, renderKeepPolicy,
 } from "./views/keep.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
@@ -80,6 +80,8 @@ function dispatchKeep(rest) {
       return renderKeepEntity({}, id);
     case "asset":
       return renderKeepAsset({}, id);
+    case "policy":
+      return renderKeepPolicy({}, id);
     default:
       return renderKeepDashboard();
   }
