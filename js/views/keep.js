@@ -95,6 +95,7 @@ function accountMenu() {
       ]),
     ]),
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
+    el("a", { attrs: { href: "#/keep/security" } }, [icon("shield", { size: 18 }), el("span", { text: "Security & privacy" })]),
     el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
     el("div", { class: "k-menu__sep" }),
     el("button", { class: "k-menu__item k-menu__danger", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
@@ -278,7 +279,7 @@ export function renderKeepLogin() {
         el("label", { class: "k-fld" }, [el("span", { text: "Password" }), el("input", { attrs: { type: "password", value: "demo-password" } })]),
         el("button", { class: "k-btn k-btn--block", attrs: { type: "button", "data-go": "/keep" } }, [el("span", { text: "Log in" }), icon("arrow-right", { size: 20 })]),
         el("p", { class: "k-ameta" }, [el("a", { text: "Forgot your password?" })]),
-        el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Invite-only · accounts come from a broker invitation" })]),
+        el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
       ]),
     ]),
   ]);
@@ -290,6 +291,11 @@ export async function renderKeepDashboard() {
   const view = page("dashboard", [
     el("h1", { class: "k-h1", text: `Welcome back, ${SAMPLE.user.name.split(" ")[0]}` }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
+    el("div", { class: "k-privacy" }, [
+      icon("lock", { size: 16 }),
+      el("span", { text: "Encrypted and private — only you and your broker can see this." }),
+      el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
+    ]),
     ...SAMPLE.entities.map((e) => entityPanel(e, settings)),
     el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
   ]);
@@ -461,7 +467,7 @@ export function renderKeepPolicy(params, id) {
       ]),
       expiryBadge(policy.renewalInDays),
     ]),
-    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Maintained by your broker (${policy.agent})` })]),
+    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Maintained by your broker (${policy.agent}) · encrypted & private` })]),
     grp("clipboard", "Policy", pg([
       ["Policy number", policy.number], ["Policy form", policy.form], ["Status", statusLabel],
       ["Effective", dateFromDays(policy.effectiveInDays)], ["Expires / renews", dateFromDays(policy.renewalInDays)], ["Auto-renew", policy.autoRenew ? "On" : "Off"],
@@ -544,6 +550,53 @@ export function renderKeepAccount() {
     ]),
     el("div", { class: "k-btn-row" }, [
       el("button", { class: "k-btn k-btn--ghost", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
+    ]),
+  ], { narrow: true });
+  mount(view);
+}
+
+const SECURITY_CARDS = [
+  { ic: "lock", t: "Encrypted in transit", b: "Everything you view and send travels over an encrypted HTTPS/TLS connection — never in the clear." },
+  { ic: "shield", t: "Encrypted at rest", b: "Your records are stored in a database that is encrypted on disk, so the underlying files are unreadable if ever accessed." },
+  { ic: "user", t: "Private to you", b: "Row-level security means only you — and your licensed broker — can ever read your entities, assets and policies. No other client can see your data." },
+  { ic: "mail", t: "Invite-only access", b: "Accounts exist only by broker invitation. There is no public sign-up to your portal." },
+  { ic: "check", t: "Least privilege", b: "The public website can only submit a request — it can never read client data. Privileged keys stay on our servers and never reach your browser." },
+  { ic: "briefcase", t: "Never sold", b: "Your information is used only to advise you on coverage. We never sell or share it for marketing." },
+];
+
+export function renderKeepSecurity() {
+  // 2FA is not live on the stub yet — the button reveals an honest explanation
+  // rather than pretending to enable it.
+  const note = el("div", { class: "twofa-note", text: "Two-factor setup unlocks once your account goes live: you'll scan a QR code with an authenticator app and enter a 6-digit code at login." });
+  const twofaBtn = el("button", { class: "k-btn", attrs: { type: "button" }, on: { click: () => note.classList.toggle("is-shown") } }, [el("span", { text: "Turn on 2FA" })]);
+
+  const view = page("security", [
+    backLink("#/keep", "dashboard"),
+    el("div", { class: "shero" }, [
+      el("span", { class: "k-cic" }, [icon("shield", { size: 34 })]),
+      el("div", {}, [
+        el("h1", { text: "Your data is protected" }),
+        el("p", { text: "How the Keep keeps your information private and secure." }),
+      ]),
+    ]),
+    el("div", { class: "twofa" }, [
+      el("span", { class: "k-cic" }, [icon("lock", { size: 26 })]),
+      el("div", {}, [
+        el("h3", {}, [el("span", { text: "Two-factor authentication " }), el("span", { class: "opt", text: "Recommended" })]),
+        el("p", { text: "Add a second layer at login — a one-time code from your phone, on top of your password." }),
+      ]),
+      twofaBtn,
+    ]),
+    note,
+    el("div", { class: "sgrid" }, SECURITY_CARDS.map((c) =>
+      el("div", { class: "scard" }, [
+        el("span", { class: "k-cic" }, [icon(c.ic, { size: 24 })]),
+        el("h3", { text: c.t }),
+        el("p", { text: c.b }),
+      ]))),
+    el("div", { class: "snote" }, [
+      icon("shield", { size: 14 }),
+      el("span", {}, [el("b", { text: " Questions about how your data is handled? " }), el("span", { text: "Your licensed broker (Rosa Alvarez) can walk you through it, or see our privacy policy." })]),
     ]),
   ], { narrow: true });
   mount(view);
