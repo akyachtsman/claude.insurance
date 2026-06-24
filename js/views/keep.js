@@ -184,7 +184,7 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Dashboard", "#/keep", "dashboard"),
-        link("Entities", "#/keep", "entities"),
+        link("Entities", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
       el("div", { class: "k-bar__rt" }, [notifMenu(), accountMenu()]),
@@ -364,6 +364,32 @@ export async function renderKeepDashboard() {
       el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
     ]),
     ...SAMPLE.entities.map((e) => entityPanel(e, settings)),
+    el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
+  ]);
+  mount(view);
+}
+
+export async function renderKeepEntities() {
+  const settings = await getRuleDefaults();
+  const card = (entity) => {
+    const sum = entitySummary(entity, settings);
+    const biz = entity.kind === "business";
+    return el("a", { class: "k-entcard", attrs: { href: `#/keep/entity/${entity.id}` } }, [
+      entityAvatar(entity),
+      el("div", { class: "k-entcard__main" }, [
+        el("div", {}, [
+          el("span", { class: "k-entcard__name", text: entity.name }),
+          el("span", { class: `k-et${biz ? " k-et--biz" : ""}`, text: entity.label }),
+        ]),
+        el("div", { class: "k-entcard__meta", text: `${sum.assets} asset${sum.assets === 1 ? "" : "s"} · ${sum.inPlace} coverages in place · ${sum.gaps} gap${sum.gaps === 1 ? "" : "s"}` }),
+      ]),
+      el("span", { class: "k-entcard__open" }, [el("span", { text: "Open" }), icon("arrow-right", { size: 16 })]),
+    ]);
+  };
+  const view = page("entities", [
+    el("h1", { class: "k-h1", text: "Entities" }),
+    el("p", { class: "k-sub", text: "You and the businesses you own. Open one to see its assets and policies." }),
+    el("div", { class: "k-ent-grid" }, SAMPLE.entities.map(card)),
     el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
   ]);
   mount(view);
