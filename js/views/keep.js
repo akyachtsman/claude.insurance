@@ -706,7 +706,16 @@ export function renderKeepSecurity() {
   // 2FA is not live on the stub yet — the button reveals an honest explanation
   // rather than pretending to enable it.
   const note = el("div", { class: "twofa-note", text: "Two-factor setup unlocks once your account goes live: you'll scan a QR code with an authenticator app and enter a 6-digit code at login." });
-  const twofaBtn = el("button", { class: "k-btn", attrs: { type: "button" }, on: { click: () => note.classList.toggle("is-shown") } }, [el("span", { text: "Turn on 2FA" })]);
+  const twofaBtn = el("button", { class: "k-btn", attrs: { type: "button", "aria-expanded": "false" } }, [
+    el("span", { text: "Turn on 2FA" }),
+    icon("arrow-right", { size: 18, class: "k-chev" }),
+  ]);
+  twofaBtn.addEventListener("click", () => {
+    const open = note.classList.toggle("is-shown");
+    twofaBtn.classList.toggle("is-open", open);
+    twofaBtn.setAttribute("aria-expanded", String(open));
+    twofaBtn.querySelector("span").textContent = open ? "Hide" : "Turn on 2FA";
+  });
 
   const view = page("security", [
     backLink("#/keep", "dashboard"),
