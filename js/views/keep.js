@@ -6,8 +6,9 @@
 import { el, mount } from "../dom.js";
 import { icon } from "../icons.js";
 import { getRuleDefaults } from "../content.js";
-import { SAMPLE, getEntity, findAsset, ASSET_META } from "../keep/data.js";
+import { SAMPLE, getEntity, findAsset, findPolicy, ASSET_META } from "../keep/data.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
+import { policyKind, reminderInfo, REMINDER_SCHEDULE } from "../keep/policies.js";
 
 // ── small helpers ────────────────────────────────────────────────────────────
 function money(v) {
@@ -67,6 +68,62 @@ function coveragePill(status) {
   if (status === "in-place") return el("span", { class: "k-pill k-pill--ok" }, [icon("check", { size: 15 }), el("span", { text: "In place" })]);
   if (status === "gap") return el("span", { class: "k-pill k-pill--gap" }, [icon("alert", { size: 15 }), el("span", { text: "Gap" })]);
   return el("span", { class: "k-pill k-pill--rec" }, [icon("spark", { size: 15 }), el("span", { text: "Suggested" })]);
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dateFromDays(days) {
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+function dateShort(days) {
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+function expiryBadge(renewalInDays) {
+  const kind = policyKind(renewalInDays);
+  if (kind === "exp") return el("span", { class: "k-exp k-exp--exp" }, [icon("x", { size: 14 }), el("span", { text: `Expired ${dateShort(renewalInDays)}` })]);
+  if (kind === "warn") return el("span", { class: "k-exp k-exp--warn" }, [icon("alert", { size: 14 }), el("span", { text: `Expires in ${renewalInDays} day${renewalInDays === 1 ? "" : "s"} · ${dateShort(renewalInDays)}` })]);
+  return el("span", { class: "k-exp k-exp--ok" }, [icon("check", { size: 14 }), el("span", { text: `Active · renews ${dateFromDays(renewalInDays)}` })]);
+}
+
+function policySummaryCard(policy) {
+  const kind = policyKind(policy.renewalInDays);
+  const cls = kind === "exp" ? " lapsed" : (kind === "warn" ? " exp" : "");
+  const chips = policy.coverages.slice(0, 3).map((c) => el("span", { class: "pill", text: `${c.label} ${c.limit}` }));
+  return el("a", { class: `k-pcard${cls}`, attrs: { href: `#/keep/policy/${policy.id}` } }, [
+    el("div", { class: "k-pcard__head" }, [
+      el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 24 })]),
+      el("div", { class: "k-pcard__t" }, [
+        el("div", { class: "k-pcard__line", text: policy.line }),
+        el("div", { class: "k-pcard__sub", text: `${policy.carrier} · ${policy.number}` }),
+      ]),
+      expiryBadge(policy.renewalInDays),
+    ]),
+    el("div", { class: "k-pcard__foot" }, [
+      el("div", { class: "k-pcard__chips" }, chips),
+      el("span", { class: "k-pcard__view", text: "View policy →" }),
+    ]),
+  ]);
+}
+
+function policiesSection(asset) {
+  const items = [
+    el("div", { class: "k-remind" }, [
+      el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
+      el("p", {}, [el("b", { text: "Renewal reminders are on. " }), el("span", { text: `We email ${SAMPLE.user.name.split(" ")[0]} ${REMINDER_SCHEDULE.join(", ")} days before each policy's renewal date.` })]),
+    ]),
+    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: "Policies maintained by your broker (Rosa Alvarez)" })]),
+  ];
+  if (!asset.policies || !asset.policies.length) {
+    items.push(el("div", { class: "k-empty", text: "No policies on file — ask your broker to add one." }));
+  } else {
+    asset.policies.forEach((p) => items.push(policySummaryCard(p)));
+  }
+  return el("section", { class: "k-sec" }, [
+    el("h2", { text: "Policies on file" }),
+    el("p", { class: "k-sub2", text: "What's on record, with limits and renewal dates" }),
+    ...items,
+  ]);
 }
 
 function assetCard(asset, settings) {
@@ -211,6 +268,8 @@ export async function renderKeepAsset(params, id) {
     ]),
   ];
 
+  sections.push(policiesSection(asset));
+
   if (gaps > 0) {
     sections.push(el("div", { class: "k-banner k-banner--gap" }, [
       el("span", { class: "k-cic" }, [icon("alert", { size: 26 })]),
@@ -274,4 +333,92 @@ export function renderKeepAddAsset() {
     )),
   ], { narrow: true });
   mount(view);
+}
+
+export function renderKeepPolicy(params, id) {
+  const found = findPolicy(id);
+  if (!found) return renderKeepDashboard();
+  const { entity, asset, policy } = found;
+  const kind = policyKind(policy.renewalInDays);
+  const statusLabel = kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
+    : (kind === "warn" ? "Expiring soon" : "Active");
+  const rinfo = reminderInfo(policy.renewalInDays);
+
+  const grp = (ic, title, inner) => el("div", { class: "k-grp" }, [
+    el("div", { class: "k-grp__h" }, [icon(ic, { size: 15 }), el("span", { text: title })]),
+    inner,
+  ]);
+  const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) =>
+    el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
+  const chips = (items) => el("div", { class: "k-pcard__chips" }, items.map((c) => el("span", { class: "pill", text: c })));
+
+  const covt = el("div", { class: "k-covt" }, policy.coverages.map((c) => {
+    const amt = c.recommended
+      ? el("span", { class: "amt" }, [el("span", { text: c.limit }), el("small", { text: `Recommended ${c.recommended} — underinsured` })])
+      : el("span", { class: "amt", text: c.limit });
+    return el("div", { class: "r" }, [
+      el("span", { class: "lbl" }, [c.tag && c.tag !== "—" ? el("b", { text: c.tag }) : null, el("span", { text: c.label })]),
+      amt,
+    ]);
+  }));
+
+  const sections = [
+    el("nav", { class: "k-crumbs" }, [
+      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }),
+      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), el("span", { text: "  ·  " }),
+      el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), el("span", { text: "  ·  " }),
+      el("span", { text: "Policy" }),
+    ]),
+    el("div", { class: "k-phead" }, [
+      el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 30 })]),
+      el("div", { class: "k-phead__t" }, [
+        el("h1", { text: policy.line }),
+        el("div", { class: "sub", text: `${policy.carrier} · NAIC ${policy.naic}` }),
+      ]),
+      expiryBadge(policy.renewalInDays),
+    ]),
+    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Maintained by your broker (${policy.agent})` })]),
+    grp("clipboard", "Policy", pg([
+      ["Policy number", policy.number], ["Policy form", policy.form], ["Status", statusLabel],
+      ["Effective", dateFromDays(policy.effectiveInDays)], ["Expires / renews", dateFromDays(policy.renewalInDays)], ["Auto-renew", policy.autoRenew ? "On" : "Off"],
+      ["Named insured", policy.namedInsured], ["Agent of record", policy.agent], ["Agent contact", policy.agentContact],
+    ])),
+  ];
+
+  if (policy.details && policy.details.length) {
+    sections.push(grp(ASSET_META[asset.type] ? ASSET_META[asset.type].icon : "home", "Insured item", pg(policy.details)));
+  }
+
+  const covInner = el("div", {}, [covt]);
+  if (policy.endorsements && policy.endorsements.length) {
+    covInner.appendChild(el("div", { class: "k-grp__h mt" }, [icon("spark", { size: 15 }), el("span", { text: "Endorsements / riders" })]));
+    covInner.appendChild(chips(policy.endorsements));
+  }
+  sections.push(grp("shield", "Coverages & limits", covInner));
+
+  if (policy.deductibles && policy.deductibles.length) {
+    sections.push(grp("flood", "Deductibles", pg(policy.deductibles)));
+  }
+
+  const billInner = el("div", {}, [pg([["Annual premium", policy.premium], ["Payment plan", policy.paymentPlan], ["Billing status", policy.billingStatus]])]);
+  if (policy.discounts && policy.discounts.length) {
+    billInner.appendChild(el("div", { class: "k-grp__h mt" }, [icon("spark", { size: 15 }), el("span", { text: "Discounts applied" })]));
+    billInner.appendChild(chips(policy.discounts));
+  }
+  sections.push(grp("briefcase", "Premium & billing", billInner));
+
+  if (policy.interests && policy.interests.length) {
+    sections.push(grp("handshake", "Mortgagee & interests", pg(policy.interests)));
+  }
+
+  const reminderText = ` Renewal reminders: ${REMINDER_SCHEDULE.join(" / ")} days before ${dateFromDays(policy.renewalInDays)}` +
+    (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming");
+  const docs = el("div", {}, [
+    el("div", {}, (policy.documents || []).map((d) => el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
+    el("p", { class: "k-note" }, [el("b", { text: "Claims history: " }), el("span", { text: policy.claims || "None" })]),
+    el("p", { class: "k-note" }, [icon("bell", { size: 14 }), el("span", { text: reminderText })]),
+  ]);
+  sections.push(grp("doc", "Documents & history", docs));
+
+  mount(page("entities", sections, { narrow: true }));
 }
