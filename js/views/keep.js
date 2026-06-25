@@ -380,17 +380,20 @@ function initialsOf(name) { return name.split(/\s+/).filter(Boolean).slice(0, 2)
 // the left, entities on the right). Real user entities (with href) open their
 // detail; the rest are sample related parties shown to illustrate the map.
 const REL_NODES = [
-  { id: "me", x: 40, cy: 330, kind: "me", name: "Jordan Mercer", sub: "You · personal", initials: "ME", href: "#/keep/entity/me" },
-  { id: "alex", x: 40, cy: 140, kind: "person", name: "Alex Mercer", sub: "Spouse", initials: "AM" },
-  { id: "cafe", x: 520, cy: 120, kind: "biz", name: "Coastal Cafe LLC", sub: "LLC", initials: "CC", href: "#/keep/entity/coastal-cafe" },
-  { id: "holdings", x: 520, cy: 300, kind: "biz", name: "Mercer Holdings LLC", sub: "LLC · real estate", initials: "MH" },
-  { id: "trust", x: 520, cy: 470, kind: "trust", name: "Mercer Family Trust", sub: "Revocable trust", initials: "MF" },
+  { id: "alex", x: 30, cy: 70, kind: "person", name: "Alex Mercer", sub: "Spouse", initials: "AM" },
+  { id: "me", x: 30, cy: 240, kind: "me", name: "Jordan Mercer", sub: "You · personal", initials: "ME", href: "#/keep/entity/me" },
+  { id: "childtrust", x: 390, cy: 120, kind: "trust", name: "Children's Trust", sub: "Irrevocable trust", initials: "CT" },
+  { id: "famtrust", x: 390, cy: 340, kind: "trust", name: "Family Trust", sub: "Revocable trust", initials: "FT" },
+  { id: "cafe", x: 740, cy: 120, kind: "biz", name: "Coastal Cafe LLC", sub: "LLC", initials: "CC", href: "#/keep/entity/coastal-cafe" },
+  { id: "holdings", x: 740, cy: 340, kind: "biz", name: "Mercer Holdings", sub: "LLC · real estate", initials: "MH" },
 ];
 const REL_EDGES = [
-  { from: "me", to: "cafe", label: "Managing member · 60%" },
+  { from: "me", to: "cafe", label: "Managing member · 50%" },
   { from: "alex", to: "cafe", label: "Member · 40%" },
-  { from: "me", to: "holdings", label: "Sole member · 100%" },
-  { from: "me", to: "trust", label: "Trustee" },
+  { from: "childtrust", to: "cafe", label: "Holds · 10%" },
+  { from: "me", to: "childtrust", label: "Trustee" },
+  { from: "me", to: "famtrust", label: "Trustee" },
+  { from: "famtrust", to: "holdings", label: "Owns · 100%" },
 ];
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
@@ -400,7 +403,7 @@ const REL_STYLE = {
 };
 
 function relationshipMap() {
-  const W = 760, H = 520, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+  const W = 970, H = 420, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
   const byId = Object.fromEntries(REL_NODES.map((n) => [n.id, n]));
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
