@@ -30,7 +30,7 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` + `entities` + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. The `notify-lead` / `notify-renewal` Edge Functions are still to come.
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the relationship demo seed. The `notify-lead` / `notify-renewal` Edge Functions are still to come.
 
 ## Backend (Supabase — provisioned)
 - **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
