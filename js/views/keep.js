@@ -404,7 +404,11 @@ const REL_STYLE = {
 
 function relationshipMap() {
   const W = 970, H = 420, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
-  const byId = Object.fromEntries(REL_NODES.map((n) => [n.id, n]));
+  const state = {};
+  REL_NODES.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const center = (id) => ({ x: state[id].x + NODE_W / 2, y: state[id].cy });
+
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
@@ -412,35 +416,75 @@ function relationshipMap() {
     ]),
   ]));
 
-  // Edges + labels (under nodes). All edges run left-column -> right-column.
-  REL_EDGES.forEach((e) => {
-    const a = byId[e.from], b = byId[e.to];
-    const sx = a.x + NODE_W, sy = a.cy, tx = b.x, ty = b.cy, mx = (sx + tx) / 2;
-    svg.appendChild(s("path", { d: `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`, fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" }));
-    const lw = e.label.length * 6.4 + 24, ly = (sy + ty) / 2;
-    svg.appendChild(s("rect", { x: mx - lw / 2, y: ly - 13, width: lw, height: 26, rx: 13, fill: "#ffffff", stroke: "#ece7fb" }));
-    svg.appendChild(svgText(e.label, { x: mx, y: ly + 4, "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#5f5880", "font-family": FS }));
+  // Edge paths first (drawn under the nodes); labels are appended after the nodes
+  // so they stay readable on top. Keep refs to reposition during drag.
+  const edgeRefs = REL_EDGES.map((e) => {
+    const path = s("path", { fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" });
+    svg.appendChild(path);
+    const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#ece7fb" });
+    const ltext = svgText(e.label, { "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#5f5880", "font-family": FS });
+    return { ...e, path, lrect, ltext };
   });
+  const updateEdges = () => {
+    edgeRefs.forEach((er) => {
+      const a = center(er.from), b = center(er.to);
+      er.path.setAttribute("d", `M ${a.x} ${a.y} L ${b.x} ${b.y}`);
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, lw = er.label.length * 6.4 + 24;
+      er.lrect.setAttribute("x", mx - lw / 2); er.lrect.setAttribute("y", my - 13); er.lrect.setAttribute("width", lw);
+      er.ltext.setAttribute("x", mx); er.ltext.setAttribute("y", my + 4);
+    });
+  };
 
   REL_NODES.forEach((n) => {
     const o = REL_STYLE[n.kind];
     const interactive = Boolean(n.href);
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}` }
-      : { class: "k-relnode k-relnode--static", "aria-label": `${n.name} (sample)` });
+      : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample)` });
     g.appendChild(s("rect", { x: n.x, y: n.cy - NODE_H / 2, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
     const ax = n.x + 38;
     g.appendChild(s("circle", { cx: ax, cy: n.cy, r: 20, fill: o.avFill }));
     g.appendChild(svgText(n.initials, { x: ax, y: n.cy + 5, "text-anchor": "middle", "font-size": "14", "font-weight": "800", fill: o.avText, "font-family": FD }));
     g.appendChild(svgText(n.name, { x: ax + 30, y: n.cy - 2, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
     g.appendChild(svgText(n.sub, { x: ax + 30, y: n.cy + 16, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
-    if (interactive) {
-      const go = () => { location.hash = n.href; };
-      g.addEventListener("click", go);
-      g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); } });
-    }
+
+    // Pointer-drag (mouse + touch): move the node, edges follow. A press with no
+    // real movement counts as a tap → open (for real entities).
+    let dragging = false, moved = false, sx = 0, sy = 0, bx = 0, by = 0, pid = null;
+    g.addEventListener("pointerdown", (ev) => {
+      dragging = true; moved = false; pid = ev.pointerId;
+      sx = ev.clientX; sy = ev.clientY; bx = state[n.id].x; by = state[n.id].cy;
+      try { g.setPointerCapture(pid); } catch (e) { /* ignore */ }
+      ev.preventDefault();
+    });
+    g.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      const rect = svg.getBoundingClientRect();
+      const scale = rect.width ? W / rect.width : 1;
+      const dxc = ev.clientX - sx, dyc = ev.clientY - sy;
+      if (Math.abs(dxc) + Math.abs(dyc) > 4) moved = true;
+      const nx = clamp(bx + dxc * scale, 0, W - NODE_W);
+      const ny = clamp(by + dyc * scale, NODE_H / 2, H - NODE_H / 2);
+      state[n.id] = { x: nx, cy: ny };
+      g.setAttribute("transform", `translate(${nx - n.x} ${ny - n.cy})`);
+      updateEdges();
+    });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      try { g.releasePointerCapture(pid); } catch (e) { /* ignore */ }
+      if (!moved && interactive) location.hash = n.href;
+    };
+    g.addEventListener("pointerup", end);
+    g.addEventListener("pointercancel", end);
+    if (interactive) g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); location.hash = n.href; } });
+
     svg.appendChild(g);
   });
+
+  // Labels on top of the nodes, then set initial geometry.
+  edgeRefs.forEach((er) => { svg.appendChild(er.lrect); svg.appendChild(er.ltext); });
+  updateEdges();
 
   return el("div", { class: "k-relmap" }, [svg]);
 }
@@ -448,9 +492,9 @@ function relationshipMap() {
 export function renderKeepEntities() {
   const view = page("entities", [
     el("h1", { class: "k-h1", text: "Entities" }),
-    el("p", { class: "k-sub", text: "How you and your businesses connect. Tap a node to open it." }),
+    el("p", { class: "k-sub", text: "How you and your businesses connect. Drag any node to rearrange; tap your own entities to open them." }),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Sample relationships shown for demonstration. Your own entities (Jordan Mercer, Coastal Cafe LLC) open when tapped." }),
+    el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Your own entities (Jordan Mercer, Coastal Cafe LLC) open when tapped; the rest are sample data." }),
   ]);
   mount(view);
 }
