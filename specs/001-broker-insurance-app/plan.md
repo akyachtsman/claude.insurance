@@ -63,7 +63,8 @@ js/
   rules.test.mjs      (extend) cover new/branch cases
   supabase.js         (keep) STUB fetchRules/submitLead; lead shape documented
   content.js          NEW small loader/cache for content/*.json (fetch once, memoize)
-  components/
+  components/         (shipped: layout/hero/sections/card/accordion/trust were
+                      consolidated into a single ui.js; glossary.js + progress.js kept)
     layout.js         site header/nav (active state), footer + trust strip, page chrome
     hero.js           hero(headline, promise, cta, illustration)
     sections.js       sectionBand(), howItWorks(), statStrip(), featureGrid()
@@ -138,7 +139,7 @@ graceful unknown-route fallback (existing try/catch kept).
   disclaimer) + `supabase.js` stub submit + lead shape.
 - Cross-cutting FR-X1…X7 → anonymous (no auth code), US copy, `slate-blue`,
   `textContent`/sprite, reduced-motion, deep routes.
-- Tests SC6/SC7/SC8 → `rules.test.mjs`, html-validate, Playwright S1–S5, reduced-motion check.
+- Tests SC6/SC7/SC8 → `rules.test.mjs`, html-validate, Playwright S1–S8, reduced-motion check.
 
 ## 8. Build sequencing (phase 4 `tasks` will expand; ambition NOT trimmed)
 A deliberate order that keeps the app runnable at each step — *all of it ships in v1*:

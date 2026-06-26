@@ -58,19 +58,35 @@ export function ctaBand({ title, body, cta, href }) {
   ]);
 }
 
+// Hero palette — single source of truth for the inline-SVG composition. These
+// mirror the harbor tokens in css/tokens.css (e.g. ACCENT = --color-accent,
+// SURFACE = --color-surface), duplicated here because CSS var() does not resolve
+// in SVG presentation attributes; GLOW/SKY are the brighter gradient-only tints.
+const HERO = {
+  ACCENT: "#5B3EE6",        // --color-accent
+  ACCENT_DEEP: "#4A2CC9",   // --color-accent-hover
+  ACCENT_LIGHT: "#EFEAFE",  // --color-accent-light
+  BORDER: "#ECE7FB",        // --color-border
+  BORDER_HOVER: "#D7CEF6",  // --color-border-hover
+  SURFACE: "#FFFFFF",       // --color-surface
+  GLOW: "#6C4BF5",          // brighter accent — gradient top only
+  SKY: "#46C2FF",           // cyan — gradient foot only
+  BLUSH: "#FBEAF5",         // soft pink — blob gradient only
+};
+
 // Hero illustration — an owned, geometric inline-SVG composition (shield + home +
-// floating covered-items), colored from the slate-blue palette.
+// floating covered-items), colored from the harbor palette (see HERO above).
 export function heroArt() {
   const svg = s("svg", { viewBox: "0 0 480 420", role: "img", "aria-label": "Illustration of protected home and belongings" });
 
   const defs = s("defs", {}, [
     s("linearGradient", { id: "g-shield", x1: "0", y1: "0", x2: "0", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#6C4BF5" }),
-      s("stop", { offset: "1", "stop-color": "#46C2FF" }),
+      s("stop", { offset: "0", "stop-color": HERO.GLOW }),
+      s("stop", { offset: "1", "stop-color": HERO.SKY }),
     ]),
     s("linearGradient", { id: "g-blob", x1: "0", y1: "0", x2: "1", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#EFEAFE" }),
-      s("stop", { offset: "1", "stop-color": "#FBEAF5" }),
+      s("stop", { offset: "0", "stop-color": HERO.ACCENT_LIGHT }),
+      s("stop", { offset: "1", "stop-color": HERO.BLUSH }),
     ]),
   ]);
   svg.appendChild(defs);
@@ -83,11 +99,11 @@ export function heroArt() {
 
   // Floating "covered item" chips (rounded rects with check marks).
   const chip = (x, y, name) => s("g", { transform: `translate(${x} ${y})` }, [
-    s("rect", { x: 0, y: 0, width: 96, height: 40, rx: 14, fill: "#FFFFFF", stroke: "#ECE7FB", "stroke-width": "1.5" }),
-    s("circle", { cx: 22, cy: 20, r: 11, fill: "#EFEAFE" }),
-    useIcon(name, 14, 15, 13, "#5B3EE6"),
-    s("rect", { x: 40, y: 13, width: 44, height: 5, rx: 2.5, fill: "#D7CEF6" }),
-    s("rect", { x: 40, y: 23, width: 30, height: 5, rx: 2.5, fill: "#ECE7FB" }),
+    s("rect", { x: 0, y: 0, width: 96, height: 40, rx: 14, fill: HERO.SURFACE, stroke: HERO.BORDER, "stroke-width": "1.5" }),
+    s("circle", { cx: 22, cy: 20, r: 11, fill: HERO.ACCENT_LIGHT }),
+    useIcon(name, 14, 15, 13, HERO.ACCENT),
+    s("rect", { x: 40, y: 13, width: 44, height: 5, rx: 2.5, fill: HERO.BORDER_HOVER }),
+    s("rect", { x: 40, y: 23, width: 30, height: 5, rx: 2.5, fill: HERO.BORDER }),
   ]);
   svg.appendChild(chip(20, 92, "auto"));
   svg.appendChild(chip(360, 150, "umbrella"));
@@ -100,18 +116,18 @@ export function heroArt() {
   }));
   svg.appendChild(s("path", {
     d: "M240 96l84 34v58c0 56-37 96-84 110z",
-    fill: "#4A2CC9", opacity: "0.35",
+    fill: HERO.ACCENT_DEEP, opacity: "0.35",
   }));
 
   // House inside the shield.
-  svg.appendChild(s("g", { fill: "none", stroke: "#FFFFFF", "stroke-width": "6", "stroke-linecap": "round", "stroke-linejoin": "round" }, [
+  svg.appendChild(s("g", { fill: "none", stroke: HERO.SURFACE, "stroke-width": "6", "stroke-linecap": "round", "stroke-linejoin": "round" }, [
     s("path", { d: "M204 196l36-30 36 30" }),
     s("path", { d: "M212 192v44h56v-44" }),
     s("path", { d: "M230 236v-22h20v22" }),
   ]));
   // Check seal.
-  svg.appendChild(s("circle", { cx: 296, cy: 232, r: 22, fill: "#FFFFFF" }));
-  svg.appendChild(s("path", { d: "M286 232l7 7 13-14", fill: "none", stroke: "#5B3EE6", "stroke-width": "5", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  svg.appendChild(s("circle", { cx: 296, cy: 232, r: 22, fill: HERO.SURFACE }));
+  svg.appendChild(s("path", { d: "M286 232l7 7 13-14", fill: "none", stroke: HERO.ACCENT, "stroke-width": "5", "stroke-linecap": "round", "stroke-linejoin": "round" }));
 
   return svg;
 }

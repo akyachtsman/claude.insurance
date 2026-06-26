@@ -35,10 +35,10 @@
 .split__col { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-6); }
 .split__head { display: flex; align-items: center; gap: var(--space-3); font-weight: 600; font-size: var(--font-lg); margin-bottom: var(--space-4); }
 .split__head .icon { width: 22px; height: 22px; }
-.split__col--yes .split__head { color: #1f7a4d; }
-.split__col--yes .icon-badge { background: #e3f3ea; color: #1f7a4d; }
+.split__col--yes .split__head { color: var(--color-ok); }
+.split__col--yes .icon-badge { background: var(--color-ok-bg); color: var(--color-ok); }
 .split__col--no .split__head { color: var(--color-danger); }
-.split__col--no .icon-badge { background: #fbe9e7; color: var(--color-danger); }
+.split__col--no .icon-badge { background: var(--color-gap-bg); color: var(--color-danger); }
 .split p { color: var(--color-text-secondary); }
 
 /* ── Coverage explainer layout ───────────────────────────────────────────── */

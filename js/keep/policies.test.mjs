@@ -9,6 +9,7 @@ test("policyKind classifies active / expiring / expired", () => {
   assert.equal(policyKind(263), "ok");
   assert.equal(policyKind(30), "warn");
   assert.equal(policyKind(12), "warn");
+  assert.equal(policyKind(0), "exp");  // due today counts as expired
   assert.equal(policyKind(-1), "exp");
 });
 

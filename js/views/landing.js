@@ -32,7 +32,7 @@ export function renderLanding() {
     }),
   ]);
   mount(view);
-  enhance(document, (n) => String(n));
+  enhance(document); // count-up uses the default String(n) formatter
 }
 
 function hero() {

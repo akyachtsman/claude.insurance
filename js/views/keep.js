@@ -75,7 +75,7 @@ function buildReminderSettings() {
     el("div", { class: "k-setlabel", text: "Remind me before each renewal at:" }),
     el("div", { class: "k-chiprow" }, chips),
     el("div", { class: "k-setrow" }, [
-      el("div", {}, [el("div", { class: "k-setrow__t", text: "Send to" }), el("div", { class: "k-setrow__s", text: "jordan.m@example.com" })]),
+      el("div", {}, [el("div", { class: "k-setrow__t", text: "Send to" }), el("div", { class: "k-setrow__s", text: SAMPLE.user.email })]),
     ]),
     el("p", { class: "k-setnote", text: "Changes apply across all your policies. (Saved to your profile once your account is live.)" }),
   ]);
@@ -162,7 +162,7 @@ function accountMenu() {
       el("span", { class: "k-av" }, [el("span", { text: SAMPLE.user.initials })]),
       el("div", {}, [
         el("div", { class: "k-menu__name", text: SAMPLE.user.name }),
-        el("div", { class: "k-menu__email", text: "jordan.m@example.com" }),
+        el("div", { class: "k-menu__email", text: SAMPLE.user.email }),
       ]),
     ]),
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
@@ -343,7 +343,7 @@ export function renderKeepLogin() {
         el("div", { class: "k-abrand" }, [el("span", { text: "Harborline" }), el("span", { class: "k-tag", text: "The Keep" })]),
         el("h1", { class: "k-atitle", text: "Welcome back" }),
         el("p", { class: "k-asub", text: "Log in to your Keep." }),
-        el("label", { class: "k-fld" }, [el("span", { text: "Email" }), el("input", { attrs: { type: "email", value: "jordan.m@example.com" } })]),
+        el("label", { class: "k-fld" }, [el("span", { text: "Email" }), el("input", { attrs: { type: "email", value: SAMPLE.user.email } })]),
         el("label", { class: "k-fld" }, [el("span", { text: "Password" }), el("input", { attrs: { type: "password", value: "demo-password" } })]),
         el("button", { class: "k-btn k-btn--block", attrs: { type: "button", "data-go": "/keep" } }, [el("span", { text: "Log in" }), icon("arrow-right", { size: 20 })]),
         el("p", { class: "k-ameta" }, [el("a", { text: "Forgot your password?" })]),
@@ -371,7 +371,6 @@ export async function renderKeepDashboard() {
 }
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
-function initialsOf(name) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase(); }
 
 // Inline-SVG relationship graph: "Me" hub on the left, each business on the right,
 // connected by a labeled edge describing the relationship (role · stake). Nodes
@@ -700,7 +699,7 @@ export function renderKeepPolicy(params, id) {
 
   const sched = activeSchedule();
   const reminderText = (reminderPrefs.email && sched.length)
-    ? ` Renewal reminders: ${sched.join(" / ")} days before ${dateFromDays(policy.renewalInDays)}` + (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming")
+    ? ` Renewal reminders: ${sched.join(", ")} days before ${dateFromDays(policy.renewalInDays)}` + (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming")
     : " Renewal reminders are off — turn them on in Settings.";
   const docs = el("div", {}, [
     el("div", {}, (policy.documents || []).map((d) => el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
@@ -813,7 +812,7 @@ export function renderKeepAccount() {
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
-      pg([["Name", SAMPLE.user.name], ["Email", "jordan.m@example.com"], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
+      pg([["Name", SAMPLE.user.name], ["Email", SAMPLE.user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
     ]),
     buildReminderSettings(),
     el("div", { class: "k-btn-row" }, [

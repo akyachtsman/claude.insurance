@@ -10,7 +10,7 @@
 // expiry badges stay meaningful over time.
 
 export const SAMPLE = {
-  user: { name: "Jordan Mercer", initials: "JM" },
+  user: { name: "Jordan Mercer", initials: "JM", email: "jordan.m@example.com" },
   entities: [
     {
       id: "me",
@@ -162,7 +162,7 @@ export const SAMPLE = {
       label: "LLC",
       icon: "briefcase",
       meta: "EIN ••–•••4821 · Food service",
-      relationship: { role: "Managing member", stake: "100%" },
+      relationship: { role: "Managing member", stake: "50%" },
       assets: [
         {
           id: "harbor-dr",

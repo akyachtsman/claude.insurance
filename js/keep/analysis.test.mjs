@@ -4,11 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeAsset, assetStatus, entitySummary } from "./analysis.js";
 import { getEntity, findAsset } from "./data.js";
-
-const SETTINGS = {
-  residential: { umbrellaHomeValue: 750000, umbrellaVehicleCount: 3 },
-  commercial: { workersCompMinEmployees: 1, umbrellaRevenue: 2000000 },
-};
+import { SETTINGS } from "../test-settings.mjs";
 
 test("home above the umbrella threshold shows umbrella as the gap; flood is in place", () => {
   const { asset } = findAsset("home-marina");
