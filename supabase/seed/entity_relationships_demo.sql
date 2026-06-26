@@ -1,8 +1,8 @@
 -- Demo seed (NOT a migration): related-party entities and relationships for the
 -- sample client Jordan Mercer, mirroring REL_NODES / REL_EDGES in js/views/keep.js.
 -- Run manually against the project; fixed UUIDs keep it idempotent.
--- Depends on the base demo rows: profile 1111… (Jordan), entity 2222… (you,
--- personal) and entity 2333… (Coastal Cafe LLC, business).
+-- Depends on the base demo rows in base_demo.sql (run that FIRST): profile 1111…
+-- (Jordan), entity 2222… (you, personal) and entity 2333… (Coastal Cafe LLC).
 
 -- Related-party entities owned by Jordan (1111…).
 insert into public.entities (id, owner, kind, name, label, subtype) values

@@ -24,6 +24,8 @@ export function icon(name, opts = {}) {
   });
   const use = s("use");
   use.setAttribute("href", `#icon-${id}`);
+  // Legacy fallback: older Safari resolves <use> only via the xlink namespace.
+  use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", `#icon-${id}`);
   svg.appendChild(use);
   return svg;
 }

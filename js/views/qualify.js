@@ -104,7 +104,9 @@ export async function renderQualify(params) {
     } else if (!state.locked) {
       state.domain = null; // back to the branch chooser
     } else {
-      history.back();
+      // Locked flow entered from a coverage page — return to that section
+      // (deterministic; history.back() would dead-end on a deep link).
+      go(`#/${state.domain}`);
       return;
     }
     render();

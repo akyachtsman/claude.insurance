@@ -2,11 +2,13 @@
 // No Date use here so it's deterministic/testable; the view supplies the actual
 // calendar date for display. "renewalInDays" is days from now (negative = past).
 
+// Default lead-times (days before renewal) to send reminders on. Mirrored by the
+// profiles.reminder_schedule column default in supabase/migrations — keep in sync.
 export const REMINDER_SCHEDULE = [60, 30, 14, 7, 1];
 
 // Badge state for a policy based on days until renewal.
 export function policyKind(renewalInDays) {
-  if (renewalInDays < 0) return "exp";   // expired / lapsed
+  if (renewalInDays <= 0) return "exp";   // due today / expired / lapsed
   if (renewalInDays <= 30) return "warn"; // expiring soon
   return "ok";                            // active
 }

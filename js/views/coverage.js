@@ -17,8 +17,8 @@ export async function renderCoverage(params, id) {
     covHero(section, topic),
     el("div", { class: "cov-body" }, [
       coversSection(topic),
-      prose("Who typically needs it", topic.whoNeeds, "life"),
-      prose("What to consider", topic.consider, "spark"),
+      prose("Who typically needs it", topic.whoNeeds),
+      prose("What to consider", topic.consider),
       topic.scenario ? scenario(topic.scenario) : null,
       related(data, section, topic),
     ]),
@@ -74,7 +74,7 @@ function coversSection(topic) {
   ]);
 }
 
-function prose(title, body, ebIcon) {
+function prose(title, body) {
   if (!body) return null;
   return el("section", { class: "cov-section reveal" }, [
     el("h2", { class: "cov-section__title", text: title }),

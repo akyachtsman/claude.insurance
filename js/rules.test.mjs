@@ -4,11 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeNeeds } from "./rules.js";
-
-const SETTINGS = {
-  residential: { umbrellaHomeValue: 750000, umbrellaVehicleCount: 3 },
-  commercial: { workersCompMinEmployees: 1, umbrellaRevenue: 2000000 },
-};
+import { SETTINGS } from "./test-settings.mjs";
 
 const ids = (needs) => needs.map((n) => n.id);
 
