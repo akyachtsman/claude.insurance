@@ -11,7 +11,7 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 ## Project Overview
 - **Project name:** claude.insurance
 - **Live URL:** https://akyachtsman.github.io/claude.insurance/
-- **Stack:** Static SPA — plain HTML + vanilla ES modules (no framework/build), CSS design tokens; Supabase (Postgres + RLS + Edge Functions) for leads & broker-editable rule settings; hosted on GitHub Pages. *(Supabase provisioning deferred — front-end built first against a stub client.)*
+- **Stack:** Static SPA — plain HTML + vanilla ES modules (no framework/build), CSS design tokens; Supabase (Postgres + RLS + Auth + Edge Functions) for leads, broker-editable rule settings, and the Keep portal; hosted on GitHub Pages. *(Live: `js/supabase.js` runs the real `@supabase/supabase-js` client — public path anonymous, the Keep authenticated.)*
 - **Branch policy:** Develop on a `claude/<name>` feature branch; PRs target `main`
 
 ## Design Theme
@@ -27,7 +27,7 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - `js/views/` — `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`, and `keep.js` (the authenticated portal: login, dashboard, entity detail, add-asset, coverage analysis)
 - **The Keep (v2, demo/stub):** invite-only client portal — entities (`Me` default + businesses) → assets → coverage analysis. `js/keep/data.js` (sample entities/assets, STUB), `js/keep/analysis.js` (asset → coverage analysis; reuses `rules.js` for risk-based recommendations; tests `js/keep/analysis.test.mjs`), `css/keep.css` (Direction C portal styles, `k-` prefixed). No real auth/persistence yet — a demo ribbon makes that explicit; reachable by URL, unlinked from the public nav.
 - `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
-- `js/supabase.js` — thin data client; STUB mode until Supabase is provisioned, then anon-key REST (service-role only in Edge Function)
+- `js/supabase.js` — live data client (`@supabase/supabase-js` from esm.sh): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; `js/keep/data.js` remains as the offline test fixture + `ASSET_META`. Service-role key never shipped.
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
 - `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the relationship demo seed. The `notify-lead` / `notify-renewal` Edge Functions are still to come.
@@ -37,7 +37,7 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - **Auth:** Supabase Auth (broker invite + password). RLS keys on `auth.uid()`.
 - **Write model:** clients have full CRUD on their **own** entities/assets; `policies` are **read-only to clients** (broker-written via service-role, the system of record).
 - **Keys:** publishable/anon key → client (safe in browser, RLS is the guard); `service_role` key → `DB_SERVICE_KEY` GitHub secret, server-side only. `DB_URL` = the project URL.
-- **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end still runs on the STUB client until `js/supabase.js` is wired to the live project — that's the next step.
+- **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end is wired to the live project; the Keep reads/writes real data under RLS. A demo client account is seeded for testing: `jordan.m@example.com` / `keep-demo-2026` (prefilled on the login screen).
 
 ## Required Commands
 | Purpose | Command |
@@ -49,6 +49,8 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
 - **Secrets stay server-side:** the email provider key lives only in the `notify-lead` Edge Function. No service-role key is ever shipped to the client.
 - **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
+- **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
+- **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.

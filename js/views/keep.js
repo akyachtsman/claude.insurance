@@ -1,27 +1,34 @@
-// views/keep.js — "The Keep" authenticated portal (Direction C, demo/stub).
+// views/keep.js — "The Keep" authenticated portal (Direction C).
 // Renders login, dashboard (entities + nested assets), entity detail, add-asset,
-// and the asset coverage-analysis page. STUB: sample data, no real auth — a
-// demo ribbon makes that explicit. Routing lives in main.js (#/keep/*).
+// and the asset coverage-analysis page. Reads/writes live Supabase data (loaded
+// by the route guard in main.js); RLS scopes everything to the signed-in client.
 
 import { el, mount } from "../dom.js";
+import { go } from "../main.js";
 import { icon } from "../icons.js";
 import { s } from "../svg.js";
 import { getRuleDefaults } from "../content.js";
-import { SAMPLE, getEntity, findAsset, findPolicy, ASSET_META } from "../keep/data.js";
+import { ASSET_META } from "../keep/data.js";
+import {
+  getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
+  getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
+  invalidate, ensureData, DEMO_CREDENTIAL,
+} from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, REMINDER_SCHEDULE } from "../keep/policies.js";
 
-// In-memory reminder preferences (STUB — persisted to the user's profile once the
-// backend is wired). Module singleton, so changes survive navigation in-session.
-const reminderPrefs = { email: true, schedule: [...REMINDER_SCHEDULE] };
+// Reminder preferences live on the user's profile (loaded with the Keep data).
+// activeSchedule reflects the saved set; changes persist via savePrefs().
 function activeSchedule() {
-  return REMINDER_SCHEDULE.filter((d) => reminderPrefs.schedule.includes(d));
+  const p = getPrefs();
+  return REMINDER_SCHEDULE.filter((d) => p.schedule.includes(d));
 }
 
 // Status banner shown on the policies list — reflects the saved preference and
 // links to Settings (the controls live there, not here).
 function reminderBanner() {
-  if (!reminderPrefs.email || !activeSchedule().length) {
+  const p = getPrefs();
+  if (!p.email || !activeSchedule().length) {
     return el("div", { class: "k-remind" }, [
       el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
       el("p", {}, [el("b", { text: "Renewal reminders are off. " }), el("span", { text: "Turn them on in " }), el("a", { attrs: { href: "#/keep/account" }, text: "Settings" }), el("span", { text: "." })]),
@@ -31,39 +38,44 @@ function reminderBanner() {
     el("span", { class: "k-cic" }, [icon("bell", { size: 22 })]),
     el("p", {}, [
       el("b", { text: "Renewal reminders are on. " }),
-      el("span", { text: `We email ${SAMPLE.user.name.split(" ")[0]} ${activeSchedule().join(", ")} days before each renewal · ` }),
+      el("span", { text: `We email ${getUser().name.split(" ")[0]} ${activeSchedule().join(", ")} days before each renewal · ` }),
       el("a", { attrs: { href: "#/keep/account" }, text: "Manage" }),
     ]),
   ]);
 }
 
-// Interactive reminder-preference controls for the Account page.
+// Interactive reminder-preference controls for the Account page. Mutates the
+// loaded prefs object in place and persists each change to the profile.
 function buildReminderSettings() {
+  const p = getPrefs();
+  const persist = () => { savePrefs({ email: p.email, schedule: p.schedule }); };
   const chips = REMINDER_SCHEDULE.map((d) => {
-    const chip = el("button", { class: `k-chiptog${reminderPrefs.schedule.includes(d) ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(reminderPrefs.schedule.includes(d)) } }, [el("span", { text: `${d} day${d === 1 ? "" : "s"}` })]);
+    const chip = el("button", { class: `k-chiptog${p.schedule.includes(d) ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(p.schedule.includes(d)) } }, [el("span", { text: `${d} day${d === 1 ? "" : "s"}` })]);
     chip.addEventListener("click", () => {
-      if (!reminderPrefs.email) return;
-      const i = reminderPrefs.schedule.indexOf(d);
-      if (i >= 0) reminderPrefs.schedule.splice(i, 1); else reminderPrefs.schedule.push(d);
-      const on = reminderPrefs.schedule.includes(d);
+      if (!p.email) return;
+      const i = p.schedule.indexOf(d);
+      if (i >= 0) p.schedule.splice(i, 1); else p.schedule.push(d);
+      const on = p.schedule.includes(d);
       chip.classList.toggle("on", on);
       chip.setAttribute("aria-pressed", String(on));
+      persist();
     });
     return chip;
   });
   const setChipsEnabled = (enabled) => chips.forEach((c) => { if (enabled) c.removeAttribute("disabled"); else c.setAttribute("disabled", "disabled"); });
-  setChipsEnabled(reminderPrefs.email);
+  setChipsEnabled(p.email);
 
-  const sw = el("button", { class: `k-switch${reminderPrefs.email ? " on" : ""}`, attrs: { type: "button", role: "switch", "aria-checked": String(reminderPrefs.email), "aria-label": "Email reminders" } }, [
+  const sw = el("button", { class: `k-switch${p.email ? " on" : ""}`, attrs: { type: "button", role: "switch", "aria-checked": String(p.email), "aria-label": "Email reminders" } }, [
     el("span", { class: "k-switch__track" }),
-    el("span", { class: "k-switch__label", text: reminderPrefs.email ? "On" : "Off" }),
+    el("span", { class: "k-switch__label", text: p.email ? "On" : "Off" }),
   ]);
   sw.addEventListener("click", () => {
-    reminderPrefs.email = !reminderPrefs.email;
-    sw.classList.toggle("on", reminderPrefs.email);
-    sw.setAttribute("aria-checked", String(reminderPrefs.email));
-    sw.querySelector(".k-switch__label").textContent = reminderPrefs.email ? "On" : "Off";
-    setChipsEnabled(reminderPrefs.email);
+    p.email = !p.email;
+    sw.classList.toggle("on", p.email);
+    sw.setAttribute("aria-checked", String(p.email));
+    sw.querySelector(".k-switch__label").textContent = p.email ? "On" : "Off";
+    setChipsEnabled(p.email);
+    persist();
   });
 
   return el("div", { class: "k-grp" }, [
@@ -75,9 +87,9 @@ function buildReminderSettings() {
     el("div", { class: "k-setlabel", text: "Remind me before each renewal at:" }),
     el("div", { class: "k-chiprow" }, chips),
     el("div", { class: "k-setrow" }, [
-      el("div", {}, [el("div", { class: "k-setrow__t", text: "Send to" }), el("div", { class: "k-setrow__s", text: SAMPLE.user.email })]),
+      el("div", {}, [el("div", { class: "k-setrow__t", text: "Send to" }), el("div", { class: "k-setrow__s", text: getUser().email })]),
     ]),
-    el("p", { class: "k-setnote", text: "Changes apply across all your policies. (Saved to your profile once your account is live.)" }),
+    el("p", { class: "k-setnote", text: "Changes save to your profile automatically." }),
   ]);
 }
 
@@ -92,7 +104,7 @@ function money(v) {
 function ribbon() {
   return el("div", { class: "k-ribbon" }, [
     icon("lock", { size: 15 }),
-    el("span", { text: "Demo — sample data, no real login" }),
+    el("span", { text: "Demo account — live data, secured by row-level security" }),
   ]);
 }
 
@@ -129,7 +141,7 @@ function popover(trigger, panel, alignRight) {
 // Notifications come from policies that are expiring or lapsed (the renewal signal).
 function buildNotifications() {
   const out = [];
-  for (const ent of SAMPLE.entities)
+  for (const ent of getEntities())
     for (const a of ent.assets)
       for (const p of a.policies || []) {
         const k = policyKind(p.renewalInDays);
@@ -156,22 +168,30 @@ function notifMenu() {
 }
 
 function accountMenu() {
-  const trigger = el("button", { class: "k-av k-av--btn", attrs: { type: "button", "aria-label": "Account menu" } }, [el("span", { text: SAMPLE.user.initials })]);
+  const user = getUser();
+  const trigger = el("button", { class: "k-av k-av--btn", attrs: { type: "button", "aria-label": "Account menu" } }, [el("span", { text: user.initials })]);
   const panel = el("div", { class: "k-menu" }, [
     el("div", { class: "k-menu__head" }, [
-      el("span", { class: "k-av" }, [el("span", { text: SAMPLE.user.initials })]),
+      el("span", { class: "k-av" }, [el("span", { text: user.initials })]),
       el("div", {}, [
-        el("div", { class: "k-menu__name", text: SAMPLE.user.name }),
-        el("div", { class: "k-menu__email", text: SAMPLE.user.email }),
+        el("div", { class: "k-menu__name", text: user.name }),
+        el("div", { class: "k-menu__email", text: user.email }),
       ]),
     ]),
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
     el("a", { attrs: { href: "#/keep/security" } }, [icon("shield", { size: 18 }), el("span", { text: "Security & privacy" })]),
     el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
     el("div", { class: "k-menu__sep" }),
-    el("button", { class: "k-menu__item k-menu__danger", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
+    signOutButton("k-menu__item k-menu__danger"),
   ]);
   return popover(trigger, panel, true);
+}
+
+// Sign out of Supabase Auth, clear the cache, return to login.
+function signOutButton(cls) {
+  const btn = el("button", { class: cls, attrs: { type: "button" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]);
+  btn.addEventListener("click", async () => { await signOut(); go("#/keep/login"); });
+  return btn;
 }
 
 function appBar(active) {
@@ -326,85 +346,103 @@ function joinDots(bits) {
 
 function entityPanel(entity, settings) {
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
+  const body = entity.assets.length
+    ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
+    : el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add the first asset" })]);
   return el("section", { class: `k-panel ${variant}` }, [
     entityHead(entity, settings, "#/keep/add-asset"),
     el("div", { class: "k-lbl", text: "Assets in this entity" }),
-    el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings))),
+    body,
   ]);
 }
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
-  const view = el("div", {}, [
-    ribbon(),
-    el("div", { class: "k-authwrap" }, [
-      el("div", { class: "k-authcard" }, [
-        el("div", { class: "k-bigshield" }, [icon("shield", { size: 34 })]),
-        el("div", { class: "k-abrand" }, [el("span", { text: "Harborline" }), el("span", { class: "k-tag", text: "The Keep" })]),
-        el("h1", { class: "k-atitle", text: "Welcome back" }),
-        el("p", { class: "k-asub", text: "Log in to your Keep." }),
-        el("label", { class: "k-fld" }, [el("span", { text: "Email" }), el("input", { attrs: { type: "email", value: SAMPLE.user.email } })]),
-        el("label", { class: "k-fld" }, [el("span", { text: "Password" }), el("input", { attrs: { type: "password", value: "demo-password" } })]),
-        el("button", { class: "k-btn k-btn--block", attrs: { type: "button", "data-go": "/keep" } }, [el("span", { text: "Log in" }), icon("arrow-right", { size: 20 })]),
-        el("p", { class: "k-ameta" }, [el("a", { text: "Forgot your password?" })]),
-        el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
-      ]),
-    ]),
+  const emailInput = el("input", { attrs: { type: "email", value: DEMO_CREDENTIAL.email, autocomplete: "username" } });
+  const pwInput = el("input", { attrs: { type: "password", value: DEMO_CREDENTIAL.password, autocomplete: "current-password" } });
+  const error = el("p", { class: "k-error", attrs: { role: "alert" } });
+  const btn = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Log in" }), icon("arrow-right", { size: 20 })]);
+
+  async function submit() {
+    error.textContent = "";
+    btn.setAttribute("disabled", "disabled");
+    btn.querySelector("span").textContent = "Signing in…";
+    const res = await signIn(emailInput.value.trim(), pwInput.value);
+    if (res.ok) { go("#/keep"); return; }
+    error.textContent = res.error || "Could not sign in. Check your email and password.";
+    btn.removeAttribute("disabled");
+    btn.querySelector("span").textContent = "Log in";
+  }
+
+  const form = el("form", { class: "k-authcard" }, [
+    el("div", { class: "k-bigshield" }, [icon("shield", { size: 34 })]),
+    el("div", { class: "k-abrand" }, [el("span", { text: "Harborline" }), el("span", { class: "k-tag", text: "The Keep" })]),
+    el("h1", { class: "k-atitle", text: "Welcome back" }),
+    el("p", { class: "k-asub", text: "Log in to your Keep." }),
+    el("label", { class: "k-fld" }, [el("span", { text: "Email" }), emailInput]),
+    el("label", { class: "k-fld" }, [el("span", { text: "Password" }), pwInput]),
+    btn,
+    error,
+    el("p", { class: "k-ameta" }, [el("a", { text: "Forgot your password?" })]),
+    el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
   ]);
-  mount(view);
+  form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+
+  mount(el("div", {}, [ribbon(), el("div", { class: "k-authwrap" }, [form])]));
 }
 
 export async function renderKeepDashboard() {
   const settings = await getRuleDefaults();
   const view = page("dashboard", [
-    el("h1", { class: "k-h1", text: `Welcome back, ${SAMPLE.user.name.split(" ")[0]}` }),
+    el("h1", { class: "k-h1", text: `Welcome back, ${getUser().name.split(" ")[0]}` }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
     el("div", { class: "k-privacy" }, [
       icon("lock", { size: 16 }),
       el("span", { text: "Encrypted and private — only you and your broker can see this." }),
       el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
     ]),
-    ...SAMPLE.entities.map((e) => entityPanel(e, settings)),
-    el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
+    ...getEntities().map((e) => entityPanel(e, settings)),
+    el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
   ]);
   mount(view);
 }
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
-// Inline-SVG relationship graph: "Me" hub on the left, each business on the right,
-// connected by a labeled edge describing the relationship (role · stake). Nodes
-// are keyboard-focusable and navigate to the entity.
-// Relationship graph. Nodes positioned for a clean two-column layout (people on
-// the left, entities on the right). Real user entities (with href) open their
-// detail; the rest are sample related parties shown to illustrate the map.
-const REL_NODES = [
-  { id: "alex", x: 30, cy: 70, kind: "person", name: "Alex Mercer", sub: "Spouse", initials: "AM" },
-  { id: "me", x: 30, cy: 240, kind: "me", name: "Jordan Mercer", sub: "You · personal", initials: "ME", href: "#/keep/entity/me" },
-  { id: "childtrust", x: 390, cy: 120, kind: "trust", name: "Children's Trust", sub: "Irrevocable trust", initials: "CT" },
-  { id: "famtrust", x: 390, cy: 340, kind: "trust", name: "Family Trust", sub: "Revocable trust", initials: "FT" },
-  { id: "cafe", x: 740, cy: 120, kind: "biz", name: "Coastal Cafe LLC", sub: "LLC", initials: "CC", href: "#/keep/entity/coastal-cafe" },
-  { id: "holdings", x: 740, cy: 340, kind: "biz", name: "Mercer Holdings", sub: "LLC · real estate", initials: "MH" },
-];
-const REL_EDGES = [
-  { from: "me", to: "cafe", label: "Managing member · 50%" },
-  { from: "alex", to: "cafe", label: "Member · 40%" },
-  { from: "childtrust", to: "cafe", label: "Holds · 10%" },
-  { from: "me", to: "childtrust", label: "Trustee" },
-  { from: "me", to: "famtrust", label: "Trustee" },
-  { from: "famtrust", to: "holdings", label: "Owns · 100%" },
-];
+// Inline-SVG relationship graph, built live from the entity_relationships table.
+// People (you + related individuals) sit on the left, trusts in the middle,
+// businesses on the right; each edge is labeled with the role (and stake). Nodes
+// for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
   person: { fill: "#fff", avFill: "#efeafe", avText: "#5b3ee6", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
   biz: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
   trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
 };
+// DB entity kind → REL_STYLE key (personal renders as the gradient "me" node).
+function relStyleKey(kind) {
+  return kind === "personal" ? "me" : kind === "business" ? "biz" : kind === "trust" ? "trust" : "person";
+}
+// Column-based auto-layout: people col 0, trusts col 1, businesses col 2.
+const REL_COL = { me: 0, person: 0, trust: 1, biz: 2 };
+const REL_X = [30, 390, 740];
+function relLayout(H) {
+  const data = getMapData();
+  const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n.kind) }));
+  const cols = [[], [], []];
+  nodes.forEach((n) => cols[REL_COL[n.sk]].push(n));
+  cols.forEach((list, c) => {
+    const k = list.length || 1;
+    list.forEach((n, i) => { n.x = REL_X[c]; n.cy = Math.round(70 + (i + 0.5) * ((H - 140) / k)); });
+  });
+  return { nodes, edges: data.edges };
+}
 
 function relationshipMap() {
   const W = 970, H = 420, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+  const { nodes, edges } = relLayout(H);
   const state = {};
-  REL_NODES.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
+  nodes.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const center = (id) => ({ x: state[id].x + NODE_W / 2, y: state[id].cy });
 
@@ -417,7 +455,7 @@ function relationshipMap() {
 
   // Edge paths first (drawn under the nodes); labels are appended after the nodes
   // so they stay readable on top. Keep refs to reposition during drag.
-  const edgeRefs = REL_EDGES.map((e) => {
+  const edgeRefs = edges.map((e) => {
     const path = s("path", { fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" });
     svg.appendChild(path);
     const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#ece7fb" });
@@ -434,8 +472,8 @@ function relationshipMap() {
     });
   };
 
-  REL_NODES.forEach((n) => {
-    const o = REL_STYLE[n.kind];
+  nodes.forEach((n) => {
+    const o = REL_STYLE[n.sk];
     const interactive = Boolean(n.href);
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}` }
@@ -493,7 +531,7 @@ export function renderKeepEntities() {
     el("h1", { class: "k-h1", text: "Entities" }),
     el("p", { class: "k-sub", text: "How you and your businesses connect. Drag any node to rearrange; tap your own entities to open them." }),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Your own entities (Jordan Mercer, Coastal Cafe LLC) open when tapped; the rest are sample data." }),
+    el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
   ]);
   mount(view);
 }
@@ -591,33 +629,129 @@ export async function renderKeepAsset(params, id) {
 
 const ASSET_CHOICES = [
   { type: "home", label: "Home or condo", sub: "You own and live here", icon: "home" },
-  { type: "rental", label: "Rental property", sub: "You rent it to others", icon: "commercial-property" },
-  { type: "vehicle", label: "Vehicle", sub: "Car, truck or motorcycle", icon: "auto" },
+  { type: "home", label: "Rental property", sub: "You rent it to others", icon: "commercial-property" },
+  { type: "auto", label: "Vehicle", sub: "Car, truck or motorcycle", icon: "auto" },
   { type: "watercraft", label: "Watercraft", sub: "Boat, jet ski or yacht", icon: "boat" },
   { type: "valuables", label: "Jewelry & valuables", sub: "Art, jewelry, collectibles", icon: "gem" },
   { type: "business", label: "Business", sub: "A company you own or run", icon: "briefcase" },
 ];
 
+// Progress header with a working Back control (onBack is a callback).
+function kProgress(stepNum, totalSteps, onBack) {
+  const back = el("button", { class: "k-back", attrs: { type: "button" } }, [icon("arrow-right", { size: 18, class: "icon-flip" }), el("span", { text: "Back" })]);
+  back.addEventListener("click", onBack);
+  return el("div", { class: "k-progress" }, [
+    el("div", { class: "k-progress__top" }, [back, el("span", { class: "k-progress__text", text: `Step ${stepNum} of ${totalSteps}` })]),
+    el("div", { class: "k-track" }, [el("i", { attrs: { style: `width:${Math.round((stepNum / totalSteps) * 100)}%` } })]),
+  ]);
+}
+
+// Add asset: step 1 pick a type, step 2 name it + pick the entity, then write.
 export function renderKeepAddAsset() {
-  const view = page("entities", [
-    el("div", { class: "k-progress" }, [
-      el("div", { class: "k-progress__top" }, [
-        el("a", { class: "k-back", attrs: { href: "#/keep" } }, [icon("arrow-right", { size: 18, class: "icon-flip" }), el("span", { text: "Back" })]),
-        el("span", { class: "k-progress__text", text: "Step 1 of 3" }),
-      ]),
-      el("div", { class: "k-track" }, [el("i", { attrs: { style: "width:33%" } })]),
-    ]),
-    el("h1", { class: "k-h1", text: "What would you like to add?" }),
-    el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
-    el("div", { class: "k-choices" }, ASSET_CHOICES.map((c) =>
-      el("button", { class: "k-choice", attrs: { type: "button", "data-go": "/keep" } }, [
-        el("span", { class: "k-cic" }, [icon(c.icon, { size: 26 })]),
-        el("span", { class: "k-choice__label" }, [el("span", { text: c.label }), el("small", { text: c.sub })]),
-        icon("arrow-right", { size: 22, class: "k-choice__arrow" }),
-      ])
-    )),
-  ], { narrow: true });
-  mount(view);
+  const entities = getEntities();
+  const state = { step: 1, type: null, label: null };
+
+  function chooseType(c) {
+    if (c.type === "business") { go("#/keep/add-entity"); return; }
+    state.type = c.type; state.label = c.label; state.step = 2; render();
+  }
+
+  function stepOne() {
+    return page("entities", [
+      kProgress(1, 2, () => go("#/keep")),
+      el("h1", { class: "k-h1", text: "What would you like to add?" }),
+      el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
+      el("div", { class: "k-choices" }, ASSET_CHOICES.map((c) => {
+        const btn = el("button", { class: "k-choice", attrs: { type: "button" } }, [
+          el("span", { class: "k-cic" }, [icon(c.icon, { size: 26 })]),
+          el("span", { class: "k-choice__label" }, [el("span", { text: c.label }), el("small", { text: c.sub })]),
+          icon("arrow-right", { size: 22, class: "k-choice__arrow" }),
+        ]);
+        btn.addEventListener("click", () => chooseType(c));
+        return btn;
+      })),
+    ], { narrow: true });
+  }
+
+  function stepTwo() {
+    const lower = state.label.toLowerCase();
+    const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. 123 Marina Way" } });
+    const valueInput = el("input", { attrs: { type: "number", min: "0", placeholder: "Estimated value (optional)" } });
+    const entSelect = el("select", {}, entities.map((e) => el("option", { attrs: { value: e.id }, text: e.name })));
+    const error = el("p", { class: "k-error", attrs: { role: "alert" } });
+    const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: `Add ${lower}` }), icon("arrow-right", { size: 20 })]);
+
+    async function create() {
+      const name = nameInput.value.trim();
+      if (!name) { error.textContent = "Give this asset a name."; return; }
+      submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
+      const res = await addAsset({
+        entityId: entSelect.value, type: state.type, name,
+        meta: state.label, value: valueInput.value ? Number(valueInput.value) : null,
+      });
+      if (!res.ok) {
+        error.textContent = res.error || "Could not add the asset.";
+        submit.removeAttribute("disabled"); submit.querySelector("span").textContent = `Add ${lower}`;
+        return;
+      }
+      await ensureData();
+      go(`#/keep/asset/${res.id}`);
+    }
+
+    const form = el("form", {}, [
+      el("h1", { class: "k-h1", text: `Add a ${lower}` }),
+      el("p", { class: "k-sub", text: "Just the basics for now — your broker fills in the policy details." }),
+      el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
+      el("label", { class: "k-fld" }, [el("span", { text: "Estimated value" }), valueInput]),
+      entities.length > 1 ? el("label", { class: "k-fld" }, [el("span", { text: "Belongs to" }), entSelect]) : null,
+      submit, error,
+    ]);
+    form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
+    return page("entities", [kProgress(2, 2, () => { state.step = 1; render(); }), form], { narrow: true });
+  }
+
+  function render() { mount(state.step === 1 ? stepOne() : stepTwo()); }
+  render();
+}
+
+// Add entity: a small form to create a business or trust you manage.
+export function renderKeepAddEntity() {
+  const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. Coastal Cafe LLC" } });
+  const kindSelect = el("select", {}, [
+    el("option", { attrs: { value: "business" }, text: "Business (LLC, Corp, etc.)" }),
+    el("option", { attrs: { value: "trust" }, text: "Trust" }),
+  ]);
+  const subInput = el("input", { attrs: { type: "text", placeholder: "e.g. LLC (optional)" } });
+  const error = el("p", { class: "k-error", attrs: { role: "alert" } });
+  const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Add entity" }), icon("arrow-right", { size: 20 })]);
+
+  async function create() {
+    const name = nameInput.value.trim();
+    if (!name) { error.textContent = "Give this entity a name."; return; }
+    submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
+    const res = await addEntity({ kind: kindSelect.value, name, subtype: subInput.value.trim() || null });
+    if (!res.ok) {
+      error.textContent = res.error || "Could not add the entity.";
+      submit.removeAttribute("disabled"); submit.querySelector("span").textContent = "Add entity";
+      return;
+    }
+    await ensureData();
+    go("#/keep");
+  }
+
+  const form = el("form", {}, [
+    el("h1", { class: "k-h1", text: "Add a business entity" }),
+    el("p", { class: "k-sub", text: "Create a company or trust to organize its assets and coverage." }),
+    el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
+    el("label", { class: "k-fld" }, [el("span", { text: "Type" }), kindSelect]),
+    el("label", { class: "k-fld" }, [el("span", { text: "Subtype" }), subInput]),
+    submit, error,
+  ]);
+  form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
+  mount(page("entities", [
+    el("div", { class: "k-backrow" }, [el("a", { class: "k-back", attrs: { href: "#/keep" } }, [icon("arrow-right", { size: 18, class: "icon-flip" }), el("span", { text: "Back to dashboard" })])]),
+    form,
+  ], { narrow: true }));
 }
 
 export function renderKeepPolicy(params, id) {
@@ -698,7 +832,7 @@ export function renderKeepPolicy(params, id) {
   }
 
   const sched = activeSchedule();
-  const reminderText = (reminderPrefs.email && sched.length)
+  const reminderText = (getPrefs().email && sched.length)
     ? ` Renewal reminders: ${sched.join(", ")} days before ${dateFromDays(policy.renewalInDays)}` + (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming")
     : " Renewal reminders are off — turn them on in Settings.";
   const docs = el("div", {}, [
@@ -716,7 +850,7 @@ export function renderKeepDocuments() {
   // found the same way it's filed.
   const entityBlocks = [];
   let total = 0;
-  for (const ent of SAMPLE.entities) {
+  for (const ent of getEntities()) {
     const assetBlocks = [];
     let entCount = 0;
     for (const a of ent.assets) {
@@ -806,18 +940,17 @@ export function renderKeepDocuments() {
 
 export function renderKeepAccount() {
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
+  const user = getUser();
   const view = page("account", [
     backLink("#/keep", "dashboard"),
     el("h1", { class: "k-h1", text: "Account" }),
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
-      pg([["Name", SAMPLE.user.name], ["Email", SAMPLE.user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
+      pg([["Name", user.name], ["Email", user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
     ]),
     buildReminderSettings(),
-    el("div", { class: "k-btn-row" }, [
-      el("button", { class: "k-btn k-btn--ghost", attrs: { type: "button", "data-go": "/keep/login" } }, [icon("lock", { size: 18 }), el("span", { text: "Sign out" })]),
-    ]),
+    el("div", { class: "k-btn-row" }, [signOutButton("k-btn k-btn--ghost")]),
   ], { narrow: true });
   mount(view);
 }

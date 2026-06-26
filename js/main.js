@@ -10,9 +10,10 @@ import { renderQualify } from "./views/qualify.js";
 import { renderSummary } from "./views/summary.js";
 import {
   renderKeepLogin, renderKeepDashboard, renderKeepEntities, renderKeepEntity,
-  renderKeepAsset, renderKeepAddAsset, renderKeepPolicy,
+  renderKeepAsset, renderKeepAddAsset, renderKeepAddEntity, renderKeepPolicy,
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./views/keep.js";
+import { getSession, ensureData } from "./supabase.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -68,15 +69,23 @@ async function dispatch(parts, params) {
 
 // The Keep sub-router: #/keep, #/keep/login, #/keep/add-asset,
 // #/keep/entity/:id, #/keep/asset/:id.
-function dispatchKeep(rest) {
+// Guards every route except login behind a Supabase Auth session, and loads the
+// user's data once before rendering so the views can read it synchronously.
+async function dispatchKeep(rest) {
   const [sub, id] = rest;
+  if (sub === "login") return renderKeepLogin();
+
+  const session = await getSession();
+  if (!session) return renderKeepLogin();
+  await ensureData();
+
   switch (sub) {
     case undefined:
       return renderKeepDashboard();
-    case "login":
-      return renderKeepLogin();
     case "add-asset":
       return renderKeepAddAsset();
+    case "add-entity":
+      return renderKeepAddEntity();
     case "entities":
       return renderKeepEntities();
     case "entity":

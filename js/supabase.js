@@ -1,53 +1,321 @@
-// supabase.js — thin data client.
+// supabase.js — live data client for both the public site and the Keep.
 //
-// Front-end-first mode: until a Supabase project is provisioned (task D1), this
-// runs in STUB mode — it serves seed rule thresholds from content/rule-defaults.json
-// and resolves lead submission locally without a network call. When config is filled
-// in, it switches to real REST calls against Supabase using only the anon
-// (publishable) key. The service-role key is NEVER used here — broker email is sent
-// by the notify-lead Edge Function, server-side.
+// Public path (anonymous): fetchRules + submitLead, anon/publishable key only.
+// Keep path (authenticated): Supabase Auth session + per-user reads/writes for
+// entities, assets, policies, relationships and reminder prefs — all guarded by
+// RLS (owner = auth.uid()). The service-role key is NEVER used in the browser.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ASSET_META } from "./keep/data.js";
 
 const CONFIG = {
-  // Filled in at task D1. Leave empty to stay in stub mode.
-  url: "",
-  anonKey: "",
+  url: "https://bdsegmjcgfmgzuxwiplj.supabase.co",
+  // Publishable key — safe in the browser; RLS is the actual guard.
+  anonKey: "sb_publishable_38rZb9UyalhHQ8rFyr-77A_2NXk2bht",
 };
+
+// Keep client — carries the signed-in session (persisted) for authenticated reads/writes.
+export const supabase = createClient(CONFIG.url, CONFIG.anonKey);
+
+// Public client — never carries a session, so the anonymous lead-capture path
+// always runs as the `anon` role even if a Keep user is signed in elsewhere.
+const publicClient = createClient(CONFIG.url, CONFIG.anonKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 export function isLive() {
   return Boolean(CONFIG.url && CONFIG.anonKey);
 }
 
-// Fetch broker-editable rule thresholds. Falls back to seeded defaults.
+// One-click demo sign-in (the broker-invited sample client). RLS still scopes
+// every read/write to this account's own rows.
+export const DEMO_CREDENTIAL = { email: "jordan.m@example.com", password: "keep-demo-2026" };
+
+// ── Public lead capture (anonymous) ─────────────────────────────────────────
 export async function fetchRules() {
-  if (isLive()) {
-    const res = await fetch(`${CONFIG.url}/rest/v1/rule_settings?id=eq.1&select=settings`, {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error(`fetchRules failed: ${res.status}`);
-    const rows = await res.json();
-    if (rows[0] && rows[0].settings) return rows[0].settings;
-  }
+  const { data, error } = await publicClient.from("rule_settings").select("settings").eq("id", 1).maybeSingle();
+  if (!error && data && data.settings) return data.settings;
   const res = await fetch("content/rule-defaults.json");
   return res.json();
 }
 
-// Persist a completed (or partial) lead. Returns { ok: true }.
-// A successful insert into `leads` fires a DB webhook -> notify-lead -> broker email.
 export async function submitLead(lead) {
-  if (isLive()) {
-    const res = await fetch(`${CONFIG.url}/rest/v1/leads`, {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify(lead),
-    });
-    if (!res.ok) throw new Error(`submitLead failed: ${res.status}`);
-    return { ok: true };
-  }
-  // Stub mode: simulate a successful, persisted lead.
-  console.info("[stub] lead captured (Supabase not yet provisioned):", lead);
-  return { ok: true, stub: true };
+  const { error } = await publicClient.from("leads").insert(lead);
+  if (error) throw new Error(`submitLead failed: ${error.message}`);
+  return { ok: true };
 }
 
-function authHeaders() {
-  return { apikey: CONFIG.anonKey, Authorization: `Bearer ${CONFIG.anonKey}` };
+// ── Auth ────────────────────────────────────────────────────────────────────
+export async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
 }
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { ok: false, error: error.message };
+  invalidate();
+  return { ok: true, session: data.session };
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+  invalidate();
+}
+
+// ── Keep data: load once, assemble the nested shape the views expect ─────────
+let cache = null;
+export function invalidate() { cache = null; }
+
+export async function ensureData() {
+  if (!cache) cache = await loadTree();
+  return cache;
+}
+
+async function loadTree() {
+  const { data: { user } } = await supabase.auth.getUser();
+  const uid = user ? user.id : null;
+
+  const [profileRes, entRes, assetRes, polRes, relRes] = await Promise.all([
+    supabase.from("profiles").select("full_name, reminder_email, reminder_schedule").eq("id", uid).maybeSingle(),
+    supabase.from("entities").select("*").order("created_at"),
+    supabase.from("assets").select("*").order("created_at"),
+    supabase.from("policies").select("*").order("renewal_date"),
+    supabase.from("entity_relationships").select("*"),
+  ]);
+
+  const profile = profileRes.data || {};
+  const entityRows = entRes.data || [];
+  const assetRows = assetRes.data || [];
+  const policyRows = polRes.data || [];
+  const relRows = relRes.data || [];
+
+  // Index policies under their asset, assets under their entity.
+  const polByAsset = groupBy(policyRows.map(adaptPolicy), (p) => p._assetId);
+  const assetsByEntity = groupBy(
+    assetRows.map((a) => adaptAsset(a, polByAsset[a.id] || [])),
+    (a) => a._entityId
+  );
+  const entities = entityRows.map((e) => adaptEntity(e, assetsByEntity[e.id] || []));
+
+  const entityById = new Map(entities.map((e) => [e.id, e]));
+  const relationships = relRows.map((r) => ({
+    from: r.from_entity, to: r.to_entity, role: r.role, stake: r.stake,
+  }));
+
+  const name = profile.full_name || (user && user.email) || "Member";
+  return {
+    user: {
+      name,
+      initials: initialsOf(name),
+      email: (user && user.email) || "",
+    },
+    entities,
+    entityById,
+    relationships,
+    prefs: {
+      email: profile.reminder_email !== false,
+      schedule: Array.isArray(profile.reminder_schedule) ? [...profile.reminder_schedule] : [60, 30, 14, 7, 1],
+    },
+  };
+}
+
+// ── Row adapters (DB row → the stub's nested shape) ─────────────────────────
+function adaptEntity(row, assets) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    label: row.label,
+    subtype: row.subtype || undefined,
+    meta: row.meta || undefined,
+    icon: row.kind === "business" ? "briefcase" : (row.kind === "trust" ? "doc" : undefined),
+    initials: row.kind === "personal" ? "ME" : initialsOf(row.name),
+    assets,
+    _hasAssets: assets.length > 0,
+    // Entities you manage (hold assets/policies in) vs. related individuals
+    // (e.g. a spouse) who only appear in the relationship map.
+    _managed: row.kind !== "person",
+  };
+}
+
+function adaptAsset(row, policies) {
+  return {
+    id: row.id,
+    _entityId: row.entity_id,
+    type: row.type,
+    name: row.name,
+    meta: row.meta || "",
+    value: row.value != null ? Number(row.value) : null,
+    facts: row.facts || [],
+    attrs: row.attrs || {},
+    held: row.held || [],
+    policies,
+  };
+}
+
+// Per-line presentation (icon glyph + asset-tile color class) — not stored in the
+// DB; derived here so the policy cards render with the right marker.
+const LINE_PRES = {
+  "Homeowners (HO-3)": { icon: "home", cic: "home" },
+  "Flood (NFIP)": { icon: "flood", cic: "boat" },
+  "Windstorm": { icon: "umbrella", cic: "home" },
+  "Personal auto": { icon: "auto", cic: "auto" },
+  "Scheduled personal property": { icon: "gem", cic: "gem" },
+  "Business owner's policy (BOP)": { icon: "general-liability", cic: "cp" },
+  "Commercial auto": { icon: "commercial-auto", cic: "auto" },
+};
+
+function adaptPolicy(row) {
+  const pres = LINE_PRES[row.line] || { icon: "shield", cic: "home" };
+  return {
+    id: row.id,
+    _assetId: row.asset_id,
+    line: row.line,
+    form: row.form,
+    icon: pres.icon,
+    cic: pres.cic,
+    carrier: row.carrier,
+    naic: row.naic,
+    number: row.number,
+    status: row.status,
+    autoRenew: row.auto_renew,
+    renewalInDays: daysFromToday(row.renewal_date),
+    effectiveInDays: daysFromToday(row.effective_date),
+    namedInsured: row.named_insured,
+    agent: row.agent,
+    agentContact: row.agent_contact,
+    premium: row.premium,
+    paymentPlan: row.payment_plan,
+    billingStatus: row.billing_status,
+    coverages: row.coverages || [],
+    endorsements: row.endorsements || [],
+    deductibles: row.deductibles || [],
+    discounts: row.discounts || [],
+    interests: row.interests || [],
+    documents: row.documents || [],
+    details: row.details || [],
+    claims: row.claims,
+  };
+}
+
+// ── Accessors over the loaded cache (sync; call ensureData() first) ──────────
+export function getUser() { return cache ? cache.user : null; }
+
+// Dashboard / entity lists show entities you manage (yourself, businesses,
+// trusts); related individuals (e.g. a spouse) live only in the map.
+export function getEntities() { return cache ? cache.entities.filter((e) => e._managed) : []; }
+
+export function getEntity(id) { return cache ? cache.entityById.get(id) || null : null; }
+
+export function findAsset(assetId) {
+  if (!cache) return null;
+  for (const entity of cache.entities) {
+    const asset = entity.assets.find((a) => a.id === assetId);
+    if (asset) return { entity, asset };
+  }
+  return null;
+}
+
+export function findPolicy(policyId) {
+  if (!cache) return null;
+  for (const entity of cache.entities) {
+    for (const asset of entity.assets) {
+      const policy = (asset.policies || []).find((p) => p.id === policyId);
+      if (policy) return { entity, asset, policy };
+    }
+  }
+  return null;
+}
+
+// Relationship-map data: every entity referenced by a relationship, plus edges.
+// Only entities you manage (with assets) get a clickable href.
+export function getMapData() {
+  if (!cache) return { nodes: [], edges: [] };
+  const ids = new Set();
+  cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
+  const nodes = [...ids].map((id) => {
+    const e = cache.entityById.get(id);
+    if (!e) return null;
+    return {
+      id: e.id,
+      kind: e.kind,
+      name: e.name,
+      sub: e.label || e.subtype || "",
+      initials: e.initials,
+      href: e._managed ? `#/keep/entity/${e.id}` : null,
+    };
+  }).filter(Boolean);
+  const edges = cache.relationships.map((r) => ({
+    from: r.from, to: r.to,
+    label: r.role + (r.stake ? ` · ${r.stake}` : ""),
+  }));
+  return { nodes, edges };
+}
+
+// ── Reminder preferences (profiles) ─────────────────────────────────────────
+export function getPrefs() {
+  return cache ? cache.prefs : { email: true, schedule: [60, 30, 14, 7, 1] };
+}
+
+export async function savePrefs(prefs) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  const { error } = await supabase.from("profiles")
+    .update({ reminder_email: prefs.email, reminder_schedule: prefs.schedule })
+    .eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  if (cache) { cache.prefs.email = prefs.email; cache.prefs.schedule = [...prefs.schedule]; }
+  return { ok: true };
+}
+
+// ── Writes (clients have CRUD on their own entities/assets) ──────────────────
+export async function addEntity({ kind, name, subtype }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const label = kind === "personal" ? "You · personal" : (subtype || (kind === "trust" ? "Trust" : "Business"));
+  const { data, error } = await supabase.from("entities")
+    .insert({ owner: user.id, kind, name, label, subtype: subtype || null })
+    .select().single();
+  if (error) return { ok: false, error: error.message };
+  invalidate();
+  return { ok: true, id: data.id };
+}
+
+export async function addAsset({ entityId, type, name, meta, value }) {
+  const { error, data } = await supabase.from("assets")
+    .insert({
+      entity_id: entityId, type, name,
+      meta: meta || "", value: value != null ? value : null,
+      facts: [], attrs: {}, held: [],
+    })
+    .select().single();
+  if (error) return { ok: false, error: error.message };
+  invalidate();
+  return { ok: true, id: data.id };
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function initialsOf(name) {
+  return (name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+}
+
+function daysFromToday(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00`);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((d - today) / 86400000);
+}
+
+function groupBy(arr, keyFn) {
+  const out = {};
+  for (const item of arr) {
+    const k = keyFn(item);
+    (out[k] || (out[k] = [])).push(item);
+  }
+  return out;
+}
+
+// ASSET_META re-exported so views keep a single import surface for Keep data.
+export { ASSET_META };
