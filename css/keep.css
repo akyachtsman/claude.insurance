@@ -269,6 +269,8 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-fld > span { display: block; font: 800 13px var(--font-sans); margin-bottom: 6px; }
 .k-fld input { width: 100%; min-height: 54px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; }
 .k-fld input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
+.k-fld select { width: 100%; min-height: 54px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; cursor: pointer; }
+.k-fld select:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
 .k-locked { display: flex; align-items: center; gap: var(--space-2); background: var(--color-bg); border: 2px solid var(--color-border); border-radius: var(--radius-md); min-height: 54px; padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-secondary); }
 .k-ameta { text-align: center; font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-5); }
 .k-ameta a { color: var(--color-accent); font-weight: 800; cursor: pointer; }
