@@ -35,6 +35,7 @@ export const DEMO_CREDENTIAL = { email: "jordan.m@example.com", password: "keep-
 export async function fetchRules() {
   const { data, error } = await publicClient.from("rule_settings").select("settings").eq("id", 1).maybeSingle();
   if (!error && data && data.settings) return data.settings;
+  if (error) console.warn("fetchRules: falling back to bundled defaults —", error.message);
   const res = await fetch("content/rule-defaults.json");
   return res.json();
 }
@@ -67,13 +68,15 @@ export async function signOut() {
 let cache = null;
 export function invalidate() { cache = null; }
 
-export async function ensureData() {
-  if (!cache) cache = await loadTree();
+// Optionally pass the already-known signed-in user (the route guard has it) to
+// skip a redundant getUser() round-trip.
+export async function ensureData(user) {
+  if (!cache) cache = await loadTree(user);
   return cache;
 }
 
-async function loadTree() {
-  const { data: { user } } = await supabase.auth.getUser();
+async function loadTree(knownUser) {
+  const user = knownUser || (await supabase.auth.getUser()).data.user;
   const uid = user ? user.id : null;
 
   const [profileRes, entRes, assetRes, polRes, relRes] = await Promise.all([
@@ -83,6 +86,11 @@ async function loadTree() {
     supabase.from("policies").select("*").order("renewal_date"),
     supabase.from("entity_relationships").select("*"),
   ]);
+
+  // Surface query failures (e.g. an RLS denial) instead of rendering silently empty.
+  for (const [label, res] of [["profiles", profileRes], ["entities", entRes], ["assets", assetRes], ["policies", polRes], ["entity_relationships", relRes]]) {
+    if (res.error) console.warn(`loadTree: ${label} query failed —`, res.error.message);
+  }
 
   const profile = profileRes.data || {};
   const entityRows = entRes.data || [];
@@ -246,10 +254,15 @@ export function getMapData() {
       href: e._managed ? `#/keep/entity/${e.id}` : null,
     };
   }).filter(Boolean);
-  const edges = cache.relationships.map((r) => ({
-    from: r.from, to: r.to,
-    label: r.role + (r.stake ? ` · ${r.stake}` : ""),
-  }));
+  // Only keep edges whose endpoints both survived (a relationship to an entity
+  // that didn't load would otherwise crash the map renderer).
+  const present = new Set(nodes.map((n) => n.id));
+  const edges = cache.relationships
+    .filter((r) => present.has(r.from) && present.has(r.to))
+    .map((r) => ({
+      from: r.from, to: r.to,
+      label: r.role + (r.stake ? ` · ${r.stake}` : ""),
+    }));
   return { nodes, edges };
 }
 

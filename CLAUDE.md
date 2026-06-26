@@ -23,14 +23,14 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 
 ## Application Architecture
 - `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
-- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep`, `#/keep/login`, `#/keep/entity/:id`, `#/keep/add-asset`, `#/keep/asset/:id`). Toggles `body.in-keep` to swap site chrome.
-- `js/views/` — `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`, and `keep.js` (the authenticated portal: login, dashboard, entity detail, add-asset, coverage analysis)
-- **The Keep (v2, demo/stub):** invite-only client portal — entities (`Me` default + businesses) → assets → coverage analysis. `js/keep/data.js` (sample entities/assets, STUB), `js/keep/analysis.js` (asset → coverage analysis; reuses `rules.js` for risk-based recommendations; tests `js/keep/analysis.test.mjs`), `css/keep.css` (Direction C portal styles, `k-` prefixed). No real auth/persistence yet — a demo ribbon makes that explicit; reachable by URL, unlinked from the public nav.
+- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep`, `#/keep/login`, `#/keep/entities`, `#/keep/entity/:id`, `#/keep/asset/:id`, `#/keep/policy/:id`, `#/keep/add-asset`, `#/keep/add-entity`, `#/keep/documents`, `#/keep/account`, `#/keep/security`). A route guard sends unauthenticated Keep routes to login. Toggles `body.in-keep` to swap site chrome.
+- `js/views/` — `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`, and `keep.js` (the authenticated portal: login, dashboard, entity detail, asset/policy detail, add-asset/add-entity, documents, account, security, coverage analysis)
+- **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/data.js` is now the **offline test fixture + `ASSET_META`** (not the app's data source); `js/keep/analysis.js` (asset → coverage analysis; reuses `rules.js`; tests `js/keep/analysis.test.mjs`); `css/keep.css` (Direction C portal styles, `k-` prefixed). Reachable by URL, unlinked from the public nav. A demo ribbon marks it as the seeded demo account.
 - `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
 - `js/supabase.js` — live data client (`@supabase/supabase-js` from esm.sh): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; `js/keep/data.js` remains as the offline test fixture + `ASSET_META`. Service-role key never shipped.
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the relationship demo seed. The `notify-lead` / `notify-renewal` Edge Functions are still to come.
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-lead` / `notify-renewal` Edge Functions are still to come.
 
 ## Backend (Supabase — provisioned)
 - **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
@@ -69,8 +69,9 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Key | Value |
 |---|---|
 | App URL | `https://akyachtsman.github.io/claude.insurance/` |
-| Valid test credential | `n/a — app is anonymous, no login` |
-| Invalid test credential | `n/a — no auth gate` |
+| Public path | Anonymous — no login (the marketing site + questionnaire) |
+| Keep credential (valid) | `jordan.m@example.com` / `keep-demo-2026` (the Keep login gate; prefilled) |
+| Keep credential (invalid) | any other password → `.k-error` on the login form |
 | Primary nav button | `Find what coverage I need` |
 | Primary content selector | `.card` |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
@@ -87,6 +88,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S6 | Commercial qualification flow | As S5 but choose "For my business"; industry-first questioning; contact via phone only → summary lists ≥1 `.need` and the "not a quote" disclaimer | Commercial branch stalls, no needs computed, or disclaimer missing |
 | S7 | Summary empty state | Deep-link `#/summary` with no prior answers → a friendly "No summary yet" empty state (the store is in-memory) | Blank page, crash, or JS error instead of the empty state |
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
+| S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-h1` "Welcome back"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
 
 ## Reporting Requirements
 Agents write evidence to `.agent-reports/`:

@@ -77,7 +77,7 @@ async function dispatchKeep(rest) {
 
   const session = await getSession();
   if (!session) return renderKeepLogin();
-  await ensureData();
+  await ensureData(session.user);
 
   switch (sub) {
     case undefined:

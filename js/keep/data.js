@@ -1,7 +1,8 @@
-// keep/data.js — sample entities, assets & policies for the Keep demo prototype.
-// STUB: no backend yet. When Supabase is provisioned this is replaced by a
-// per-user query (entities + assets + policies scoped by RLS). Shapes mirror the
-// real tables so views/analysis don't change.
+// keep/data.js — OFFLINE TEST FIXTURE for the Keep (+ ASSET_META, used by the app).
+// The live app reads from Supabase via js/supabase.js; this sample tree is no
+// longer the app's data source — it backs the offline unit tests (analysis/rules)
+// which can't reach a live DB. Shapes mirror the real tables so the tests and the
+// adapter agree. ASSET_META (asset-type icon/colour) is still imported by the app.
 //
 // Policy records carry the standard declarations-page fields (researched against
 // NAIC / state DOIs / carriers): identity, insured item, Coverage A–F + limits,

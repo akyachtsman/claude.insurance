@@ -1,6 +1,10 @@
 -- Demo seed (NOT a migration): per-asset held coverage lists for the sample
--- client, mirroring js/keep/data.js. Run after the asset rows exist. Matched by
--- asset name (demo data has unique names per the sample set).
+-- client. Matched by asset name (demo names are unique in the sample set).
+-- PREREQUISITE: the asset rows must already exist — no committed seed creates
+-- them (they were seeded live). Run standalone before assets exist and every
+-- UPDATE is a silent no-op (0 rows).
+-- KEEP IN SYNC with the `held` arrays in js/keep/data.js (the offline test
+-- fixture) — both describe the same demo assets.
 
 update public.assets set held = '["dwelling","home-liability","home-contents","flood"]'::jsonb where name = '123 Marina Way';
 update public.assets set held = '["auto-liability","auto-physical"]'::jsonb where name = '2023 Tesla Model Y';

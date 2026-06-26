@@ -17,6 +17,13 @@ import {
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, REMINDER_SCHEDULE } from "../keep/policies.js";
 
+// Broker of record (demo). Single source for the name shown across the portal;
+// policy-level agent comes from the policy record itself.
+const BROKER_NAME = "Rosa Alvarez";
+
+// Breadcrumb separator node (kept as one helper so the glyph isn't duplicated).
+function sep() { return el("span", { text: "  ·  " }); }
+
 // Reminder preferences live on the user's profile (loaded with the Keep data).
 // activeSchedule reflects the saved set; changes persist via savePrefs().
 function activeSchedule() {
@@ -282,7 +289,7 @@ function policySummaryCard(policy) {
 function policiesSection(asset) {
   const items = [
     reminderBanner(),
-    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: "Policies maintained by your broker (Rosa Alvarez)" })]),
+    el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Policies maintained by your broker (${BROKER_NAME})` })]),
   ];
   if (!asset.policies || !asset.policies.length) {
     items.push(el("div", { class: "k-empty", text: "No policies on file — ask your broker to add one." }));
@@ -310,8 +317,11 @@ function assetCard(asset, settings) {
 }
 
 function entityAvatar(entity) {
-  if (entity.kind === "business") {
-    return el("span", { class: "k-bigav k-bigav--biz" }, [icon(entity.icon || "briefcase", { size: 30 })]);
+  // Businesses and trusts get an icon avatar (trust on the violet base, business
+  // on the green one); people show their initials.
+  if (entity.kind === "business" || entity.kind === "trust") {
+    const cls = entity.kind === "business" ? "k-bigav k-bigav--biz" : "k-bigav";
+    return el("span", { class: cls }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
   }
   return el("span", { class: "k-bigav", text: entity.initials });
 }
@@ -338,7 +348,7 @@ function entityHead(entity, settings, addHref) {
 function joinDots(bits) {
   const out = [];
   bits.filter(Boolean).forEach((b, i) => {
-    if (i) out.push(el("span", { text: "  ·  " }));
+    if (i) out.push(sep());
     out.push(el("span", { text: b }));
   });
   return out;
@@ -383,7 +393,7 @@ export function renderKeepLogin() {
     el("label", { class: "k-fld" }, [el("span", { text: "Password" }), pwInput]),
     btn,
     error,
-    el("p", { class: "k-ameta" }, [el("a", { text: "Forgot your password?" })]),
+    el("p", { class: "k-ameta", text: `Forgot your password? Contact your broker (${BROKER_NAME}) to reset it.` }),
     el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
@@ -543,7 +553,7 @@ export async function renderKeepEntity(params, id) {
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const view = page("entities", [
     backLink("#/keep", "dashboard"),
-    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }), el("span", { text: entity.name })]),
+    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
@@ -571,15 +581,14 @@ export async function renderKeepAsset(params, id) {
     ]),
     el("div", { class: "k-crow__r" }, [
       coveragePill(c.status),
-      c.status === "gap" ? el("span", { class: "k-linklike", text: "Add to review →" }) : null,
     ]),
   ]);
 
   const sections = [
     backLink(`#/keep/entity/${entity.id}`, entity.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }),
-      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), el("span", { text: "  ·  " }),
+      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("span", { text: asset.name }),
     ]),
     el("div", { class: "k-ahero" }, [
@@ -598,9 +607,8 @@ export async function renderKeepAsset(params, id) {
       el("span", { class: "k-cic" }, [icon("alert", { size: 26 })]),
       el("div", {}, [
         el("h3", { text: `${gaps} gap${gaps > 1 ? "s" : ""} found on this asset` }),
-        el("p", { text: "Recommended coverage that isn't in place yet. Share it with your broker to close the gaps." }),
+        el("p", { text: `Recommended coverage that isn't in place yet. Bring these to your next review with ${BROKER_NAME} to close the gaps.` }),
       ]),
-      el("button", { class: "k-btn", attrs: { type: "button" } }, [icon("chat", { size: 18 }), el("span", { text: "Share with broker" })]),
     ]));
   }
 
@@ -784,9 +792,9 @@ export function renderKeepPolicy(params, id) {
   const sections = [
     backLink(`#/keep/asset/${asset.id}`, asset.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), el("span", { text: "  ·  " }),
-      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), el("span", { text: "  ·  " }),
-      el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), el("span", { text: "  ·  " }),
+      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
+      el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), sep(),
       el("span", { text: "Policy" }),
     ]),
     el("div", { class: "k-phead" }, [
@@ -947,7 +955,7 @@ export function renderKeepAccount() {
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
-      pg([["Name", user.name], ["Email", user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", "Rosa Alvarez"]]),
+      pg([["Name", user.name], ["Email", user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", BROKER_NAME]]),
     ]),
     buildReminderSettings(),
     el("div", { class: "k-btn-row" }, [signOutButton("k-btn k-btn--ghost")]),
@@ -1005,7 +1013,7 @@ export function renderKeepSecurity() {
       ]))),
     el("div", { class: "snote" }, [
       icon("shield", { size: 14 }),
-      el("span", {}, [el("b", { text: " Questions about how your data is handled? " }), el("span", { text: "Your licensed broker (Rosa Alvarez) can walk you through it, or see our privacy policy." })]),
+      el("span", {}, [el("b", { text: " Questions about how your data is handled? " }), el("span", { text: `Your licensed broker (${BROKER_NAME}) can walk you through it, or see our privacy policy.` })]),
     ]),
   ], { narrow: true });
   mount(view);
