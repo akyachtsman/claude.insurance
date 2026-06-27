@@ -882,7 +882,7 @@ export function renderKeepAddEntity() {
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
   mount(page("entities", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     form,
   ], { narrow: true }));
 }
@@ -1061,7 +1061,7 @@ export function renderKeepDocuments() {
   });
 
   const view = page("documents", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Documents" }),
     el("p", { class: "k-sub", text: "All your documents, filed by entity and asset." }),
     total ? search : null,
@@ -1075,7 +1075,7 @@ export function renderKeepAccount() {
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
   const user = getUser();
   const view = page("account", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Account" }),
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
@@ -1113,7 +1113,7 @@ export function renderKeepSecurity() {
   });
 
   const view = page("security", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("div", { class: "shero" }, [
       el("span", { class: "k-cic" }, [icon("shield", { size: 34 })]),
       el("div", {}, [
