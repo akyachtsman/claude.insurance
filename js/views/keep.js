@@ -15,7 +15,7 @@ import {
   invalidate, ensureData, DEMO_CREDENTIAL,
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
-import { policyKind, reminderInfo, REMINDER_SCHEDULE } from "../keep/policies.js";
+import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -205,14 +205,15 @@ function appBar(active) {
   const link = (label, href, key) => el("a", { class: key === active ? "on" : "", attrs: { href } }, [el("span", { text: label })]);
   return el("header", { class: "k-bar" }, [
     el("div", { class: "k-bar__in" }, [
-      el("a", { class: "k-brand", attrs: { href: "#/keep", "aria-label": "The Keep — dashboard" } }, [
+      el("a", { class: "k-brand", attrs: { href: "#/keep", "aria-label": "The Keep — home" } }, [
         icon("shield", { size: 26, class: "k-mark" }),
         el("span", { text: "Harborline" }),
         el("span", { class: "k-tag", text: "The Keep" }),
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
-        link("Dashboard", "#/keep", "dashboard"),
-        link("Entities", "#/keep/entities", "entities"),
+        link("Home", "#/keep", "home"),
+        link("Entity List", "#/keep/list", "list"),
+        link("Entity Flow", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
       el("div", { class: "k-bar__rt" }, [notifMenu(), accountMenu()]),
@@ -228,8 +229,9 @@ function page(active, contentChildren, opts = {}) {
 // Friendly labels for the Keep's static routes (dynamic entity/asset routes
 // fall through to a plain "Back").
 const KEEP_LABELS = {
-  "#/keep": "dashboard",
-  "#/keep/entities": "entities",
+  "#/keep": "home",
+  "#/keep/list": "entity list",
+  "#/keep/entities": "entity flow",
   "#/keep/documents": "documents",
   "#/keep/account": "account",
   "#/keep/security": "security",
@@ -425,10 +427,126 @@ export function renderKeepLogin() {
   mount(el("div", {}, [ribbon(), el("div", { class: "k-authwrap" }, [form])]));
 }
 
-export async function renderKeepDashboard() {
+// Renewal urgency band → display treatment (colour escalates as the date nears).
+const RENEWAL_STYLE = {
+  lapsed:   { cls: "k-rb--crit", word: "Lapsed" },
+  urgent:   { cls: "k-rb--crit", word: "Due now" },
+  week:     { cls: "k-rb--high", word: "This week" },
+  soon:     { cls: "k-rb--med",  word: "This month" },
+  upcoming: { cls: "k-rb--low",  word: "Upcoming" },
+};
+
+// Every policy across the user's entities, with its asset/entity context.
+function collectPolicies() {
+  const out = [];
+  for (const ent of getEntities())
+    for (const a of ent.assets)
+      for (const p of (a.policies || []))
+        out.push({ policy: p, asset: a, entity: ent });
+  return out;
+}
+
+function quickCard(href, ic, title, sub) {
+  return el("a", { class: "k-qcard", attrs: { href } }, [
+    el("span", { class: "k-qcard__ic" }, [icon(ic, { size: 22 })]),
+    el("div", {}, [
+      el("div", { class: "k-qcard__t", text: title }),
+      el("div", { class: "k-qcard__s", text: sub }),
+    ]),
+  ]);
+}
+
+function statTile(label, value, sub) {
+  return el("div", { class: "k-stat" }, [
+    el("div", { class: "k-stat__v", text: String(value) }),
+    el("div", { class: "k-stat__l", text: label }),
+    sub ? el("div", { class: "k-stat__s", text: sub }) : null,
+  ]);
+}
+
+// Landing — welcome + "what would you like to do?" + a renewals report and
+// at-a-glance boxes. The home of the Keep (#/keep).
+export async function renderKeepLanding() {
   const settings = await getRuleDefaults();
-  const view = page("dashboard", [
-    el("h1", { class: "k-h1", text: `Welcome back, ${getUser().name.split(" ")[0]}` }),
+  const first = getUser().name.split(" ")[0];
+  const entities = getEntities();
+
+  // Aggregate at-a-glance numbers.
+  let assets = 0, policies = 0, gaps = 0, insured = 0, lapsed = 0;
+  for (const e of entities) {
+    const sum = entitySummary(e, settings);
+    assets += sum.assets; gaps += sum.gaps;
+    for (const a of e.assets) {
+      insured += a.value || 0;
+      for (const p of (a.policies || [])) { policies++; if (p.renewalInDays < 0) lapsed++; }
+    }
+  }
+
+  // Renewals inside the 60-day window, soonest first.
+  const renewals = collectPolicies()
+    .map((r) => ({ ...r, band: renewalBand(r.policy.renewalInDays) }))
+    .filter((r) => r.band)
+    .sort((a, b) => a.policy.renewalInDays - b.policy.renewalInDays);
+
+  const renewalRows = renewals.length
+    ? renewals.map(({ policy, asset, band }) => {
+        const st = RENEWAL_STYLE[band];
+        const d = policy.renewalInDays;
+        const when = d < 0 ? `Lapsed ${dateShort(d)}`
+          : d === 0 ? "Due today"
+          : `${d} day${d === 1 ? "" : "s"} · ${dateShort(d)}`;
+        return el("a", { class: `k-rb ${st.cls}`, attrs: { href: `#/keep/policy/${policy.id}` } }, [
+          el("span", { class: "k-rb__ic" }, [icon(policy.icon, { size: 18 })]),
+          el("div", { class: "k-rb__main" }, [
+            el("div", { class: "k-rb__line", text: policy.line }),
+            el("div", { class: "k-rb__sub", text: asset.name }),
+          ]),
+          el("div", { class: "k-rb__r" }, [
+            el("span", { class: "k-rb__tag", text: st.word }),
+            el("span", { class: "k-rb__when", text: when }),
+          ]),
+        ]);
+      })
+    : [el("div", { class: "k-report__empty", text: "No renewals in the next 60 days — you're all set." })];
+
+  const view = page("home", [
+    el("section", { class: "k-welcome" }, [
+      el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
+      el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
+      el("div", { class: "k-quick" }, [
+        quickCard("#/keep/list", "briefcase", "Entity list", "Your entities & assets"),
+        quickCard("#/keep/entities", "handshake", "Entity flow", "How everything connects"),
+        quickCard("#/keep/add-asset", "plus", "Add an asset", "Insure something new"),
+        quickCard("#/keep/documents", "doc", "Documents", "Policies & declarations"),
+      ]),
+    ]),
+    el("section", { class: "k-report" }, [
+      el("div", { class: "k-report__h" }, [
+        el("h2", {}, [icon("bell", { size: 18 }), el("span", { text: "Renewals coming up" })]),
+        el("span", { class: "k-report__count", text: renewals.length ? `${renewals.length} within 60 days` : "All clear" }),
+      ]),
+      el("div", { class: "k-report__list" }, renewalRows),
+    ]),
+    el("section", {}, [
+      el("div", { class: "k-lbl", text: "At a glance" }),
+      el("div", { class: "k-stats" }, [
+        statTile("Entities", entities.length),
+        statTile("Assets", assets),
+        statTile("Active policies", policies),
+        statTile("Coverage gaps", gaps, gaps ? "review recommended" : "none open"),
+        statTile("Insured value", money(insured) || "$0"),
+        statTile("Lapsed", lapsed, lapsed ? "action needed" : "none"),
+      ]),
+    ]),
+  ]);
+  mount(view);
+}
+
+// Entity List — the entities-with-assets view (formerly the dashboard).
+export async function renderKeepEntityList() {
+  const settings = await getRuleDefaults();
+  const view = page("list", [
+    el("h1", { class: "k-h1", text: "Entity list" }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
     el("div", { class: "k-privacy" }, [
       icon("lock", { size: 16 }),
@@ -572,7 +690,7 @@ export function renderKeepEntities() {
 
 export async function renderKeepEntity(params, id) {
   const entity = getEntity(id);
-  if (!entity) return renderKeepDashboard();
+  if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const view = page("entities", [
@@ -591,7 +709,7 @@ export async function renderKeepEntity(params, id) {
 
 export async function renderKeepAsset(params, id) {
   const found = findAsset(id);
-  if (!found) return renderKeepDashboard();
+  if (!found) return renderKeepEntityList();
   const { entity, asset } = found;
   const settings = await getRuleDefaults();
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
@@ -787,7 +905,7 @@ export function renderKeepAddEntity() {
 
 export function renderKeepPolicy(params, id) {
   const found = findPolicy(id);
-  if (!found) return renderKeepDashboard();
+  if (!found) return renderKeepEntityList();
   const { entity, asset, policy } = found;
   const kind = policyKind(policy.renewalInDays);
   const statusLabel = kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
