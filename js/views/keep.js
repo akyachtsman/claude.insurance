@@ -235,17 +235,21 @@ const KEEP_LABELS = {
   "#/keep/security": "security",
 };
 
-// Origin-aware back affordance (CLAUDE.md coding standard): return to the route
-// the user actually came from when it's a Keep route, else the hierarchical
-// fallback the caller passes (used for deep-links / fresh loads).
-function backLink(fallbackHref, fallbackLabel) {
+// The route to return to: where the user actually came from (when it's a Keep
+// route), else the hierarchical fallback the caller passes (deep-links/reloads).
+function originHref(fallbackHref) {
   const prev = previousRoute();
-  let href = fallbackHref, label = fallbackLabel;
-  if (prev && prev.startsWith("#/keep") && prev !== location.hash) {
-    href = prev;
-    // Keep the caller's descriptive label when the origin IS the parent; else
-    // use a known route name, or a plain "Back" for dynamic routes.
-    label = prev === fallbackHref ? fallbackLabel : (KEEP_LABELS[prev] || null);
+  return (prev && prev.startsWith("#/keep") && prev !== location.hash) ? prev : fallbackHref;
+}
+
+// Origin-aware back affordance (CLAUDE.md coding standard).
+function backLink(fallbackHref, fallbackLabel) {
+  const href = originHref(fallbackHref);
+  let label = fallbackLabel;
+  if (href !== fallbackHref) {
+    // Came from somewhere other than the parent — use a known route name, or a
+    // plain "Back" for dynamic routes (entity/asset).
+    label = KEEP_LABELS[href] || null;
   }
   return el("div", { class: "k-backrow" }, [
     el("a", { class: "k-back", attrs: { href } }, [
@@ -378,7 +382,7 @@ function entityPanel(entity, settings) {
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const body = entity.assets.length
     ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
-    : el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add the first asset" })]);
+    : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." });
   return el("section", { class: `k-panel ${variant}` }, [
     entityHead(entity, settings, "#/keep/add-asset"),
     el("div", { class: "k-lbl", text: "Assets in this entity" }),
@@ -577,10 +581,9 @@ export async function renderKeepEntity(params, id) {
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
-      el("div", { class: "k-grid2" }, [
-        ...entity.assets.map((a) => assetCard(a, settings)),
-        el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-asset" } }, [icon("plus", { size: 24 }), el("span", { text: "Add asset" })]),
-      ]),
+      entity.assets.length
+        ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
+        : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
     ]),
   ]);
   mount(view);
@@ -686,7 +689,7 @@ export function renderKeepAddAsset() {
 
   function stepOne() {
     return page("entities", [
-      kProgress(1, 2, () => go("#/keep")),
+      kProgress(1, 2, () => go(originHref("#/keep"))),
       el("h1", { class: "k-h1", text: "What would you like to add?" }),
       el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
       el("div", { class: "k-choices" }, ASSET_CHOICES.map((c) => {

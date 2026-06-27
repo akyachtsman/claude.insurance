@@ -3,7 +3,7 @@
 // + back, honeypot, and an "assembling your needs" transition into the summary.
 
 import { el, mount } from "../dom.js";
-import { go } from "../main.js";
+import { go, previousRoute } from "../main.js";
 import { icon, iconBadge } from "../icons.js";
 import { enhance } from "../motion.js";
 import { getQuestionnaire } from "../content.js";
@@ -104,9 +104,10 @@ export async function renderQualify(params) {
     } else if (!state.locked) {
       state.domain = null; // back to the branch chooser
     } else {
-      // Locked flow entered from a coverage page — return to that section
-      // (deterministic; history.back() would dead-end on a deep link).
-      go(`#/${state.domain}`);
+      // Locked flow (entered from a coverage page): return to the page the user
+      // actually came from, falling back to the section index on a deep link.
+      const prev = previousRoute();
+      go(prev && prev !== location.hash ? prev : `#/${state.domain}`);
       return;
     }
     render();
