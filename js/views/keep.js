@@ -4,7 +4,7 @@
 // by the route guard in main.js); RLS scopes everything to the signed-in client.
 
 import { el, mount } from "../dom.js";
-import { go } from "../main.js";
+import { go, previousRoute } from "../main.js";
 import { icon } from "../icons.js";
 import { s } from "../svg.js";
 import { getRuleDefaults } from "../content.js";
@@ -225,12 +225,32 @@ function page(active, contentChildren, opts = {}) {
   return el("div", {}, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
 }
 
-// One-level-up affordance shown at the top of each drill-down level.
-function backLink(href, label) {
+// Friendly labels for the Keep's static routes (dynamic entity/asset routes
+// fall through to a plain "Back").
+const KEEP_LABELS = {
+  "#/keep": "dashboard",
+  "#/keep/entities": "entities",
+  "#/keep/documents": "documents",
+  "#/keep/account": "account",
+  "#/keep/security": "security",
+};
+
+// Origin-aware back affordance (CLAUDE.md coding standard): return to the route
+// the user actually came from when it's a Keep route, else the hierarchical
+// fallback the caller passes (used for deep-links / fresh loads).
+function backLink(fallbackHref, fallbackLabel) {
+  const prev = previousRoute();
+  let href = fallbackHref, label = fallbackLabel;
+  if (prev && prev.startsWith("#/keep") && prev !== location.hash) {
+    href = prev;
+    // Keep the caller's descriptive label when the origin IS the parent; else
+    // use a known route name, or a plain "Back" for dynamic routes.
+    label = prev === fallbackHref ? fallbackLabel : (KEEP_LABELS[prev] || null);
+  }
   return el("div", { class: "k-backrow" }, [
     el("a", { class: "k-back", attrs: { href } }, [
       icon("arrow-right", { size: 18, class: "icon-flip" }),
-      el("span", { text: `Back to ${label}` }),
+      el("span", { text: label ? `Back to ${label}` : "Back" }),
     ]),
   ]);
 }
@@ -552,8 +572,8 @@ export async function renderKeepEntity(params, id) {
   const settings = await getRuleDefaults();
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const view = page("entities", [
-    backLink("#/keep", "dashboard"),
-    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
+    backLink("#/keep/entities", "entities"),
+    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
@@ -587,7 +607,7 @@ export async function renderKeepAsset(params, id) {
   const sections = [
     backLink(`#/keep/entity/${entity.id}`, entity.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("span", { text: asset.name }),
     ]),
@@ -757,7 +777,7 @@ export function renderKeepAddEntity() {
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
   mount(page("entities", [
-    el("div", { class: "k-backrow" }, [el("a", { class: "k-back", attrs: { href: "#/keep" } }, [icon("arrow-right", { size: 18, class: "icon-flip" }), el("span", { text: "Back to dashboard" })])]),
+    backLink("#/keep", "dashboard"),
     form,
   ], { narrow: true }));
 }
@@ -792,7 +812,7 @@ export function renderKeepPolicy(params, id) {
   const sections = [
     backLink(`#/keep/asset/${asset.id}`, asset.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), sep(),
       el("span", { text: "Policy" }),
