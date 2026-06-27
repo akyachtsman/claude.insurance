@@ -14,6 +14,7 @@ import {
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./views/keep.js";
 import { getSession, ensureData } from "./supabase.js";
+import { createNavStack } from "./nav.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -21,16 +22,14 @@ export function go(hash) {
   else location.hash = hash;
 }
 
-// Origin tracking for "origin-aware back" (see CLAUDE.md coding standards):
-// the route the user navigated *from*. Updated only on a real route change, so
-// in-place re-renders (go() to the same hash) don't clobber it.
-let prevRoute = null;
-let currRoute = null;
-export function previousRoute() { return prevRoute; }
+// Navigation stack for "origin-aware back" (see CLAUDE.md coding standards).
+// Logic lives in js/nav.js (pure + unit-tested in js/nav.test.mjs).
+const nav = createNavStack();
+export function previousRoute() { return nav.previous(); }
 
 async function route() {
   const fullHash = location.hash || "#/";
-  if (fullHash !== currRoute) { prevRoute = currRoute; currRoute = fullHash; }
+  nav.track(fullHash);
 
   const raw = location.hash.replace(/^#/, "") || "/";
   const [pathPart, query] = raw.split("?");
