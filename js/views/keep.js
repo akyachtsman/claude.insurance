@@ -446,16 +446,6 @@ function collectPolicies() {
   return out;
 }
 
-function quickCard(href, ic, title, sub) {
-  return el("a", { class: "k-qcard", attrs: { href } }, [
-    el("span", { class: "k-qcard__ic" }, [icon(ic, { size: 22 })]),
-    el("div", {}, [
-      el("div", { class: "k-qcard__t", text: title }),
-      el("div", { class: "k-qcard__s", text: sub }),
-    ]),
-  ]);
-}
-
 function statTile(label, value, sub) {
   return el("div", { class: "k-stat" }, [
     el("div", { class: "k-stat__v", text: String(value) }),
@@ -513,12 +503,6 @@ export async function renderKeepLanding() {
     el("section", { class: "k-welcome" }, [
       el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
       el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
-      el("div", { class: "k-quick" }, [
-        quickCard("#/keep/list", "briefcase", "Entity list", "Your entities & assets"),
-        quickCard("#/keep/entities", "handshake", "Entity flow", "How everything connects"),
-        quickCard("#/keep/add-asset", "plus", "Add an asset", "Insure something new"),
-        quickCard("#/keep/documents", "doc", "Documents", "Policies & declarations"),
-      ]),
     ]),
     el("section", { class: "k-report" }, [
       el("div", { class: "k-report__h" }, [
