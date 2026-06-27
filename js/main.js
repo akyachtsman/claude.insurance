@@ -21,7 +21,17 @@ export function go(hash) {
   else location.hash = hash;
 }
 
+// Origin tracking for "origin-aware back" (see CLAUDE.md coding standards):
+// the route the user navigated *from*. Updated only on a real route change, so
+// in-place re-renders (go() to the same hash) don't clobber it.
+let prevRoute = null;
+let currRoute = null;
+export function previousRoute() { return prevRoute; }
+
 async function route() {
+  const fullHash = location.hash || "#/";
+  if (fullHash !== currRoute) { prevRoute = currRoute; currRoute = fullHash; }
+
   const raw = location.hash.replace(/^#/, "") || "/";
   const [pathPart, query] = raw.split("?");
   const parts = pathPart.split("/").filter(Boolean); // ["coverage","home"]
