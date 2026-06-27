@@ -13,6 +13,20 @@ export function policyKind(renewalInDays) {
   return "ok";                            // active
 }
 
+// Urgency band for an upcoming renewal, escalating as the date nears. Drives the
+// colour priority on the landing renewals report. Returns null when the renewal
+// is further out than the 60-day report window (or unknown).
+// Bands: lapsed (past) · urgent (≤3d) · week (≤7d) · soon (≤30d) · upcoming (≤60d).
+export function renewalBand(renewalInDays) {
+  if (renewalInDays == null) return null;
+  if (renewalInDays < 0) return "lapsed";
+  if (renewalInDays <= 3) return "urgent";
+  if (renewalInDays <= 7) return "week";
+  if (renewalInDays <= 30) return "soon";
+  if (renewalInDays <= 60) return "upcoming";
+  return null;
+}
+
 // Which reminders have already fired and which is next, for a given lead-time
 // schedule (default 60/30/14/7/1 days before renewal).
 export function reminderInfo(renewalInDays, schedule = REMINDER_SCHEDULE) {
