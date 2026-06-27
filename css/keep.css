@@ -329,12 +329,6 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-welcome { margin-bottom: var(--space-8); }
 .k-welcome__h { font: 700 30px var(--font-display); letter-spacing: -.01em; }
 .k-welcome__p { font: 600 16px var(--font-sans); color: var(--color-text-secondary); margin: var(--space-1) 0 var(--space-5); }
-.k-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.k-qcard { display: flex; align-items: center; gap: 14px; background: var(--color-surface); border-radius: var(--radius-lg); padding: 16px 18px; box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
-a.k-qcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
-.k-qcard__ic { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none; background: var(--color-accent-light); color: var(--color-accent); }
-.k-qcard__t { font: 700 15px var(--font-display); }
-.k-qcard__s { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 2px; }
 
 /* Renewals report */
 .k-report { background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-6); margin-bottom: var(--space-8); }
@@ -379,7 +373,6 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
   .k-pg { grid-template-columns: 1fr 1fr; }
   .k-nav { display: none; }
   .k-banner .k-btn { margin-left: 0; }
-  .k-quick { grid-template-columns: 1fr 1fr; }
   .k-stats { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
