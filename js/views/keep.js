@@ -24,6 +24,18 @@ const BROKER_NAME = "Rosa Alvarez";
 // Breadcrumb separator node (kept as one helper so the glyph isn't duplicated).
 function sep() { return el("span", { text: "  ·  " }); }
 
+// Persist Entity Flow node positions (per browser) so dragged layouts survive
+// re-renders, navigation and reloads. Keyed by entity id → {x, cy}.
+const REL_POS_KEY = "keep:relmap-positions";
+function loadRelPositions() {
+  try { return JSON.parse(localStorage.getItem(REL_POS_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function saveRelPositions(state) {
+  try { localStorage.setItem(REL_POS_KEY, JSON.stringify(Object.assign(loadRelPositions(), state))); }
+  catch (e) { /* storage unavailable — ignore */ }
+}
+
 // Reminder preferences live on the user's profile (loaded with the Keep data).
 // activeSchedule reflects the saved set; changes persist via savePrefs().
 function activeSchedule() {
@@ -577,9 +589,17 @@ function relLayout(H) {
 function relationshipMap() {
   const W = 970, H = 420, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
   const { nodes, edges } = relLayout(H);
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  // Restore any saved positions over the default auto-layout (clamped to canvas).
+  const saved = loadRelPositions();
+  nodes.forEach((n) => {
+    if (saved[n.id]) {
+      n.x = clamp(saved[n.id].x, 0, W - NODE_W);
+      n.cy = clamp(saved[n.id].cy, NODE_H / 2, H - NODE_H / 2);
+    }
+  });
   const state = {};
   nodes.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const center = (id) => ({ x: state[id].x + NODE_W / 2, y: state[id].cy });
 
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
@@ -646,7 +666,8 @@ function relationshipMap() {
       if (!dragging) return;
       dragging = false;
       try { g.releasePointerCapture(pid); } catch (e) { /* ignore */ }
-      if (!moved && interactive) location.hash = n.href;
+      if (moved) saveRelPositions(state);          // remember the new layout
+      else if (interactive) location.hash = n.href; // a tap → open
     };
     g.addEventListener("pointerup", end);
     g.addEventListener("pointercancel", end);
@@ -882,7 +903,7 @@ export function renderKeepAddEntity() {
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
   mount(page("entities", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     form,
   ], { narrow: true }));
 }
@@ -1061,7 +1082,7 @@ export function renderKeepDocuments() {
   });
 
   const view = page("documents", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Documents" }),
     el("p", { class: "k-sub", text: "All your documents, filed by entity and asset." }),
     total ? search : null,
@@ -1075,7 +1096,7 @@ export function renderKeepAccount() {
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
   const user = getUser();
   const view = page("account", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Account" }),
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
@@ -1113,7 +1134,7 @@ export function renderKeepSecurity() {
   });
 
   const view = page("security", [
-    backLink("#/keep", "dashboard"),
+    backLink("#/keep", "home"),
     el("div", { class: "shero" }, [
       el("span", { class: "k-cic" }, [icon("shield", { size: 34 })]),
       el("div", {}, [
