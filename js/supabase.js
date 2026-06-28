@@ -373,8 +373,17 @@ export async function notifyEnhancement(requestId, event) {
 }
 
 // Broker-only final approval (RLS + the Edge Function both enforce role).
+// Routed through the Edge Function so the approval emails fire.
 export async function approveEnhancement(requestId) {
   return notifyEnhancement(requestId, "approved");
+}
+
+// Broker-only intermediate stage change (broker_review, underwriting, declined).
+// No email — just moves the tracker along; RLS enforces the broker role.
+export async function advanceRequest(requestId, status) {
+  const { error } = await supabase.from("enhancement_requests").update({ status }).eq("id", requestId);
+  if (error) { console.warn("advanceRequest failed —", error.message); return { ok: false, error: error.message }; }
+  return { ok: true };
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -13,12 +13,12 @@ import {
   getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
   getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
   invalidate, ensureData, DEMO_CREDENTIAL,
-  addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement,
+  addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest,
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
-import { validateRequest, statusDisplay, defaultSubject } from "../keep/requests.js";
+import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -587,10 +587,62 @@ function statTile(label, value, sub) {
 
 // Landing — welcome + "what would you like to do?" + a renewals report and
 // at-a-glance boxes. The home of the Keep (#/keep).
+// Horizontal progress tracker for a request's lifecycle (Submitted → Broker
+// review → Underwriting → Approved). Declined renders as a single off-track step.
+function requestStepper(status) {
+  const info = stageInfo(status);
+  if (info.declined) {
+    return el("div", { class: "k-steps k-steps--declined" }, [
+      el("div", { class: "k-step is-declined" }, [
+        el("span", { class: "k-step__dot" }, [icon("x", { size: 13 })]),
+        el("span", { class: "k-step__lbl", text: "Declined" }),
+      ]),
+    ]);
+  }
+  return el("div", { class: "k-steps" }, REQUEST_STAGES.map((s, i) => {
+    const n = i + 1;
+    const cls = n < info.step ? "is-done" : (n === info.step ? "is-current" : "");
+    return el("div", { class: `k-step ${cls}` }, [
+      el("span", { class: "k-step__dot" }, [n < info.step ? icon("check", { size: 13 }) : el("span", { text: String(n) })]),
+      el("span", { class: "k-step__lbl", text: s.track }),
+    ]);
+  }));
+}
+
+// Compact "Request status" window for the landing page — pending requests with
+// their live stage. Links through to the full My requests list.
+function pendingRequestsReport(requests, isBroker) {
+  const pending = requests.filter((r) => isPending(r.status));
+  const rows = pending.length
+    ? pending.slice(0, 4).map((r) => {
+        const info = stageInfo(r.status);
+        const stt = statusDisplay(r.status);
+        return el("a", { class: "k-prq", attrs: { href: "#/keep/requests" } }, [
+          el("div", { class: "k-prq__top" }, [
+            el("div", { class: "k-prq__subj", text: r.subject }),
+            el("span", { class: `k-pill ${stt.cls}` }, [icon(stt.icon, { size: 14 }), el("span", { text: stt.label })]),
+          ]),
+          requestStepper(r.status),
+          el("div", { class: "k-prq__wait", text: info.wait }),
+        ]);
+      })
+    : [el("div", { class: "k-report__empty", text: isBroker ? "No client requests in progress." : "No requests in progress — start one from the prompt above." })];
+
+  return el("section", { class: "k-report" }, [
+    el("div", { class: "k-report__h" }, [
+      el("h2", {}, [icon("spark", { size: 18 }), el("span", { text: isBroker ? "Requests to action" : "Request status" })]),
+      el("a", { class: "k-report__count", attrs: { href: "#/keep/requests" }, text: pending.length ? `${pending.length} in progress →` : "View all →" }),
+    ]),
+    el("div", { class: "k-report__list" }, rows),
+  ]);
+}
+
 export async function renderKeepLanding() {
   const settings = await getRuleDefaults();
   const first = getUser().name.split(" ")[0];
   const entities = getEntities();
+  const isBroker = getUser() && getUser().role === "broker";
+  const requests = await loadEnhancementRequests();
 
   // Aggregate at-a-glance numbers.
   let assets = 0, policies = 0, gaps = 0, insured = 0, lapsed = 0;
@@ -643,6 +695,7 @@ export async function renderKeepLanding() {
       ]),
       el("div", { class: "k-report__list" }, renewalRows),
     ]),
+    pendingRequestsReport(requests, isBroker),
     el("section", {}, [
       el("div", { class: "k-lbl", text: "At a glance" }),
       el("div", { class: "k-stats" }, [
@@ -1245,18 +1298,35 @@ export async function renderKeepRequests() {
 
   const when = (days) => days == null ? "" : (days === 0 ? "Today" : days === -1 ? "Yesterday" : `${Math.abs(days)} days ago`);
 
-  function card(r) {
-    const st = statusDisplay(r.status);
-    const actions = [];
-    if (isBroker && r.status === "requested") {
-      const approve = el("button", { class: "k-btn k-btn--sm", attrs: { type: "button" } }, [el("span", { text: "Approve" }), icon("check", { size: 16 })]);
-      approve.addEventListener("click", async () => {
-        approve.setAttribute("disabled", "disabled"); approve.querySelector("span").textContent = "Approving…";
-        await approveEnhancement(r.id);
+  // Broker stage controls: advance to the next stage (Approve routes through the
+  // email function), or decline. Hidden for clients and terminal requests.
+  const NEXT_LABEL = { broker_review: "Mark received", underwriting: "Send to underwriter", approved: "Approve" };
+  function brokerControls(r) {
+    if (!isBroker || r.status === "approved" || r.status === "declined") return [];
+    const out = [];
+    const nx = nextStage(r.status);
+    if (nx) {
+      const advance = el("button", { class: "k-btn k-btn--sm", attrs: { type: "button" } }, [el("span", { text: NEXT_LABEL[nx] }), icon(nx === "approved" ? "check" : "arrow-right", { size: 16 })]);
+      advance.addEventListener("click", async () => {
+        advance.setAttribute("disabled", "disabled"); advance.querySelector("span").textContent = "Saving…";
+        if (nx === "approved") await approveEnhancement(r.id); else await advanceRequest(r.id, nx);
         renderKeepRequests();
       });
-      actions.push(approve);
+      out.push(advance);
     }
+    const decline = el("button", { class: "k-btn k-btn--ghost k-btn--sm", attrs: { type: "button" } }, [el("span", { text: "Decline" })]);
+    decline.addEventListener("click", async () => {
+      decline.setAttribute("disabled", "disabled"); decline.querySelector("span").textContent = "…";
+      await advanceRequest(r.id, "declined");
+      renderKeepRequests();
+    });
+    out.push(decline);
+    return out;
+  }
+
+  function card(r) {
+    const st = statusDisplay(r.status);
+    const info = stageInfo(r.status);
     return el("div", { class: "k-reqcard" }, [
       el("div", { class: "k-reqcard__top" }, [
         el("div", { class: "k-reqcard__main" }, [
@@ -1265,10 +1335,12 @@ export async function renderKeepRequests() {
         ]),
         el("span", { class: `k-pill ${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]),
       ]),
+      requestStepper(r.status),
+      el("div", { class: "k-reqcard__stage" }, [icon(info.declined ? "alert" : "spark", { size: 14 }), el("span", { text: info.wait })]),
       el("p", { class: "k-reqcard__msg", text: r.message }),
       el("div", { class: "k-reqcard__foot" }, [
         el("span", { class: "k-reqcard__when", text: when(r.createdInDays) }),
-        ...actions,
+        ...brokerControls(r),
       ]),
     ]);
   }

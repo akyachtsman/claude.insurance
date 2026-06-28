@@ -15,11 +15,46 @@ export function validateRequest({ subject, message } = {}) {
   return { ok: true };
 }
 
-// Status → display treatment for the requests list.
+// The request lifecycle as an ordered pipeline the client can track. `wait`
+// is the plain-language "what's happening now" line shown to the client.
+export const REQUEST_STAGES = [
+  { key: "requested",     track: "Submitted",     wait: "Waiting for your broker to review" },
+  { key: "broker_review", track: "Broker review", wait: "Your broker is reviewing your request" },
+  { key: "underwriting",  track: "Underwriting",  wait: "Submitted to the underwriter for approval" },
+  { key: "approved",      track: "Approved",      wait: "Approved — your broker will follow up" },
+];
+
+// Stage position for the progress tracker. `declined` is terminal and off-track.
+export function stageInfo(status) {
+  if (status === "declined") {
+    return { key: "declined", step: 0, total: REQUEST_STAGES.length, track: "Declined", wait: "This request was declined — talk to your broker", terminal: true, declined: true };
+  }
+  const idx = REQUEST_STAGES.findIndex((s) => s.key === status);
+  const i = idx < 0 ? 0 : idx;
+  const s = REQUEST_STAGES[i];
+  return { key: s.key, step: i + 1, total: REQUEST_STAGES.length, track: s.track, wait: s.wait, terminal: s.key === "approved", declined: false };
+}
+
+// A request is still in flight (not approved or declined) → shows on the
+// landing "Request status" window.
+export function isPending(status) {
+  return status !== "approved" && status !== "declined";
+}
+
+// The next stage a broker can advance a request to (null at/after underwriting).
+export function nextStage(status) {
+  const i = REQUEST_STAGES.findIndex((s) => s.key === status);
+  if (i < 0 || i >= REQUEST_STAGES.length - 1) return null; // unknown, or already approved
+  return REQUEST_STAGES[i + 1].key;
+}
+
+// Status → pill treatment for the requests list.
 const STATUS = {
-  requested: { label: "Awaiting approval", cls: "k-pill--rec", icon: "spark" },
-  approved:  { label: "Approved", cls: "k-pill--ok", icon: "check" },
-  declined:  { label: "Declined", cls: "k-pill--gap", icon: "x" },
+  requested:     { label: "Submitted", cls: "k-pill--rec", icon: "spark" },
+  broker_review: { label: "Broker review", cls: "k-pill--rec", icon: "user" },
+  underwriting:  { label: "Underwriting", cls: "k-pill--rec", icon: "clipboard" },
+  approved:      { label: "Approved", cls: "k-pill--ok", icon: "check" },
+  declined:      { label: "Declined", cls: "k-pill--gap", icon: "x" },
 };
 export function statusDisplay(status) {
   return STATUS[status] || STATUS.requested;
