@@ -524,7 +524,7 @@ function entityPanel(entity, settings) {
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
-  const emailInput = el("input", { attrs: { type: "email", value: DEMO_CREDENTIAL.email, autocomplete: "username" } });
+  const emailInput = el("input", { attrs: { type: "text", value: DEMO_CREDENTIAL.email, autocomplete: "username" } });
   const pwInput = el("input", { attrs: { type: "password", value: DEMO_CREDENTIAL.password, autocomplete: "current-password" } });
   const error = el("p", { class: "k-error", attrs: { role: "alert" } });
   const btn = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Log in" }), icon("arrow-right", { size: 20 })]);
@@ -545,10 +545,11 @@ export function renderKeepLogin() {
     el("div", { class: "k-abrand" }, [el("span", { text: "Harborline" }), el("span", { class: "k-tag", text: "The Keep" })]),
     el("h1", { class: "k-atitle", text: "Welcome back" }),
     el("p", { class: "k-asub", text: "Log in to your Keep." }),
-    el("label", { class: "k-fld" }, [el("span", { text: "Email" }), emailInput]),
+    el("label", { class: "k-fld" }, [el("span", { text: "Username" }), emailInput]),
     el("label", { class: "k-fld" }, [el("span", { text: "Password" }), pwInput]),
     btn,
     error,
+    el("p", { class: "k-ameta" }, [el("b", { text: "Demo logins: " }), el("span", { text: "“user” for the client view · “broker” for the broker view — same password (prefilled)." })]),
     el("p", { class: "k-ameta", text: `Forgot your password? Contact your broker (${BROKER_NAME}) to reset it.` }),
     el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
   ]);
