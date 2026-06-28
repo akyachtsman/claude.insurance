@@ -125,11 +125,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, event, broker: brokerMail, client: clientMail });
   }
 
-  // event === "approved" — broker or service-role only.
+  // event === "approved" — broker, underwriter, or service-role only.
   if (!isServiceRole) {
     if (!user) return json({ error: "forbidden" }, 403);
     const { data: prof } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (prof?.role !== "broker") return json({ error: "forbidden" }, 403);
+    if (prof?.role !== "broker" && prof?.role !== "underwriter") return json({ error: "forbidden" }, 403);
   }
   await admin.from("enhancement_requests")
     .update({ status: "approved", approved_at: new Date().toISOString(), approved_notified_at: new Date().toISOString() })
