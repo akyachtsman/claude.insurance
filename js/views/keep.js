@@ -16,6 +16,7 @@ import {
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
+import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -135,10 +136,121 @@ function closeKeepMenus() {
     if (t) t.setAttribute("aria-expanded", "false");
   });
 }
+// Close any open search/command dropdowns (the nav search and the landing box).
+function closeKeepSearch() {
+  document.querySelectorAll(".k-search.is-open, .k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
+}
 if (typeof document !== "undefined" && !document.__keepMenusInit) {
   document.__keepMenusInit = true;
-  document.addEventListener("click", (e) => { if (!e.target.closest(".k-pop")) closeKeepMenus(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeKeepMenus(); });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".k-pop")) closeKeepMenus();
+    if (!e.target.closest(".k-search")) document.querySelectorAll(".k-search.is-open").forEach((s) => s.classList.remove("is-open"));
+    if (!e.target.closest(".k-cmd")) document.querySelectorAll(".k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeKeepMenus(); closeKeepSearch(); } });
+}
+
+// ── Search / command dropdowns ───────────────────────────────────────────────
+// One row in a results dropdown (records or actions). Anchors carry the href so
+// navigation works natively; the parent clears + closes on click.
+function resultRow(r, tag) {
+  return el("a", { class: "k-sresult", attrs: { href: r.href } }, [
+    el("span", { class: "k-sresult__ic" }, [icon(r.icon, { size: 16 })]),
+    el("div", { class: "k-sresult__main" }, [
+      el("div", { class: "k-sresult__t", text: r.label }),
+      el("div", { class: "k-sresult__s", text: r.sub || r.hint || "" }),
+    ]),
+    el("span", { class: "k-sresult__tag", text: tag }),
+  ]);
+}
+
+const RECORD_TAGS = { entity: "Entity", asset: "Asset", policy: "Policy", document: "Document" };
+
+// Top-nav search box: searches the user's records and surfaces matching actions.
+function searchBox() {
+  const input = el("input", { class: "k-search__in", attrs: { type: "search", placeholder: "Search entities, policies, documents…", "aria-label": "Search the Keep", autocomplete: "off" } });
+  const panel = el("div", { class: "k-search__panel" });
+  const wrap = el("div", { class: "k-search" }, [el("span", { class: "k-search__ic" }, [icon("search", { size: 18 })]), input, panel]);
+  let firstHref = null;
+
+  function render() {
+    const q = input.value.trim();
+    panel.replaceChildren();
+    firstHref = null;
+    if (!q) { wrap.classList.remove("is-open"); return; }
+    const records = searchRecords(q, getEntities(), 6);
+    const actions = matchActions(q, 4);
+    if (records.length) {
+      panel.appendChild(el("div", { class: "k-search__lbl", text: "Your records" }));
+      records.forEach((r) => { if (!firstHref) firstHref = r.href; panel.appendChild(resultRow(r, RECORD_TAGS[r.type] || "")); });
+    }
+    if (actions.length) {
+      panel.appendChild(el("div", { class: "k-search__lbl", text: "Actions" }));
+      actions.forEach((a) => { if (!firstHref) firstHref = a.href; panel.appendChild(resultRow(a, "Action")); });
+    }
+    if (!records.length && !actions.length) {
+      panel.appendChild(el("div", { class: "k-search__empty", text: `No matches for “${q}”.` }));
+    }
+    wrap.classList.add("is-open");
+  }
+
+  input.addEventListener("input", render);
+  input.addEventListener("focus", () => { if (input.value.trim()) render(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); if (firstHref) { go(firstHref); input.value = ""; wrap.classList.remove("is-open"); input.blur(); } }
+  });
+  panel.addEventListener("click", (e) => { if (e.target.closest("a")) { input.value = ""; wrap.classList.remove("is-open"); } });
+  return wrap;
+}
+
+// Landing "command" box: free-text intent → suggested actions (and records),
+// with default suggestion chips when empty. Drives the "what would you like to
+// accomplish today?" prompt.
+const LANDING_SUGGESTIONS = ["add-entity", "audit", "documents", "add-asset"];
+function landingCommand() {
+  const input = el("input", { class: "k-cmd__in", attrs: { type: "text", placeholder: "Try “add an entity”, “audit my policies”, “download a document”…", "aria-label": "What would you like to do?", autocomplete: "off" } });
+  const goBtn = el("button", { class: "k-cmd__go", attrs: { type: "button", "aria-label": "Go" } }, [icon("arrow-right", { size: 20 })]);
+  const panel = el("div", { class: "k-cmd__panel" });
+  const wrap = el("div", { class: "k-cmd" }, [
+    el("div", { class: "k-cmd__bar" }, [el("span", { class: "k-cmd__ic" }, [icon("spark", { size: 20 })]), input, goBtn]),
+    panel,
+  ]);
+  let firstHref = null;
+
+  function render() {
+    const q = input.value.trim();
+    panel.replaceChildren();
+    firstHref = null;
+    if (!q) { wrap.classList.remove("is-open"); return; }
+    const actions = matchActions(q, 5);
+    const records = searchRecords(q, getEntities(), 4);
+    if (actions.length) {
+      panel.appendChild(el("div", { class: "k-search__lbl", text: "Suggested actions" }));
+      actions.forEach((a) => { if (!firstHref) firstHref = a.href; panel.appendChild(resultRow(a, "Action")); });
+    }
+    if (records.length) {
+      panel.appendChild(el("div", { class: "k-search__lbl", text: "In your account" }));
+      records.forEach((r) => { if (!firstHref) firstHref = r.href; panel.appendChild(resultRow(r, RECORD_TAGS[r.type] || "")); });
+    }
+    if (!actions.length && !records.length) {
+      panel.appendChild(el("div", { class: "k-search__empty", text: `I didn't find anything for “${q}”. Try “add an entity” or “audit my policies”.` }));
+    }
+    wrap.classList.add("is-open");
+  }
+  function submit() { if (firstHref) { go(firstHref); } }
+
+  input.addEventListener("input", render);
+  input.addEventListener("focus", () => { if (input.value.trim()) render(); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+  goBtn.addEventListener("click", submit);
+  panel.addEventListener("click", (e) => { if (e.target.closest("a")) wrap.classList.remove("is-open"); });
+
+  const chips = LANDING_SUGGESTIONS
+    .map((id) => KEEP_ACTIONS.find((a) => a.id === id))
+    .filter(Boolean)
+    .map((a) => el("a", { class: "k-cmd__chip", attrs: { href: a.href } }, [icon(a.icon, { size: 15 }), el("span", { text: a.label })]));
+
+  return el("div", { class: "k-cmd-wrap" }, [wrap, el("div", { class: "k-cmd__chips" }, chips)]);
 }
 
 function popover(trigger, panel, alignRight) {
@@ -229,7 +341,7 @@ function appBar(active) {
         link("Relationships", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
-      el("div", { class: "k-bar__rt" }, [notifMenu(), accountMenu()]),
+      el("div", { class: "k-bar__rt" }, [searchBox(), notifMenu(), accountMenu()]),
     ]),
   ]);
 }
@@ -517,6 +629,7 @@ export async function renderKeepLanding() {
     el("section", { class: "k-welcome" }, [
       el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
       el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
+      landingCommand(),
     ]),
     el("section", { class: "k-report" }, [
       el("div", { class: "k-report__h" }, [
@@ -532,7 +645,7 @@ export async function renderKeepLanding() {
         statTile("Assets", assets),
         statTile("Active policies", policies),
         statTile("Coverage gaps", gaps, gaps ? "review recommended" : "none open"),
-        statTile("Insured value", money(insured) || "$0"),
+        statTile("Total asset value", money(insured) || "$0"),
         statTile("Lapsed", lapsed, lapsed ? "action needed" : "none"),
       ]),
     ]),
