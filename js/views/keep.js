@@ -340,7 +340,7 @@ function appBar(active) {
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
         link("Policies", "#/keep/insurance", "insurance"),
-        link("My Entities", "#/keep/list", "list"),
+        link("Entities", "#/keep/list", "list"),
         link("Relationships", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
@@ -358,7 +358,7 @@ function page(active, contentChildren, opts = {}) {
 // fall through to a plain "Back").
 const KEEP_LABELS = {
   "#/keep": "home",
-  "#/keep/list": "my entities",
+  "#/keep/list": "entities",
   "#/keep/insurance": "policies",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
