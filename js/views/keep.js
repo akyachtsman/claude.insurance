@@ -19,6 +19,7 @@ import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
+import { buildPdf, docLines } from "../keep/docfile.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -121,6 +122,35 @@ function money(v) {
   if (v >= 1000000) return "$" + (v / 1000000).toFixed(v % 1000000 ? 1 : 0) + "M";
   if (v >= 1000) return "$" + Math.round(v / 1000) + "K";
   return "$" + v;
+}
+
+// Generate + download a placeholder PDF for a demo document (no real file is
+// stored; see js/keep/docfile.js). Named after the document.
+function downloadDocument(name, context) {
+  const bytes = buildPdf(docLines(name, context));
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i) & 0xff;
+  const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
+  const a = el("a", { attrs: { href: url, download: `${name}.pdf` } });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadButton(name, context) {
+  const b = el("button", { class: "k-dl", attrs: { type: "button", title: `Download ${name}`, "aria-label": `Download ${name}` } }, [icon("download", { size: 15 })]);
+  b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); downloadDocument(name, context); });
+  return b;
+}
+
+// A document row: the document (optionally linking to its policy) plus a
+// download button. `context` lines are embedded in the generated PDF.
+function docItem(name, href, context, dataDoc) {
+  const label = href
+    ? el("a", { class: "k-doclink", attrs: { href } }, [icon("doc", { size: 15 }), el("span", { text: name })])
+    : el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: name })]);
+  const row = el("div", { class: "k-docrow" }, [label, downloadButton(name, context)]);
+  if (dataDoc) row.setAttribute("data-doc", dataDoc);
+  return row;
 }
 
 function ribbon() {
@@ -731,11 +761,11 @@ export function renderKeepInsurance() {
     return r.sort((a, b) => a.policy.renewalInDays - b.policy.renewalInDays); // due date (soonest/most overdue first)
   }
 
-  function docCell(policy) {
+  function docCell(policy, asset, entity) {
     const docs = policy.documents || [];
     if (!docs.length) return el("span", { class: "k-imuted", text: "—" });
     return el("div", { class: "k-idocs" }, docs.map((d) =>
-      el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${policy.id}` } }, [icon("doc", { size: 14 }), el("span", { text: d })])));
+      docItem(d, `#/keep/policy/${policy.id}`, [policy.line, asset.name, entity.name])));
   }
 
   function sortBtn(key, label) {
@@ -756,7 +786,7 @@ export function renderKeepInsurance() {
       el("td", { text: policy.carrier || "—" }),
       el("td", {}, [expiryBadge(policy.renewalInDays)]),
       el("td", { text: policy.premium || "—" }),
-      el("td", {}, [docCell(policy)]),
+      el("td", {}, [docCell(policy, asset, entity)]),
     ]));
 
     const view = page("insurance", [
@@ -1235,7 +1265,7 @@ export function renderKeepPolicy(params, id) {
     ? ` Renewal reminders: ${sched.join(", ")} days before ${dateFromDays(policy.renewalInDays)}` + (rinfo.next ? ` · next at ${rinfo.next} days` : " · none upcoming")
     : " Renewal reminders are off — turn them on in Settings.";
   const docs = el("div", {}, [
-    el("div", {}, (policy.documents || []).map((d) => el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: d })]))),
+    el("div", { class: "k-doclist" }, (policy.documents || []).map((d) => docItem(d, null, [policy.line, asset.name, policy.number ? `Policy ${policy.number}` : ""]))),
     el("p", { class: "k-note" }, [el("b", { text: "Claims history: " }), el("span", { text: policy.claims || "None" })]),
     el("p", { class: "k-note" }, [icon("bell", { size: 14 }), el("span", { text: reminderText })]),
   ]);
@@ -1392,7 +1422,7 @@ export function renderKeepDocuments() {
         if (!p.documents || !p.documents.length) continue;
         const links = p.documents.map((d) => {
           const match = `${d} ${p.line} ${a.name} ${ent.name}`.toLowerCase();
-          return el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${p.id}`, "data-doc": match } }, [icon("doc", { size: 15 }), el("span", { text: d })]);
+          return docItem(d, `#/keep/policy/${p.id}`, [p.line, a.name, ent.name], match);
         });
         assetCount += p.documents.length;
         policyBlocks.push(el("div", { class: "k-doc-policy" }, [
@@ -1442,9 +1472,9 @@ export function renderKeepDocuments() {
         let asVis = false;
         as.querySelectorAll(".k-doc-policy").forEach((pol) => {
           let polVis = false;
-          pol.querySelectorAll(".k-doclink").forEach((link) => {
-            const show = !q || (link.dataset.doc || "").includes(q);
-            link.hidden = !show;
+          pol.querySelectorAll(".k-docrow").forEach((row) => {
+            const show = !q || (row.dataset.doc || "").includes(q);
+            row.hidden = !show;
             if (show) polVis = true;
           });
           pol.hidden = !polVis;
