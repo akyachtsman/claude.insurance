@@ -224,6 +224,7 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
+        link("Insurance", "#/keep/insurance", "insurance"),
         link("Entity List", "#/keep/list", "list"),
         link("Entity Flow", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
@@ -243,6 +244,7 @@ function page(active, contentChildren, opts = {}) {
 const KEEP_LABELS = {
   "#/keep": "home",
   "#/keep/list": "entity list",
+  "#/keep/insurance": "insurance",
   "#/keep/entities": "entity flow",
   "#/keep/documents": "documents",
   "#/keep/account": "account",
@@ -539,6 +541,67 @@ export async function renderKeepLanding() {
 }
 
 // Entity List — the entities-with-assets view (formerly the dashboard).
+// Insurance — every policy across all entities in one sortable table.
+export function renderKeepInsurance() {
+  const rows = collectPolicies();
+  const state = { sort: "due" };
+
+  function sorted() {
+    const r = [...rows];
+    if (state.sort === "entity") return r.sort((a, b) => a.entity.name.localeCompare(b.entity.name) || a.policy.line.localeCompare(b.policy.line));
+    if (state.sort === "policy") return r.sort((a, b) => a.policy.line.localeCompare(b.policy.line));
+    return r.sort((a, b) => a.policy.renewalInDays - b.policy.renewalInDays); // due date (soonest/most overdue first)
+  }
+
+  function docCell(policy) {
+    const docs = policy.documents || [];
+    if (!docs.length) return el("span", { class: "k-imuted", text: "—" });
+    return el("div", { class: "k-idocs" }, docs.map((d) =>
+      el("a", { class: "k-doclink", attrs: { href: `#/keep/policy/${policy.id}` } }, [icon("doc", { size: 14 }), el("span", { text: d })])));
+  }
+
+  function sortBtn(key, label) {
+    const b = el("button", { class: `k-sortbtn${state.sort === key ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(state.sort === key) } }, [el("span", { text: label })]);
+    b.addEventListener("click", () => { state.sort = key; render(); });
+    return b;
+  }
+
+  function render() {
+    const headers = ["Policy", "Entity", "Asset", "Carrier", "Renewal", "Premium", "Documents"];
+    const body = sorted().map(({ policy, asset, entity }) => el("tr", {}, [
+      el("td", {}, [
+        el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${policy.id}` }, text: policy.line }),
+        el("div", { class: "k-imuted", text: policy.number || "" }),
+      ]),
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name })]),
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name })]),
+      el("td", { text: policy.carrier || "—" }),
+      el("td", {}, [expiryBadge(policy.renewalInDays)]),
+      el("td", { text: policy.premium || "—" }),
+      el("td", {}, [docCell(policy)]),
+    ]));
+
+    const view = page("insurance", [
+      el("h1", { class: "k-h1", text: "Insurance" }),
+      el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
+      el("div", { class: "k-sortrow" }, [
+        el("span", { class: "k-sortlbl", text: "Sort" }),
+        sortBtn("due", "Due date"), sortBtn("entity", "Entity"), sortBtn("policy", "Policy"),
+      ]),
+      rows.length
+        ? el("div", { class: "k-itable-wrap" }, [
+            el("table", { class: "k-itable" }, [
+              el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
+              el("tbody", {}, body),
+            ]),
+          ])
+        : el("div", { class: "k-empty", text: "No policies on file yet — your broker adds them as they're bound." }),
+    ]);
+    mount(view);
+  }
+  render();
+}
+
 export async function renderKeepEntityList() {
   const settings = await getRuleDefaults();
   const view = page("list", [
