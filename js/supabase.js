@@ -80,7 +80,7 @@ async function loadTree(knownUser) {
   const uid = user ? user.id : null;
 
   const [profileRes, entRes, assetRes, polRes, relRes] = await Promise.all([
-    supabase.from("profiles").select("full_name, reminder_email, reminder_schedule").eq("id", uid).maybeSingle(),
+    supabase.from("profiles").select("full_name, role, reminder_email, reminder_schedule").eq("id", uid).maybeSingle(),
     supabase.from("entities").select("*").order("created_at"),
     supabase.from("assets").select("*").order("created_at"),
     supabase.from("policies").select("*").order("renewal_date"),
@@ -117,6 +117,8 @@ async function loadTree(knownUser) {
       name,
       initials: initialsOf(name),
       email: (user && user.email) || "",
+      role: profile.role || "client",
+      id: uid,
     },
     entities,
     entityById,
@@ -306,6 +308,65 @@ export async function addAsset({ entityId, type, name, meta, value }) {
   if (error) return { ok: false, error: error.message };
   invalidate();
   return { ok: true, id: data.id };
+}
+
+// ── Policy enhancement requests ──────────────────────────────────────────────
+// A client asks the broker to add/increase coverage; the broker gives final
+// approval. Emails (to broker + client) fire at both steps via the
+// notify-enhancement Edge Function. Requests are fetched fresh (not part of the
+// cached tree) so status changes show without a full reload.
+function adaptRequest(row) {
+  return {
+    id: row.id,
+    policyId: row.policy_id || null,
+    assetId: row.asset_id || null,
+    entityId: row.entity_id || null,
+    subject: row.subject,
+    message: row.message,
+    context: row.context || "",
+    status: row.status,
+    createdInDays: daysFromToday((row.created_at || "").slice(0, 10)),
+    approved: row.status === "approved",
+  };
+}
+
+export async function addEnhancementRequest({ subject, message, policyId, assetId, entityId, context }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { data, error } = await supabase.from("enhancement_requests")
+    .insert({
+      owner: user.id, subject, message,
+      policy_id: policyId || null, asset_id: assetId || null, entity_id: entityId || null,
+      context: context || null,
+    })
+    .select().single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, id: data.id };
+}
+
+export async function loadEnhancementRequests() {
+  const { data, error } = await supabase.from("enhancement_requests").select("*").order("created_at", { ascending: false });
+  if (error) { console.warn("loadEnhancementRequests failed —", error.message); return []; }
+  return (data || []).map(adaptRequest);
+}
+
+// Invoke the Edge Function to email everyone for an event ("requested" |
+// "approved"). Best-effort: the request is already saved; email may be off if
+// the provider key isn't configured yet.
+export async function notifyEnhancement(requestId, event) {
+  try {
+    const { data, error } = await supabase.functions.invoke("notify-enhancement", { body: { requestId, event } });
+    if (error) { console.warn("notifyEnhancement failed —", error.message); return { ok: false, error: error.message }; }
+    return { ok: true, result: data };
+  } catch (e) {
+    console.warn("notifyEnhancement threw —", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// Broker-only final approval (RLS + the Edge Function both enforce role).
+export async function approveEnhancement(requestId) {
+  return notifyEnhancement(requestId, "approved");
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

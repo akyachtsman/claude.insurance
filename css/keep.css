@@ -423,6 +423,26 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-cmd__chip:hover { background: var(--color-accent-ring); }
 .k-cmd__chip .icon { color: var(--color-accent); }
 
+/* ── Policy enhancement requests ────────────────────────────────────────────── */
+.k-fld textarea { width: 100%; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 12px var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; resize: vertical; min-height: 120px; }
+.k-fld textarea:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
+.k-reqctx { display: flex; align-items: center; gap: 12px; background: var(--color-accent-light); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: var(--space-4); }
+.k-reqctx__t { font: 700 15px var(--font-display); color: var(--color-text-primary); }
+.k-reqctx__s { font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
+.k-pactions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: var(--space-5); }
+.k-pactions__hint { font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
+.k-btn--sm { padding: 8px 16px; min-height: 38px; font-size: 14px; box-shadow: none; }
+.k-reqhead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); }
+.k-reqlist { display: grid; gap: 14px; }
+.k-reqcard { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 18px 20px; }
+.k-reqcard__top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.k-reqcard__main { min-width: 0; }
+.k-reqcard__subj { font: 700 16px var(--font-display); color: var(--color-text-primary); }
+.k-reqcard__ctx { font: 600 13px var(--font-sans); color: var(--color-accent); margin-top: 2px; }
+.k-reqcard__msg { font: 600 14px var(--font-sans); color: var(--color-text-secondary); line-height: 1.5; margin: 10px 0 0; white-space: pre-wrap; }
+.k-reqcard__foot { display: flex; align-items: center; gap: var(--space-3); margin-top: 12px; }
+.k-reqcard__when { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-right: auto; }
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
   .k-grid2 { grid-template-columns: 1fr; }

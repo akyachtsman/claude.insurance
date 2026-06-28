@@ -10,6 +10,8 @@ export const KEEP_ACTIONS = [
     keywords: ["add entity", "new entity", "add business", "new business", "add trust", "create company", "add company", "llc", "corporation"] },
   { id: "add-asset", label: "Add an asset", hint: "Home, vehicle, valuables and more", href: "#/keep/add-asset", icon: "plus",
     keywords: ["add asset", "new asset", "add home", "add house", "add car", "add vehicle", "add property", "add boat", "add jewelry", "insure something"] },
+  { id: "request-enhancement", label: "Request a policy enhancement", hint: "Ask your broker to add or increase coverage", href: "#/keep/request", icon: "spark",
+    keywords: ["request enhancement", "policy enhancement", "enhance", "enhance coverage", "modify policy", "modify my policy", "increase coverage", "add coverage", "upgrade policy", "change policy", "improve coverage", "request change", "raise limits"] },
   { id: "audit", label: "Audit my policies", hint: "Review coverage and find gaps", href: "#/keep/insurance", icon: "clipboard",
     keywords: ["audit", "audit policies", "audit my policies", "review coverage", "review policies", "check coverage", "find gaps", "coverage gaps", "am i covered", "analyze coverage"] },
   { id: "documents", label: "Download a document", hint: "Find and open your documents", href: "#/keep/documents", icon: "doc",
