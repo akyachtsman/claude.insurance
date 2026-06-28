@@ -24,7 +24,7 @@ const BROKER_NAME = "Rosa Alvarez";
 // Breadcrumb separator node (kept as one helper so the glyph isn't duplicated).
 function sep() { return el("span", { text: "  ·  " }); }
 
-// Persist Entity Flow node positions (per browser) so dragged layouts survive
+// Persist Relationships-map node positions (per browser) so dragged layouts survive
 // re-renders, navigation and reloads. Keyed by entity id → {x, cy}.
 const REL_POS_KEY = "keep:relmap-positions";
 function loadRelPositions() {
@@ -225,8 +225,8 @@ function appBar(active) {
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
         link("Insurance", "#/keep/insurance", "insurance"),
-        link("Entity List", "#/keep/list", "list"),
-        link("Entity Flow", "#/keep/entities", "entities"),
+        link("My Entities", "#/keep/list", "list"),
+        link("Relationships", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
       el("div", { class: "k-bar__rt" }, [notifMenu(), accountMenu()]),
@@ -243,9 +243,9 @@ function page(active, contentChildren, opts = {}) {
 // fall through to a plain "Back").
 const KEEP_LABELS = {
   "#/keep": "home",
-  "#/keep/list": "entity list",
+  "#/keep/list": "my entities",
   "#/keep/insurance": "insurance",
-  "#/keep/entities": "entity flow",
+  "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
   "#/keep/account": "account",
   "#/keep/security": "security",
@@ -540,7 +540,7 @@ export async function renderKeepLanding() {
   mount(view);
 }
 
-// Entity List — the entities-with-assets view (formerly the dashboard).
+// My Entities — the entities-with-assets view (formerly the dashboard).
 // Insurance — every policy across all entities in one sortable table.
 export function renderKeepInsurance() {
   const rows = collectPolicies();
@@ -605,7 +605,7 @@ export function renderKeepInsurance() {
 export async function renderKeepEntityList() {
   const settings = await getRuleDefaults();
   const view = page("list", [
-    el("h1", { class: "k-h1", text: "Entity list" }),
+    el("h1", { class: "k-h1", text: "My entities" }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
     el("div", { class: "k-privacy" }, [
       icon("lock", { size: 16 }),
@@ -748,8 +748,8 @@ function relationshipMap() {
 
 export function renderKeepEntities() {
   const view = page("entities", [
-    el("h1", { class: "k-h1", text: "Entities" }),
-    el("p", { class: "k-sub", text: "How you and your businesses connect. Drag any node to rearrange; tap your own entities to open them." }),
+    el("h1", { class: "k-h1", text: "Relationships" }),
+    el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
   ]);
@@ -763,7 +763,7 @@ export async function renderKeepEntity(params, id) {
   const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
   const view = page("entities", [
     backLink("#/keep/entities", "entities"),
-    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
+    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
@@ -796,7 +796,7 @@ export async function renderKeepAsset(params, id) {
   const sections = [
     backLink(`#/keep/entity/${entity.id}`, entity.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("span", { text: asset.name }),
     ]),
@@ -1001,7 +1001,7 @@ export function renderKeepPolicy(params, id) {
   const sections = [
     backLink(`#/keep/asset/${asset.id}`, asset.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep/entities" }, text: "Entities" }), sep(),
+      el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), sep(),
       el("span", { text: "Policy" }),
