@@ -13,10 +13,12 @@ import {
   getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
   getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
   invalidate, ensureData, DEMO_CREDENTIAL,
+  addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement,
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
+import { validateRequest, statusDisplay, defaultSubject } from "../keep/requests.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -206,7 +208,7 @@ function searchBox() {
 // Landing "command" box: free-text intent → suggested actions (and records),
 // with default suggestion chips when empty. Drives the "what would you like to
 // accomplish today?" prompt.
-const LANDING_SUGGESTIONS = ["add-entity", "audit", "documents", "add-asset"];
+const LANDING_SUGGESTIONS = ["request-enhancement", "audit", "documents", "add-entity"];
 function landingCommand() {
   const input = el("input", { class: "k-cmd__in", attrs: { type: "text", placeholder: "Try “add an entity”, “audit my policies”, “download a document”…", "aria-label": "What would you like to do?", autocomplete: "off" } });
   const goBtn = el("button", { class: "k-cmd__go", attrs: { type: "button", "aria-label": "Go" } }, [icon("arrow-right", { size: 20 })]);
@@ -309,6 +311,7 @@ function accountMenu() {
         el("div", { class: "k-menu__email", text: user.email }),
       ]),
     ]),
+    el("a", { attrs: { href: "#/keep/requests" } }, [icon("spark", { size: 18 }), el("span", { text: "My requests" })]),
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
     el("a", { attrs: { href: "#/keep/security" } }, [icon("shield", { size: 18 }), el("span", { text: "Security & privacy" })]),
     el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
@@ -359,6 +362,7 @@ const KEEP_LABELS = {
   "#/keep/insurance": "policies",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
+  "#/keep/requests": "my requests",
   "#/keep/account": "account",
   "#/keep/security": "security",
 };
@@ -1128,6 +1132,10 @@ export function renderKeepPolicy(params, id) {
       expiryBadge(policy.renewalInDays),
     ]),
     el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Maintained by your broker (${policy.agent}) · encrypted & private` })]),
+    el("div", { class: "k-pactions" }, [
+      el("a", { class: "k-btn", attrs: { href: `#/keep/request/${policy.id}` } }, [icon("spark", { size: 18 }), el("span", { text: "Request enhancement" })]),
+      el("span", { class: "k-pactions__hint", text: "Ask your broker to add or change coverage on this policy." }),
+    ]),
     grp("clipboard", "Policy", pg([
       ["Policy number", policy.number], ["Policy form", policy.form], ["Status", statusLabel],
       ["Effective", dateFromDays(policy.effectiveInDays)], ["Expires / renews", dateFromDays(policy.renewalInDays)], ["Auto-renew", policy.autoRenew ? "On" : "Off"],
@@ -1173,6 +1181,111 @@ export function renderKeepPolicy(params, id) {
   sections.push(grp("doc", "Documents & history", docs));
 
   mount(page("entities", sections, { narrow: true }));
+}
+
+// Request a policy enhancement. Optional policyId pre-fills the context from a
+// specific policy (the "Modify" button on a policy page); without it, it's a
+// general request (e.g. from the home smart prompt).
+export function renderKeepRequest(policyId) {
+  const found = policyId ? findPolicy(policyId) : null;
+  const ctx = found
+    ? { policyId: found.policy.id, assetId: found.asset.id, entityId: found.entity.id,
+        label: `${found.policy.line} · ${found.asset.name}`, line: found.policy.line }
+    : { policyId: null, assetId: null, entityId: null, label: "", line: "" };
+
+  const subjectInput = el("input", { attrs: { type: "text", value: defaultSubject(ctx.line), maxlength: "200" } });
+  const messageInput = el("textarea", { attrs: { rows: "5", placeholder: "Describe the change you'd like — e.g. raise liability to $500K, add flood coverage, schedule a new appraisal…", maxlength: "4000" } });
+  const error = el("p", { class: "k-error", attrs: { role: "alert" } });
+  const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Send request to broker" }), icon("arrow-right", { size: 20 })]);
+
+  async function create() {
+    error.textContent = "";
+    const subject = subjectInput.value.trim();
+    const message = messageInput.value.trim();
+    const v = validateRequest({ subject, message });
+    if (!v.ok) { error.textContent = v.error; return; }
+    submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Sending…";
+    const res = await addEnhancementRequest({ subject, message, policyId: ctx.policyId, assetId: ctx.assetId, entityId: ctx.entityId, context: ctx.label || null });
+    if (!res.ok) {
+      error.textContent = res.error || "Could not send your request. Please try again.";
+      submit.removeAttribute("disabled"); submit.querySelector("span").textContent = "Send request to broker";
+      return;
+    }
+    // Best-effort email to broker + client; the request is already saved.
+    await notifyEnhancement(res.id, "requested");
+    go("#/keep/requests");
+  }
+
+  const form = el("form", {}, [
+    el("h1", { class: "k-h1", text: "Request a policy enhancement" }),
+    el("p", { class: "k-sub", text: "Tell your broker what you'd like to add or change. They review every request and give final approval — you'll be emailed at each step." }),
+    found ? el("div", { class: "k-reqctx" }, [
+      el("span", { class: `k-cic k-cic--${found.policy.cic}` }, [icon(found.policy.icon, { size: 22 })]),
+      el("div", {}, [
+        el("div", { class: "k-reqctx__t", text: found.policy.line }),
+        el("div", { class: "k-reqctx__s", text: `${found.asset.name}${found.policy.carrier ? ` · ${found.policy.carrier}` : ""}` }),
+      ]),
+    ]) : null,
+    el("label", { class: "k-fld" }, [el("span", { text: "Subject" }), subjectInput]),
+    el("label", { class: "k-fld" }, [el("span", { text: "What would you like to change?" }), messageInput]),
+    submit, error,
+    el("p", { class: "k-setnote" }, [icon("lock", { size: 14 }), el("span", { text: " This sends a request only — your broker confirms what's available and binds any change." })]),
+  ]);
+  form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
+
+  mount(page("requests", [backLink(found ? `#/keep/policy/${found.policy.id}` : "#/keep", found ? found.policy.line : "home"), form], { narrow: true }));
+}
+
+// The client's enhancement requests, newest first, with live status. Brokers
+// additionally see an Approve control on pending requests.
+export async function renderKeepRequests() {
+  const requests = await loadEnhancementRequests();
+  const isBroker = getUser() && getUser().role === "broker";
+
+  const when = (days) => days == null ? "" : (days === 0 ? "Today" : days === -1 ? "Yesterday" : `${Math.abs(days)} days ago`);
+
+  function card(r) {
+    const st = statusDisplay(r.status);
+    const actions = [];
+    if (isBroker && r.status === "requested") {
+      const approve = el("button", { class: "k-btn k-btn--sm", attrs: { type: "button" } }, [el("span", { text: "Approve" }), icon("check", { size: 16 })]);
+      approve.addEventListener("click", async () => {
+        approve.setAttribute("disabled", "disabled"); approve.querySelector("span").textContent = "Approving…";
+        await approveEnhancement(r.id);
+        renderKeepRequests();
+      });
+      actions.push(approve);
+    }
+    return el("div", { class: "k-reqcard" }, [
+      el("div", { class: "k-reqcard__top" }, [
+        el("div", { class: "k-reqcard__main" }, [
+          el("div", { class: "k-reqcard__subj", text: r.subject }),
+          r.context ? el("div", { class: "k-reqcard__ctx", text: r.context }) : null,
+        ]),
+        el("span", { class: `k-pill ${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]),
+      ]),
+      el("p", { class: "k-reqcard__msg", text: r.message }),
+      el("div", { class: "k-reqcard__foot" }, [
+        el("span", { class: "k-reqcard__when", text: when(r.createdInDays) }),
+        ...actions,
+      ]),
+    ]);
+  }
+
+  const view = page("requests", [
+    backLink("#/keep", "home"),
+    el("div", { class: "k-reqhead" }, [
+      el("div", {}, [
+        el("h1", { class: "k-h1", text: isBroker ? "Enhancement requests" : "My requests" }),
+        el("p", { class: "k-sub", text: isBroker ? "Client requests awaiting your review and final approval." : "Policy enhancements you've asked your broker for." }),
+      ]),
+      el("a", { class: "k-btn", attrs: { href: "#/keep/request" } }, [icon("plus", { size: 18 }), el("span", { text: "New request" })]),
+    ]),
+    requests.length
+      ? el("div", { class: "k-reqlist" }, requests.map(card))
+      : el("div", { class: "k-empty", text: "No requests yet. Use “New request” or the home prompt to ask your broker for a coverage change." }),
+  ], { narrow: true });
+  mount(view);
 }
 
 export function renderKeepDocuments() {

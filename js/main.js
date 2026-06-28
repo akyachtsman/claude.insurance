@@ -11,6 +11,7 @@ import { renderSummary } from "./views/summary.js";
 import {
   renderKeepLogin, renderKeepLanding, renderKeepInsurance, renderKeepEntityList, renderKeepEntities, renderKeepEntity,
   renderKeepAsset, renderKeepAddAsset, renderKeepAddEntity, renderKeepPolicy,
+  renderKeepRequest, renderKeepRequests,
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./views/keep.js";
 import { getSession, ensureData } from "./supabase.js";
@@ -107,6 +108,10 @@ async function dispatchKeep(rest) {
       return renderKeepAsset({}, id);
     case "policy":
       return renderKeepPolicy({}, id);
+    case "request":
+      return renderKeepRequest(id);
+    case "requests":
+      return renderKeepRequests();
     case "documents":
       return renderKeepDocuments();
     case "account":
