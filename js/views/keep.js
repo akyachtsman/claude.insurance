@@ -549,7 +549,7 @@ export function renderKeepLogin() {
     el("label", { class: "k-fld" }, [el("span", { text: "Password" }), pwInput]),
     btn,
     error,
-    el("p", { class: "k-ameta" }, [el("b", { text: "Demo logins: " }), el("span", { text: "“user” for the client view · “broker” for the broker view — same password (prefilled)." })]),
+    el("p", { class: "k-ameta" }, [el("b", { text: "Demo logins: " }), el("span", { text: "“user” (client) · “broker” (broker) · “underwriter” (underwriter) — same password (prefilled)." })]),
     el("p", { class: "k-ameta", text: `Forgot your password? Contact your broker (${BROKER_NAME}) to reset it.` }),
     el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
   ]);
@@ -611,8 +611,15 @@ function requestStepper(status) {
 
 // Compact "Request status" window for the landing page — pending requests with
 // their live stage. Links through to the full My requests list.
-function pendingRequestsReport(requests, isBroker) {
+function pendingRequestsReport(requests, role) {
   const pending = requests.filter((r) => isPending(r.status));
+  const isStaff = role === "broker" || role === "underwriter";
+  const HEAD = { broker: "Requests to action", underwriter: "Underwriting queue", client: "Request status" };
+  const EMPTY = {
+    broker: "No client requests in progress.",
+    underwriter: "No requests awaiting underwriting.",
+    client: "No requests in progress — start one from the prompt above.",
+  };
   const rows = pending.length
     ? pending.slice(0, 4).map((r) => {
         const info = stageInfo(r.status);
@@ -626,11 +633,11 @@ function pendingRequestsReport(requests, isBroker) {
           el("div", { class: "k-prq__wait", text: info.wait }),
         ]);
       })
-    : [el("div", { class: "k-report__empty", text: isBroker ? "No client requests in progress." : "No requests in progress — start one from the prompt above." })];
+    : [el("div", { class: "k-report__empty", text: EMPTY[role] || EMPTY.client })];
 
   return el("section", { class: "k-report" }, [
     el("div", { class: "k-report__h" }, [
-      el("h2", {}, [icon("spark", { size: 18 }), el("span", { text: isBroker ? "Requests to action" : "Request status" })]),
+      el("h2", {}, [icon("spark", { size: 18 }), el("span", { text: HEAD[role] || HEAD.client })]),
       el("a", { class: "k-report__count", attrs: { href: "#/keep/requests" }, text: pending.length ? `${pending.length} in progress →` : "View all →" }),
     ]),
     el("div", { class: "k-report__list" }, rows),
@@ -641,7 +648,7 @@ export async function renderKeepLanding() {
   const settings = await getRuleDefaults();
   const first = getUser().name.split(" ")[0];
   const entities = getEntities();
-  const isBroker = getUser() && getUser().role === "broker";
+  const role = (getUser() && getUser().role) || "client";
   const requests = await loadEnhancementRequests();
 
   // Aggregate at-a-glance numbers.
@@ -695,7 +702,7 @@ export async function renderKeepLanding() {
       ]),
       el("div", { class: "k-report__list" }, renewalRows),
     ]),
-    pendingRequestsReport(requests, isBroker),
+    pendingRequestsReport(requests, role),
     el("section", {}, [
       el("div", { class: "k-lbl", text: "At a glance" }),
       el("div", { class: "k-stats" }, [
@@ -1294,34 +1301,35 @@ export function renderKeepRequest(policyId) {
 // additionally see an Approve control on pending requests.
 export async function renderKeepRequests() {
   const requests = await loadEnhancementRequests();
-  const isBroker = getUser() && getUser().role === "broker";
+  const role = (getUser() && getUser().role) || "client";
+  const isStaff = role === "broker" || role === "underwriter";
 
   const when = (days) => days == null ? "" : (days === 0 ? "Today" : days === -1 ? "Yesterday" : `${Math.abs(days)} days ago`);
 
-  // Broker stage controls: advance to the next stage (Approve routes through the
-  // email function), or decline. Hidden for clients and terminal requests.
-  const NEXT_LABEL = { broker_review: "Mark received", underwriting: "Send to underwriter", approved: "Approve" };
-  function brokerControls(r) {
-    if (!isBroker || r.status === "approved" || r.status === "declined") return [];
-    const out = [];
-    const nx = nextStage(r.status);
-    if (nx) {
-      const advance = el("button", { class: "k-btn k-btn--sm", attrs: { type: "button" } }, [el("span", { text: NEXT_LABEL[nx] }), icon(nx === "approved" ? "check" : "arrow-right", { size: 16 })]);
-      advance.addEventListener("click", async () => {
-        advance.setAttribute("disabled", "disabled"); advance.querySelector("span").textContent = "Saving…";
-        if (nx === "approved") await approveEnhancement(r.id); else await advanceRequest(r.id, nx);
-        renderKeepRequests();
-      });
-      out.push(advance);
+  // Role-aware stage controls. Broker moves a request up to underwriting; the
+  // underwriter owns the underwriting → approved/declined decision. Approve
+  // routes through approveEnhancement (status flip + best-effort email).
+  const NEXT_LABEL = { broker_review: "Mark received", underwriting: "Send to underwriter" };
+  function stageButton(label, ic, run) {
+    const b = el("button", { class: "k-btn k-btn--sm", attrs: { type: "button" } }, [el("span", { text: label }), icon(ic, { size: 16 })]);
+    b.addEventListener("click", async () => { b.setAttribute("disabled", "disabled"); b.querySelector("span").textContent = "Saving…"; await run(); renderKeepRequests(); });
+    return b;
+  }
+  function declineButton(r) {
+    const b = el("button", { class: "k-btn k-btn--ghost k-btn--sm", attrs: { type: "button" } }, [el("span", { text: "Decline" })]);
+    b.addEventListener("click", async () => { b.setAttribute("disabled", "disabled"); b.querySelector("span").textContent = "…"; await advanceRequest(r.id, "declined"); renderKeepRequests(); });
+    return b;
+  }
+  function stageControls(r) {
+    if (r.status === "approved" || r.status === "declined") return [];
+    if (role === "broker" && (r.status === "requested" || r.status === "broker_review")) {
+      const nx = nextStage(r.status); // broker_review | underwriting
+      return [stageButton(NEXT_LABEL[nx], "arrow-right", () => advanceRequest(r.id, nx)), declineButton(r)];
     }
-    const decline = el("button", { class: "k-btn k-btn--ghost k-btn--sm", attrs: { type: "button" } }, [el("span", { text: "Decline" })]);
-    decline.addEventListener("click", async () => {
-      decline.setAttribute("disabled", "disabled"); decline.querySelector("span").textContent = "…";
-      await advanceRequest(r.id, "declined");
-      renderKeepRequests();
-    });
-    out.push(decline);
-    return out;
+    if (role === "underwriter" && r.status === "underwriting") {
+      return [stageButton("Approve", "check", () => approveEnhancement(r.id)), declineButton(r)];
+    }
+    return [];
   }
 
   function card(r) {
@@ -1340,23 +1348,31 @@ export async function renderKeepRequests() {
       el("p", { class: "k-reqcard__msg", text: r.message }),
       el("div", { class: "k-reqcard__foot" }, [
         el("span", { class: "k-reqcard__when", text: when(r.createdInDays) }),
-        ...brokerControls(r),
+        ...stageControls(r),
       ]),
     ]);
   }
+
+  const HEAD = {
+    broker: { h: "Requests to action", s: "Client requests — review and send to underwriting." },
+    underwriter: { h: "Underwriting queue", s: "Requests submitted for underwriting approval." },
+    client: { h: "My requests", s: "Policy enhancements you've asked your broker for." },
+  };
+  const head = HEAD[role] || HEAD.client;
+  const emptyText = isStaff ? "No requests to action right now." : "No requests yet. Use “New request” or the home prompt to ask your broker for a coverage change.";
 
   const view = page("requests", [
     backLink("#/keep", "home"),
     el("div", { class: "k-reqhead" }, [
       el("div", {}, [
-        el("h1", { class: "k-h1", text: isBroker ? "Enhancement requests" : "My requests" }),
-        el("p", { class: "k-sub", text: isBroker ? "Client requests awaiting your review and final approval." : "Policy enhancements you've asked your broker for." }),
+        el("h1", { class: "k-h1", text: head.h }),
+        el("p", { class: "k-sub", text: head.s }),
       ]),
-      el("a", { class: "k-btn", attrs: { href: "#/keep/request" } }, [icon("plus", { size: 18 }), el("span", { text: "New request" })]),
+      isStaff ? null : el("a", { class: "k-btn", attrs: { href: "#/keep/request" } }, [icon("plus", { size: 18 }), el("span", { text: "New request" })]),
     ]),
     requests.length
       ? el("div", { class: "k-reqlist" }, requests.map(card))
-      : el("div", { class: "k-empty", text: "No requests yet. Use “New request” or the home prompt to ask your broker for a coverage change." }),
+      : el("div", { class: "k-empty", text: emptyText }),
   ], { narrow: true });
   mount(view);
 }
