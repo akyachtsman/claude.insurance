@@ -27,9 +27,17 @@ export function isLive() {
   return Boolean(CONFIG.url && CONFIG.anonKey);
 }
 
-// One-click demo sign-in (the broker-invited sample client). RLS still scopes
-// every read/write to this account's own rows.
-export const DEMO_CREDENTIAL = { email: "jordan.m@example.com", password: "keep-demo-2026" };
+// Demo logins (RLS still scopes every read/write). Two roles for testing:
+//   user   → the client view (owns the seeded demo data)
+//   broker → the broker view (can approve enhancement requests)
+// A bare username is expanded to <name>@example.com by signIn().
+export const DEMO_CREDENTIAL = { email: "user", password: "keep-demo-2026" };
+
+// Expand a bare demo username ("user"/"broker") to its email; pass real emails through.
+function normalizeLogin(id) {
+  const v = (id || "").trim();
+  return v.includes("@") ? v : `${v.toLowerCase()}@example.com`;
+}
 
 // ── Public lead capture (anonymous) ─────────────────────────────────────────
 export async function fetchRules() {
@@ -53,7 +61,7 @@ export async function getSession() {
 }
 
 export async function signIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };
   invalidate();
   return { ok: true, session: data.session };

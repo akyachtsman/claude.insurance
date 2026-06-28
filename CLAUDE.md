@@ -37,7 +37,7 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 - **Auth:** Supabase Auth (broker invite + password). RLS keys on `auth.uid()`.
 - **Write model:** clients have full CRUD on their **own** entities/assets; `policies` are **read-only to clients** (broker-written via service-role, the system of record).
 - **Keys:** publishable/anon key → client (safe in browser, RLS is the guard); `service_role` key → `DB_SERVICE_KEY` GitHub secret, server-side only. `DB_URL` = the project URL.
-- **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end is wired to the live project; the Keep reads/writes real data under RLS. A demo client account is seeded for testing: `jordan.m@example.com` / `keep-demo-2026` (prefilled on the login screen).
+- **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end is wired to the live project; the Keep reads/writes real data under RLS. Two demo logins are seeded (a bare username is expanded to `<name>@example.com` by `signIn`): `user` / `keep-demo-2026` (client view, owns the seeded data; prefilled on the login screen) and `broker` / `keep-demo-2026` (broker view, approves enhancement requests).
 
 ## Required Commands
 | Purpose | Command |
@@ -71,7 +71,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 |---|---|
 | App URL | `https://akyachtsman.github.io/claude.insurance/` |
 | Public path | Anonymous — no login (the marketing site + questionnaire) |
-| Keep credential (valid) | `jordan.m@example.com` / `keep-demo-2026` (the Keep login gate; prefilled) |
+| Keep credential (valid) | `user` / `keep-demo-2026` (client view, prefilled) · `broker` / `keep-demo-2026` (broker view). Bare username → `<name>@example.com`. |
 | Keep credential (invalid) | any other password → `.k-error` on the login form |
 | Primary nav button | `Find what coverage I need` |
 | Primary content selector | `.card` |
