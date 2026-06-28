@@ -224,7 +224,7 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
-        link("Insurance", "#/keep/insurance", "insurance"),
+        link("Policies", "#/keep/insurance", "insurance"),
         link("My Entities", "#/keep/list", "list"),
         link("Relationships", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
@@ -244,7 +244,7 @@ function page(active, contentChildren, opts = {}) {
 const KEEP_LABELS = {
   "#/keep": "home",
   "#/keep/list": "my entities",
-  "#/keep/insurance": "insurance",
+  "#/keep/insurance": "policies",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
   "#/keep/account": "account",
@@ -582,7 +582,7 @@ export function renderKeepInsurance() {
     ]));
 
     const view = page("insurance", [
-      el("h1", { class: "k-h1", text: "Insurance" }),
+      el("h1", { class: "k-h1", text: "Policies" }),
       el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
       el("div", { class: "k-sortrow" }, [
         el("span", { class: "k-sortlbl", text: "Sort" }),
