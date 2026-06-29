@@ -726,14 +726,6 @@ export async function renderKeepLanding() {
       el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
       landingCommand(),
     ]),
-    el("section", { class: "k-report" }, [
-      el("div", { class: "k-report__h" }, [
-        el("h2", {}, [icon("bell", { size: 18 }), el("span", { text: "Renewals coming up" })]),
-        el("span", { class: "k-report__count", text: renewals.length ? `${renewals.length} within 60 days` : "All clear" }),
-      ]),
-      el("div", { class: "k-report__list" }, renewalRows),
-    ]),
-    pendingRequestsReport(requests, role),
     el("section", {}, [
       el("div", { class: "k-lbl", text: "At a glance" }),
       el("div", { class: "k-stats" }, [
@@ -745,6 +737,14 @@ export async function renderKeepLanding() {
         statTile("Lapsed", lapsed, lapsed ? "action needed" : "none"),
       ]),
     ]),
+    el("section", { class: "k-report" }, [
+      el("div", { class: "k-report__h" }, [
+        el("h2", {}, [icon("bell", { size: 18 }), el("span", { text: "Renewals coming up" })]),
+        el("span", { class: "k-report__count", text: renewals.length ? `${renewals.length} within 60 days` : "All clear" }),
+      ]),
+      el("div", { class: "k-report__list" }, renewalRows),
+    ]),
+    pendingRequestsReport(requests, role),
   ]);
   mount(view);
 }
