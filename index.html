@@ -101,6 +101,45 @@
     </defs>
   </svg>
 
-  <script type="module" src="js/main.js"></script>
+  <!-- App bootstrap with automatic cache-busting. ES-module relative imports do
+       NOT inherit a ?v= query, so a stamp on main.js alone wouldn't refresh the
+       other modules. Instead we inject an import map that stamps every module
+       with a per-load token, so a new deploy is always picked up without a
+       manual hard refresh. Build-free; degrades to normal loading if import
+       maps are unsupported or anything throws. -->
+  <script>
+    (function () {
+      try {
+        var V = Date.now().toString(36);
+        var MODULES = [
+          "js/main.js", "js/dom.js", "js/svg.js", "js/icons.js", "js/format.js", "js/motion.js",
+          "js/store.js", "js/content.js", "js/rules.js", "js/nav.js", "js/supabase.js",
+          "js/components/glossary.js", "js/components/progress.js", "js/components/ui.js",
+          "js/keep/analysis.js", "js/keep/data.js", "js/keep/docfile.js", "js/keep/policies.js",
+          "js/keep/requests.js", "js/keep/search.js",
+          "js/views/coverage.js", "js/views/keep.js", "js/views/landing.js", "js/views/qualify.js",
+          "js/views/section.js", "js/views/summary.js",
+        ];
+        var base = new URL(".", document.baseURI).href;
+        var supportsImportMap = HTMLScriptElement.supports && HTMLScriptElement.supports("importmap");
+        if (supportsImportMap) {
+          var imports = {};
+          MODULES.forEach(function (m) { imports[base + m] = base + m + "?v=" + V; });
+          var im = document.createElement("script");
+          im.type = "importmap";
+          im.textContent = JSON.stringify({ imports: imports });
+          document.head.appendChild(im);
+        }
+        var s = document.createElement("script");
+        s.type = "module";
+        s.src = "js/main.js" + (supportsImportMap ? "?v=" + V : "");
+        document.head.appendChild(s);
+      } catch (e) {
+        var f = document.createElement("script");
+        f.type = "module"; f.src = "js/main.js";
+        document.head.appendChild(f);
+      }
+    })();
+  </script>
 </body>
 </html>
