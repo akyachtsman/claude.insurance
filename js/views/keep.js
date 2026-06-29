@@ -1448,7 +1448,7 @@ export function renderKeepDocuments() {
   const sortButtons = [];
   function applySort(key) {
     state.sort = key;
-    [...entries].sort(CMP[key]).forEach((e) => tbody.appendChild(e.tr));
+    [...entries].sort((A, B) => CMP[key](A.x, B.x)).forEach((e) => tbody.appendChild(e.tr));
     sortButtons.forEach((b) => { const on = b.dataset.key === key; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
   }
   function sortBtn(key, label) {
