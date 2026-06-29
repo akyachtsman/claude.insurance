@@ -28,6 +28,9 @@ body.in-keep { background: var(--color-bg); }
 .k-nav a:hover { color: var(--color-text-primary); }
 .k-nav a.on { background: var(--color-accent); color: #fff; }
 .k-navswap { display: inline-flex; align-items: center; color: var(--color-accent); opacity: 1; margin: 0 2px; }
+/* base.css sets `img, svg { max-width:100% }`, which collapses an SVG flex item
+   to width:0; pin the icon size so the arrow actually shows. */
+.k-navswap .icon { width: 18px; height: 18px; flex: none; }
 .k-bar__rt { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 .k-iconbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); position: relative; cursor: pointer; }
 .k-iconbtn .k-dot { position: absolute; top: 10px; right: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-gap); }
