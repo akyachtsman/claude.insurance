@@ -12,7 +12,7 @@ import { ASSET_META } from "../keep/data.js";
 import {
   getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
   getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
-  invalidate, ensureData, DEMO_CREDENTIAL,
+  invalidate, ensureData, DEMO_CREDENTIAL, addRelationship,
   addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest,
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
@@ -20,6 +20,7 @@ import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../kee
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 import { buildPdf, docLines } from "../keep/docfile.js";
+import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -1151,15 +1152,66 @@ export function renderKeepAddEntity() {
   const error = el("p", { class: "k-error", attrs: { role: "alert" } });
   const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Add entity" }), icon("arrow-right", { size: 20 })]);
 
+  // ── Ownership: who owns this new entity, and at what stake ──────────────────
+  const owners = getEntities(); // existing entities the client manages (You, businesses, trusts)
+  const ownRows = el("div", { class: "k-own" });
+  const ownTotal = el("div", { class: "k-own__total" });
+
+  function readRows() {
+    return [...ownRows.querySelectorAll(".k-own__row")].map((r) => ({
+      ownerId: r.querySelector(".k-own__owner").value,
+      role: r.querySelector(".k-own__role").value,
+      pct: r.querySelector(".k-own__pct").value,
+    }));
+  }
+  function refreshTotal() {
+    const t = totalStake(readRows());
+    ownTotal.textContent = `Total stake: ${t}%`;
+    ownTotal.classList.toggle("over", t > 100);
+  }
+  function addRow(ownerId, role, pct) {
+    const ownerSel = el("select", { class: "k-own__owner" }, owners.map((e) => el("option", { attrs: { value: e.id }, text: e.name })));
+    if (ownerId) ownerSel.value = ownerId;
+    const roleSel = el("select", { class: "k-own__role" }, OWNERSHIP_ROLES.map((r) => el("option", { attrs: { value: r }, text: r })));
+    if (role) roleSel.value = role;
+    const pctInput = el("input", { class: "k-own__pct", attrs: { type: "number", min: "1", max: "100", placeholder: "%", value: pct != null ? String(pct) : "" } });
+    const rm = el("button", { class: "k-own__rm", attrs: { type: "button", "aria-label": "Remove owner" } }, [icon("x", { size: 16 })]);
+    const row = el("div", { class: "k-own__row" }, [ownerSel, roleSel, pctInput, rm]);
+    rm.addEventListener("click", () => { row.remove(); refreshTotal(); });
+    pctInput.addEventListener("input", refreshTotal);
+    ownRows.appendChild(row);
+    refreshTotal();
+  }
+  const addOwnerBtn = el("button", { class: "k-own__add", attrs: { type: "button" } }, [icon("plus", { size: 16 }), el("span", { text: "Add owner" })]);
+  addOwnerBtn.addEventListener("click", () => addRow());
+  const me = owners.find((e) => e.kind === "personal") || owners[0];
+  if (me) addRow(me.id, "Owner", 100); else refreshTotal();
+
+  const ownership = el("div", { class: "k-grp" }, [
+    el("div", { class: "k-grp__h" }, [icon("handshake", { size: 15 }), el("span", { text: "Ownership" })]),
+    el("p", { class: "k-setnote", text: "Who owns this entity? Add owners from your existing entities and give each a stake. Stakes can total up to 100%." }),
+    ownRows,
+    el("div", { class: "k-own__foot" }, [addOwnerBtn, ownTotal]),
+  ]);
+
   async function create() {
+    error.textContent = "";
     const name = nameInput.value.trim();
     if (!name) { error.textContent = "Give this entity a name."; return; }
+    const rows = readRows().filter((r) => r.ownerId);
+    const v = validateOwnership(rows);
+    if (!v.ok) { error.textContent = v.error; return; }
+
     submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
     const res = await addEntity({ kind: kindSelect.value, name, subtype: subInput.value.trim() || null });
     if (!res.ok) {
       error.textContent = res.error || "Could not add the entity.";
       submit.removeAttribute("disabled"); submit.querySelector("span").textContent = "Add entity";
       return;
+    }
+    // Record ownership edges (best-effort; the entity is already created).
+    for (const r of rows) {
+      await addRelationship({ fromEntity: r.ownerId, toEntity: res.id, role: r.role || "Owner", stake: stakeLabel(r.pct) });
     }
     await ensureData();
     go(res.id ? `#/keep/entity/${res.id}` : "#/keep/list");
@@ -1171,6 +1223,7 @@ export function renderKeepAddEntity() {
     el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
     el("label", { class: "k-fld" }, [el("span", { text: "Type" }), kindSelect]),
     el("label", { class: "k-fld" }, [el("span", { text: "Subtype" }), subInput]),
+    ownership,
     submit, error,
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
