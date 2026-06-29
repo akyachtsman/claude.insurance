@@ -29,8 +29,12 @@ body.in-keep { background: var(--color-bg); }
 .k-nav a.on { background: var(--color-accent); color: #fff; }
 .k-navswap { display: inline-flex; align-items: center; color: var(--color-accent); opacity: 1; margin: 0 2px; }
 /* base.css sets `img, svg { max-width:100% }`, which collapses an SVG flex item
-   to width:0; pin the icon size so the arrow actually shows. */
-.k-navswap .icon { width: 18px; height: 18px; flex: none; }
+   to width:0; pin the icon size so the arrow actually shows. The sprite's
+   stroke styling lives on a <g> that doesn't pass through <use>, so icons
+   fall back to a solid fill — which hides this arrow's thin connecting line.
+   Re-apply stroke styling here (CSS does inherit into the <use> shadow tree)
+   so it reads as an outlined double arrow with a visible connector. */
+.k-navswap .icon { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .k-bar__rt { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 .k-iconbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); position: relative; cursor: pointer; }
 .k-iconbtn .k-dot { position: absolute; top: 10px; right: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-gap); }
