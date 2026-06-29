@@ -1407,96 +1407,87 @@ export async function renderKeepRequests() {
   mount(view);
 }
 
+// Every document flattened to one row, with its policy/asset/entity context.
+function collectDocuments() {
+  const out = [];
+  for (const ent of getEntities())
+    for (const a of ent.assets)
+      for (const p of (a.policies || []))
+        for (const d of (p.documents || []))
+          out.push({ doc: d, entity: ent, asset: a, policy: p, hay: `${d} ${p.line} ${a.name} ${ent.name}`.toLowerCase() });
+  return out;
+}
+
+// Documents — a flat, sortable table: one row per document, with the entity,
+// asset and policy it belongs to, plus a download button.
 export function renderKeepDocuments() {
-  // Build the Entity -> Asset -> Policy -> documents hierarchy so a document is
-  // found the same way it's filed.
-  const entityBlocks = [];
-  let total = 0;
-  for (const ent of getEntities()) {
-    const assetBlocks = [];
-    let entCount = 0;
-    for (const a of ent.assets) {
-      const policyBlocks = [];
-      let assetCount = 0;
-      for (const p of a.policies || []) {
-        if (!p.documents || !p.documents.length) continue;
-        const links = p.documents.map((d) => {
-          const match = `${d} ${p.line} ${a.name} ${ent.name}`.toLowerCase();
-          return docItem(d, `#/keep/policy/${p.id}`, [p.line, a.name, ent.name], match);
-        });
-        assetCount += p.documents.length;
-        policyBlocks.push(el("div", { class: "k-doc-policy" }, [
-          el("div", { class: "k-doc-policy__name", text: p.line }),
-          el("div", { class: "k-doc-links" }, links),
-        ]));
-      }
-      if (!policyBlocks.length) continue;
-      entCount += assetCount;
-      const meta = ASSET_META[a.type] || { cic: "home", icon: "shield" };
-      assetBlocks.push(el("div", { class: "k-doc-asset" }, [
-        el("div", { class: "k-doc-asset__h" }, [
-          el("span", { class: `k-cic k-cic--${meta.cic}` }, [icon(meta.icon, { size: 22 })]),
-          el("div", {}, [
-            el("div", { class: "k-doc-asset__name", text: a.name }),
-            el("div", { class: "k-doc-asset__meta", text: `${assetCount} document${assetCount === 1 ? "" : "s"}` }),
-          ]),
-        ]),
-        ...policyBlocks,
-      ]));
-    }
-    if (!assetBlocks.length) continue;
-    total += entCount;
-    const avatar = ent.kind === "business"
-      ? el("span", { class: "k-bigav k-bigav--biz k-bigav--sm" }, [icon(ent.icon || "briefcase", { size: 22 })])
-      : el("span", { class: "k-bigav k-bigav--sm", text: ent.initials });
-    entityBlocks.push(el("section", { class: "k-doc-entity" }, [
-      el("div", { class: "k-doc-entity__h" }, [
-        avatar,
-        el("div", {}, [
-          el("div", { class: "k-doc-entity__name", text: ent.name }),
-          el("div", { class: "k-doc-entity__meta", text: `${entCount} document${entCount === 1 ? "" : "s"}` }),
-        ]),
-      ]),
-      ...assetBlocks,
-    ]));
+  const rows = collectDocuments();
+
+  const CMP = {
+    document: (a, b) => a.doc.localeCompare(b.doc),
+    policy: (a, b) => a.policy.line.localeCompare(b.policy.line) || a.doc.localeCompare(b.doc),
+    entity: (a, b) => a.entity.name.localeCompare(b.entity.name) || a.asset.name.localeCompare(b.asset.name) || a.doc.localeCompare(b.doc),
+  };
+
+  // One <tr> per document (built once; sort re-orders, search toggles hidden).
+  const entries = rows.map((x) => ({
+    x,
+    tr: el("tr", {}, [
+      el("td", {}, [el("span", { class: "k-doc-ic" }, [icon("doc", { size: 15 })]), el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${x.policy.id}` }, text: x.doc })]),
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${x.entity.id}` }, text: x.entity.name })]),
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${x.asset.id}` }, text: x.asset.name })]),
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${x.policy.id}` }, text: x.policy.line }), el("div", { class: "k-imuted", text: x.policy.number || "" })]),
+      el("td", {}, [downloadButton(x.doc, [x.policy.line, x.asset.name, x.entity.name])]),
+    ]),
+  }));
+
+  const tbody = el("tbody", {}, entries.map((e) => e.tr));
+  const empty = el("div", { class: "k-docs-empty", attrs: { hidden: "" }, text: "No documents match your search." });
+
+  const state = { sort: "entity" };
+  const sortButtons = [];
+  function applySort(key) {
+    state.sort = key;
+    [...entries].sort(CMP[key]).forEach((e) => tbody.appendChild(e.tr));
+    sortButtons.forEach((b) => { const on = b.dataset.key === key; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+  }
+  function sortBtn(key, label) {
+    const b = el("button", { class: "k-sortbtn", attrs: { type: "button", "aria-pressed": "false" } }, [el("span", { text: label })]);
+    b.dataset.key = key;
+    b.addEventListener("click", () => applySort(key));
+    sortButtons.push(b);
+    return b;
   }
 
-  const empty = el("div", { class: "k-docs-empty", attrs: { hidden: "" }, text: "No documents match your search." });
-  const search = el("input", { class: "k-docsearch", attrs: { type: "search", placeholder: "Search documents by name, policy, or asset…", "aria-label": "Search documents" } });
+  const search = el("input", { class: "k-docsearch", attrs: { type: "search", placeholder: "Search documents by name, policy, asset or entity…", "aria-label": "Search documents" } });
   search.addEventListener("input", () => {
     const q = search.value.trim().toLowerCase();
     let any = false;
-    for (const ent of entityBlocks) {
-      let entVis = false;
-      ent.querySelectorAll(".k-doc-asset").forEach((as) => {
-        let asVis = false;
-        as.querySelectorAll(".k-doc-policy").forEach((pol) => {
-          let polVis = false;
-          pol.querySelectorAll(".k-docrow").forEach((row) => {
-            const show = !q || (row.dataset.doc || "").includes(q);
-            row.hidden = !show;
-            if (show) polVis = true;
-          });
-          pol.hidden = !polVis;
-          if (polVis) asVis = true;
-        });
-        as.hidden = !asVis;
-        if (asVis) entVis = true;
-      });
-      ent.hidden = !entVis;
-      if (entVis) any = true;
-    }
+    entries.forEach((e) => { const show = !q || e.x.hay.includes(q); e.tr.hidden = !show; if (show) any = true; });
     empty.hidden = any;
   });
 
+  const headers = ["Document", "Entity", "Asset", "Policy", "Download"];
   const view = page("documents", [
     backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Documents" }),
-    el("p", { class: "k-sub", text: "All your documents, filed by entity and asset." }),
-    total ? search : null,
-    ...(entityBlocks.length ? entityBlocks : [el("div", { class: "k-empty", text: "No documents on file yet." })]),
+    el("p", { class: "k-sub", text: rows.length ? `Every document across your policies — ${rows.length} on file.` : "Your documents will appear here." }),
+    rows.length ? search : null,
+    rows.length ? el("div", { class: "k-sortrow" }, [
+      el("span", { class: "k-sortlbl", text: "Sort" }),
+      sortBtn("entity", "Entity"), sortBtn("document", "Document"), sortBtn("policy", "Policy"),
+    ]) : null,
+    rows.length
+      ? el("div", { class: "k-itable-wrap" }, [
+          el("table", { class: "k-itable" }, [
+            el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
+            tbody,
+          ]),
+        ])
+      : el("div", { class: "k-empty", text: "No documents on file yet." }),
     empty,
-  ], { narrow: true });
+  ]);
+  if (rows.length) applySort("entity");
   mount(view);
 }
 
