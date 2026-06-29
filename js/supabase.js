@@ -305,6 +305,18 @@ export async function addEntity({ kind, name, subtype }) {
   return { ok: true, id: data.id };
 }
 
+// Create a directed ownership/relationship edge: `fromEntity` (owner) holds
+// `toEntity`, with a role and optional stake ("60%"). RLS keys owner=auth.uid().
+export async function addRelationship({ fromEntity, toEntity, role, stake }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in" };
+  const { error } = await supabase.from("entity_relationships")
+    .insert({ owner: user.id, from_entity: fromEntity, to_entity: toEntity, role: role || "Owner", stake: stake || null });
+  if (error) return { ok: false, error: error.message };
+  invalidate();
+  return { ok: true };
+}
+
 export async function addAsset({ entityId, type, name, meta, value }) {
   const { error, data } = await supabase.from("assets")
     .insert({
