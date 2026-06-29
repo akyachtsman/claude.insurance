@@ -1162,7 +1162,7 @@ export function renderKeepAddEntity() {
       return;
     }
     await ensureData();
-    go("#/keep");
+    go(res.id ? `#/keep/entity/${res.id}` : "#/keep/list");
   }
 
   const form = el("form", {}, [
