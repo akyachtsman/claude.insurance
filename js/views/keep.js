@@ -371,7 +371,7 @@ function appBar(active) {
         link("Home", "#/keep", "home"),
         link("Policies", "#/keep/insurance", "insurance"),
         link("Entities", "#/keep/list", "list"),
-        el("span", { class: "k-navswap", attrs: { "aria-hidden": "true", title: "Entities and Relationships are two views of the same thing" } }, [icon("swap", { size: 18 })]),
+        el("span", { class: "k-navswap", attrs: { "aria-hidden": "true", title: "Entities and Relationships are two views of the same thing" } }, [icon("swap", { size: 22 })]),
         link("Relationships", "#/keep/entities", "entities"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
