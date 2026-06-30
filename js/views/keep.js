@@ -21,6 +21,7 @@ import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
+import { ENTITY_TYPE_GROUPS, kindForType } from "../keep/entity-types.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -1153,10 +1154,9 @@ export function renderKeepAddAsset() {
 // Add entity: a small form to create a business or trust you manage.
 export function renderKeepAddEntity() {
   const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. Coastal Cafe LLC" } });
-  const kindSelect = el("select", {}, [
-    el("option", { attrs: { value: "business" }, text: "Business" }),
-    el("option", { attrs: { value: "trust" }, text: "Trust" }),
-  ]);
+  // Type picker: specific US entity types grouped by colour category.
+  const typeSelect = el("select", {}, ENTITY_TYPE_GROUPS.map((g) =>
+    el("optgroup", { attrs: { label: g.category } }, g.types.map((t) => el("option", { attrs: { value: t }, text: t })))));
   const error = el("p", { class: "k-error", attrs: { role: "alert" } });
   const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Add entity" }), icon("arrow-right", { size: 20 })]);
 
@@ -1211,7 +1211,8 @@ export function renderKeepAddEntity() {
     if (!v.ok) { error.textContent = v.error; return; }
 
     submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
-    const res = await addEntity({ kind: kindSelect.value, name });
+    const typeLabel = typeSelect.value;
+    const res = await addEntity({ kind: kindForType(typeLabel), name, typeLabel });
     if (!res.ok) {
       error.textContent = res.error || "Could not add the entity.";
       submit.removeAttribute("disabled"); submit.querySelector("span").textContent = "Add entity";
@@ -1229,7 +1230,7 @@ export function renderKeepAddEntity() {
     el("h1", { class: "k-h1", text: "Add a business entity" }),
     el("p", { class: "k-sub", text: "Create a company or trust to organize its assets and coverage." }),
     el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
-    el("label", { class: "k-fld" }, [el("span", { text: "Type" }), kindSelect]),
+    el("label", { class: "k-fld" }, [el("span", { text: "Type" }), typeSelect]),
     ownership,
     submit, error,
   ]);
