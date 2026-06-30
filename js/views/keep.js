@@ -838,9 +838,9 @@ function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; 
 // for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
-  person: { fill: "#fff", avFill: "#efeafe", avText: "#5b3ee6", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
-  biz: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
-  trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#231d3a", subFill: "#5f5880", stroke: "#ece7fb" },
+  person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  biz: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
 };
 // DB entity kind → REL_STYLE key (personal renders as the gradient "me" node).
 function relStyleKey(kind) {
@@ -880,7 +880,7 @@ function relationshipMap() {
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#8a6bff" }), s("stop", { offset: "1", "stop-color": "#5b3ee6" }),
+      s("stop", { offset: "0", "stop-color": "#6F9BFF" }), s("stop", { offset: "1", "stop-color": "#2F6AF6" }),
     ]),
   ]));
 
@@ -889,8 +889,8 @@ function relationshipMap() {
   const edgeRefs = edges.map((e) => {
     const path = s("path", { fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" });
     svg.appendChild(path);
-    const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#ece7fb" });
-    const ltext = svgText(e.label, { "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#5f5880", "font-family": FS });
+    const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#E3EBFA" });
+    const ltext = svgText(e.label, { "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#55607F", "font-family": FS });
     return { ...e, path, lrect, ltext };
   });
   const updateEdges = () => {

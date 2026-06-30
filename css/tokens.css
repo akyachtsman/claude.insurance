@@ -1,6 +1,6 @@
 /* tokens.css — design system tokens.
    Identity: "Direction C" (Soft consumer) — set via data-theme="harbor" on <html>.
-   Quicksand (display) + Nunito (body), violet accent, soft tints, large radii.
+   Quicksand (display) + Nunito (body), blue accent, soft tints, large radii.
    Shadows are theme-independent. Self-hosted fonts (OFL) live in css/fonts/. */
 
 /* ── Self-hosted fonts (no network at runtime) ──────────────────────────────── */
@@ -60,16 +60,16 @@
 }
 
 [data-theme="harbor"] {
-  --color-bg: #F6F3FF;
+  --color-bg: #F1F5FF;
   --color-surface: #FFFFFF;
-  --color-border: #ECE7FB;
-  --color-border-hover: #D7CEF6;
-  --color-text-primary: #231D3A;
-  --color-text-secondary: #5F5880;
-  --color-accent: #5B3EE6;
-  --color-accent-hover: #4A2CC9;
-  --color-accent-light: #EFEAFE;
-  --color-accent-ring: rgba(91, 62, 230, 0.22);
+  --color-border: #E3EBFA;
+  --color-border-hover: #CBD9F4;
+  --color-text-primary: #1B2540;
+  --color-text-secondary: #55607F;
+  --color-accent: #2F6AF6;
+  --color-accent-hover: #1F52D6;
+  --color-accent-light: #E7EFFE;
+  --color-accent-ring: rgba(47, 106, 246, 0.22);
   --color-danger: #C42847;
 
   /* Status palette (shared by marketing + the Keep). */
