@@ -819,11 +819,9 @@ export async function renderKeepEntityList() {
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
     el("div", { class: "k-privacy" }, [
       icon("lock", { size: 16 }),
-      el("span", { text: "Encrypted and private — only you and your broker can see this." }),
+      el("span", { text: "Encrypted & private — only you and your broker." }),
       el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
-    ]),
-    el("div", { class: "k-listactions" }, [
-      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
+      el("button", { class: "k-btn k-btn--sm k-privacy__add", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
     ]),
     ...getEntities().map((e) => entityPanel(e, settings)),
   ]);
