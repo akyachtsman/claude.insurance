@@ -280,6 +280,8 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-fld select { width: 100%; min-height: 54px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; cursor: pointer; }
 .k-fld select:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
 /* Ownership rows (add-entity) */
+/* Entities page: right-aligned "New entity" action under the privacy line */
+.k-listactions { display: flex; justify-content: flex-end; margin-bottom: var(--space-5); }
 .k-own { display: grid; gap: 10px; margin-top: var(--space-3); }
 .k-own__row { display: grid; grid-template-columns: 1fr 1fr 84px 40px; gap: 8px; align-items: center; }
 .k-own__row select, .k-own__row input { min-height: 46px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 12px; font: 600 14px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; width: 100%; }
