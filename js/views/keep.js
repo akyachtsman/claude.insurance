@@ -504,11 +504,18 @@ function assetCard(asset, settings) {
   ]);
 }
 
+// Per-type colour coordination, consistent across the app:
+//   Me / personal → blue (accent) · Business / LLC → green · Trust → amber.
+function entKindSuffix(kind) {
+  return kind === "business" ? "biz" : kind === "trust" ? "trust" : "me";
+}
+function panelVariant(kind) { return `k-panel--${entKindSuffix(kind)}`; }
+
 function entityAvatar(entity) {
-  // Businesses and trusts get an icon avatar (trust on the violet base, business
-  // on the green one); people show their initials.
+  // Businesses and trusts get an icon avatar (business green, trust amber);
+  // people show their initials on the blue base.
   if (entity.kind === "business" || entity.kind === "trust") {
-    const cls = entity.kind === "business" ? "k-bigav k-bigav--biz" : "k-bigav";
+    const cls = entity.kind === "business" ? "k-bigav k-bigav--biz" : "k-bigav k-bigav--trust";
     return el("span", { class: cls }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
   }
   return el("span", { class: "k-bigav", text: entity.initials });
@@ -524,7 +531,7 @@ function entityHead(entity, settings, addHref) {
     el("div", {}, [
       el("div", {}, [
         el("h1", { text: entity.name }),
-        el("span", { class: `k-et${entity.kind === "business" ? " k-et--biz" : ""}`, text: entity.label }),
+        el("span", { class: `k-et k-et--${entKindSuffix(entity.kind)}`, text: entity.label }),
       ]),
       el("div", { class: "k-emeta" }, joinDots(metaBits)),
     ]),
@@ -543,7 +550,7 @@ function joinDots(bits) {
 }
 
 function entityPanel(entity, settings) {
-  const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
+  const variant = panelVariant(entity.kind);
   const body = entity.assets.length
     ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
     : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." });
@@ -972,7 +979,7 @@ export async function renderKeepEntity(params, id) {
   const entity = getEntity(id);
   if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
-  const variant = entity.kind === "business" ? "k-panel--biz" : "k-panel--me";
+  const variant = panelVariant(entity.kind);
   const view = page("entities", [
     backLink("#/keep/entities", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(), el("span", { text: entity.name })]),
