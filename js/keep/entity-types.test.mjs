@@ -7,16 +7,18 @@ test("groups are non-empty and use valid category kinds", () => {
   assert.ok(ENTITY_TYPE_GROUPS.length >= 2);
   for (const g of ENTITY_TYPE_GROUPS) {
     assert.ok(g.types.length > 0, `${g.category} has types`);
-    assert.ok(["business", "trust"].includes(g.kind), `${g.category} kind valid`);
+    assert.ok(["business", "trust", "person"].includes(g.kind), `${g.category} kind valid`);
   }
 });
 
-test("kindForType maps business and trust types", () => {
+test("kindForType maps business, trust and people types", () => {
   assert.equal(kindForType("LLC"), "business");
   assert.equal(kindForType("S Corporation"), "business");
   assert.equal(kindForType("Limited Partnership (LP)"), "business");
   assert.equal(kindForType("Revocable Trust"), "trust");
   assert.equal(kindForType("Estate"), "trust");
+  assert.equal(kindForType("Spouse"), "person");
+  assert.equal(kindForType("Child"), "person");
 });
 
 test("kindForType falls back to business for unknown", () => {
