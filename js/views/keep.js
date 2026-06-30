@@ -1154,10 +1154,9 @@ export function renderKeepAddAsset() {
 export function renderKeepAddEntity() {
   const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. Coastal Cafe LLC" } });
   const kindSelect = el("select", {}, [
-    el("option", { attrs: { value: "business" }, text: "Business (LLC, Corp, etc.)" }),
+    el("option", { attrs: { value: "business" }, text: "Business" }),
     el("option", { attrs: { value: "trust" }, text: "Trust" }),
   ]);
-  const subInput = el("input", { attrs: { type: "text", placeholder: "e.g. LLC (optional)" } });
   const error = el("p", { class: "k-error", attrs: { role: "alert" } });
   const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: "Add entity" }), icon("arrow-right", { size: 20 })]);
 
@@ -1212,7 +1211,7 @@ export function renderKeepAddEntity() {
     if (!v.ok) { error.textContent = v.error; return; }
 
     submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
-    const res = await addEntity({ kind: kindSelect.value, name, subtype: subInput.value.trim() || null });
+    const res = await addEntity({ kind: kindSelect.value, name });
     if (!res.ok) {
       error.textContent = res.error || "Could not add the entity.";
       submit.removeAttribute("disabled"); submit.querySelector("span").textContent = "Add entity";
@@ -1231,7 +1230,6 @@ export function renderKeepAddEntity() {
     el("p", { class: "k-sub", text: "Create a company or trust to organize its assets and coverage." }),
     el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
     el("label", { class: "k-fld" }, [el("span", { text: "Type" }), kindSelect]),
-    el("label", { class: "k-fld" }, [el("span", { text: "Subtype" }), subInput]),
     ownership,
     submit, error,
   ]);

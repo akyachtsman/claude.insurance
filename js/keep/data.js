@@ -158,9 +158,9 @@ export const SAMPLE = {
     {
       id: "coastal-cafe",
       kind: "business",
-      subtype: "LLC",
+      subtype: null,
       name: "Coastal Cafe LLC",
-      label: "LLC",
+      label: "Business",
       icon: "briefcase",
       meta: "EIN ••–•••4821 · Food service",
       relationship: { role: "Managing member", stake: "50%" },
