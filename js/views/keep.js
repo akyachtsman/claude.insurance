@@ -822,8 +822,10 @@ export async function renderKeepEntityList() {
       el("span", { text: "Encrypted and private — only you and your broker can see this." }),
       el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
     ]),
+    el("div", { class: "k-listactions" }, [
+      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
+    ]),
     ...getEntities().map((e) => entityPanel(e, settings)),
-    el("button", { class: "k-addtile", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 24 }), el("span", { text: "Add a business entity" })]),
   ]);
   mount(view);
 }
