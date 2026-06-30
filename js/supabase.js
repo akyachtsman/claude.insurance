@@ -144,7 +144,9 @@ function adaptEntity(row, assets) {
     id: row.id,
     kind: row.kind,
     name: row.name,
-    label: row.label,
+    // Type label shown on the pill. Businesses always read "Business" (the
+    // entity name carries the LLC/Corp suffix), regardless of stored value.
+    label: row.kind === "business" ? "Business" : row.label,
     subtype: row.subtype || undefined,
     meta: row.meta || undefined,
     icon: row.kind === "business" ? "briefcase" : (row.kind === "trust" ? "doc" : undefined),
@@ -296,7 +298,7 @@ export async function savePrefs(prefs) {
 export async function addEntity({ kind, name, subtype }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in" };
-  const label = kind === "personal" ? "You · personal" : (subtype || (kind === "trust" ? "Trust" : "Business"));
+  const label = kind === "personal" ? "You · personal" : (kind === "trust" ? "Trust" : "Business");
   const { data, error } = await supabase.from("entities")
     .insert({ owner: user.id, kind, name, label, subtype: subtype || null })
     .select().single();

@@ -15,5 +15,5 @@ on conflict (id) do nothing;
 
 insert into public.entities (id, owner, kind, name, label, subtype) values
   ('22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111','personal','Jordan Mercer','You · personal',null),
-  ('23333333-3333-4333-8333-333333333333','11111111-1111-4111-8111-111111111111','business','Coastal Cafe LLC','LLC','LLC')
+  ('23333333-3333-4333-8333-333333333333','11111111-1111-4111-8111-111111111111','business','Coastal Cafe LLC','Business',null)
 on conflict (id) do nothing;
