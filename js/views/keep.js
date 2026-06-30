@@ -506,20 +506,20 @@ function assetCard(asset, settings) {
 }
 
 // Per-type colour coordination, consistent across the app:
-//   Me / personal → blue (accent) · Business / LLC → green · Trust → amber.
+//   Me / personal → blue · Business → green · Trust & Estate → amber · People → rose.
 function entKindSuffix(kind) {
-  return kind === "business" ? "biz" : kind === "trust" ? "trust" : "me";
+  return kind === "business" ? "biz" : kind === "trust" ? "trust" : kind === "person" ? "person" : "me";
 }
 function panelVariant(kind) { return `k-panel--${entKindSuffix(kind)}`; }
 
 function entityAvatar(entity) {
   // Businesses and trusts get an icon avatar (business green, trust amber);
-  // people show their initials on the blue base.
+  // you (blue) and family members (rose) show their initials.
   if (entity.kind === "business" || entity.kind === "trust") {
     const cls = entity.kind === "business" ? "k-bigav k-bigav--biz" : "k-bigav k-bigav--trust";
     return el("span", { class: cls }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
   }
-  return el("span", { class: "k-bigav", text: entity.initials });
+  return el("span", { class: `k-bigav${entity.kind === "person" ? " k-bigav--person" : ""}`, text: entity.initials });
 }
 
 function entityHead(entity, settings, addHref) {
@@ -846,7 +846,7 @@ function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; 
 // for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
-  person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  person: { fill: "#fff", avFill: "#FFE3EC", avText: "#D6336C", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   biz: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
 };

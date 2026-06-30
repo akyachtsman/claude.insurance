@@ -29,6 +29,17 @@ export const ENTITY_TYPE_GROUPS = [
       "Estate",
     ],
   },
+  {
+    category: "People", kind: "person",
+    types: [
+      "Spouse",
+      "Domestic Partner",
+      "Child",
+      "Parent",
+      "Sibling",
+      "Other Family Member",
+    ],
+  },
 ];
 
 // Specific type label → colour/RLS category kind.

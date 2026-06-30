@@ -153,9 +153,10 @@ function adaptEntity(row, assets) {
     initials: row.kind === "personal" ? "ME" : initialsOf(row.name),
     assets,
     _hasAssets: assets.length > 0,
-    // Entities you manage (hold assets/policies in) vs. related individuals
-    // (e.g. a spouse) who only appear in the relationship map.
-    _managed: row.kind !== "person",
+    // Every entity the client creates — including family members (People) — is
+    // theirs to manage: listed in My Entities, clickable on the map, and
+    // selectable as an owner.
+    _managed: true,
   };
 }
 
