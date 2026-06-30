@@ -817,11 +817,13 @@ export async function renderKeepEntityList() {
   const view = page("list", [
     el("h1", { class: "k-h1", text: "My entities" }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
-    el("div", { class: "k-privacy" }, [
-      icon("lock", { size: 16 }),
-      el("span", { text: "Encrypted & private — only you and your broker." }),
-      el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
-      el("button", { class: "k-btn k-btn--sm k-privacy__add", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
+    el("div", { class: "k-privacyrow" }, [
+      el("div", { class: "k-privacy" }, [
+        icon("lock", { size: 16 }),
+        el("span", { text: "Encrypted & private — only you and your broker." }),
+        el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
+      ]),
+      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
     ]),
     ...getEntities().map((e) => entityPanel(e, settings)),
   ]);
