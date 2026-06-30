@@ -98,7 +98,7 @@
 .band--surface { background: var(--color-surface); }
 .band--tint { background: linear-gradient(180deg, var(--color-accent-light), var(--color-surface)); }
 .band--deep {
-  background: linear-gradient(135deg, #4a2cc9 0%, #6c4bf5 55%, #46c2ff 150%);
+  background: linear-gradient(135deg, #1F52D6 0%, #3D78F7 55%, #46c2ff 150%);
   color: #fff;
 }
 .band--deep .section-head__title, .band--deep h2, .band--deep h3 { color: #fff; }

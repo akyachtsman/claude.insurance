@@ -63,13 +63,13 @@ export function ctaBand({ title, body, cta, href }) {
 // SURFACE = --color-surface), duplicated here because CSS var() does not resolve
 // in SVG presentation attributes; GLOW/SKY are the brighter gradient-only tints.
 const HERO = {
-  ACCENT: "#5B3EE6",        // --color-accent
-  ACCENT_DEEP: "#4A2CC9",   // --color-accent-hover
-  ACCENT_LIGHT: "#EFEAFE",  // --color-accent-light
-  BORDER: "#ECE7FB",        // --color-border
-  BORDER_HOVER: "#D7CEF6",  // --color-border-hover
+  ACCENT: "#2F6AF6",        // --color-accent
+  ACCENT_DEEP: "#1F52D6",   // --color-accent-hover
+  ACCENT_LIGHT: "#E7EFFE",  // --color-accent-light
+  BORDER: "#E3EBFA",        // --color-border
+  BORDER_HOVER: "#CBD9F4",  // --color-border-hover
   SURFACE: "#FFFFFF",       // --color-surface
-  GLOW: "#6C4BF5",          // brighter accent — gradient top only
+  GLOW: "#3D78F7",          // brighter accent — gradient top only
   SKY: "#46C2FF",           // cyan — gradient foot only
   BLUSH: "#FBEAF5",         // soft pink — blob gradient only
 };
