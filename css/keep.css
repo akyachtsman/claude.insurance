@@ -208,19 +208,12 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-4); }
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
-/* ── Entities · Rows layout (Option A) ──────────────────────────────────────── */
-.k-erows { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
-.k-erow { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--color-border); color: inherit; transition: background .12s; }
-.k-erow:last-child { border-bottom: 0; }
-.k-erow:hover { background: var(--color-bg); color: inherit; }
-.k-erow .k-bigav { width: 40px; height: 40px; border-radius: 12px; font-size: 14px; }
-.k-erow .k-bigav .icon { width: 20px; height: 20px; }
-.k-erow__id { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-.k-erow__name { font: 700 16px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.k-erow__sum { font: 600 14px var(--font-sans); color: var(--color-text-secondary); white-space: nowrap; }
-.k-erow__sum b { color: var(--color-text-primary); font-weight: 800; }
-.k-erow__chev { color: var(--color-text-secondary); display: inline-flex; flex: none; }
-.k-erow__chev .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+/* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
+.k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
+.k-enttable .k-bigav .icon { width: 17px; height: 17px; }
+.k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 11px; }
+.k-enttable .k-etcell__name { font: 700 15px var(--font-display); }
+.k-enttable .k-et { margin-left: 0; }
 
 /* ── Entities · Cards layout (Option B) ─────────────────────────────────────── */
 .k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }

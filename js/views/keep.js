@@ -1030,26 +1030,20 @@ function relationshipMap() {
 function entityValue(entity) {
   return entity.assets.reduce((t, a) => t + (a.value || 0), 0);
 }
-// Summary nodes: "N assets · M gaps · $value" with the numbers bold.
-function entitySumNodes(sum, val) {
-  const out = [el("b", { text: String(sum.assets) }), el("span", { text: ` asset${sum.assets === 1 ? "" : "s"}` })];
-  if (sum.gaps) { out.push(sep(), el("b", { text: String(sum.gaps) }), el("span", { text: ` gap${sum.gaps === 1 ? "" : "s"}` })); }
-  out.push(sep(), el("b", { text: val ? money(val) : "—" }));
-  return out;
-}
-
-// Option A — one compact row per entity (click to open its detail).
-function entityRow(entity, settings) {
-  const sum = entitySummary(entity, settings);
-  return el("a", { class: "k-erow", attrs: { href: `#/keep/entity/${entity.id}` } }, [
-    el("div", { class: "k-erow__id" }, [
-      entityAvatar(entity),
-      el("span", { class: "k-erow__name", text: entity.name }),
-      el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
-    ]),
-    el("span", { class: "k-erow__sum" }, entitySumNodes(sum, entityValue(entity))),
-    el("span", { class: "k-erow__chev" }, [icon("arrow-right", { size: 18 })]),
-  ]);
+// Option A — a sortable table: click a column header to sort by it (Entity,
+// Type, Assets, Gaps or Value); click again to flip direction.
+function entityTable(entities, settings) {
+  const rows = entities.map((e) => ({ e, sum: entitySummary(e, settings), val: entityValue(e) }));
+  const columns = [
+    { label: "Entity", get: (r) => r.e.name, cell: (r) => el("a", { class: "k-etcell k-ilink", attrs: { href: `#/keep/entity/${r.e.id}` } }, [
+      entityAvatar(r.e), el("span", { class: "k-etcell__name", text: r.e.name }),
+    ]) },
+    { label: "Type", get: (r) => r.e.label || "", cell: (r) => el("span", { class: `k-et k-et--${colorSuffix(r.e)}`, text: r.e.label }) },
+    { label: "Assets", get: (r) => r.e.assets.length, cell: (r) => el("span", { text: String(r.e.assets.length) }) },
+    { label: "Gaps", get: (r) => r.sum.gaps, cell: (r) => el("span", { text: String(r.sum.gaps) }) },
+    { label: "Value", get: (r) => r.val, cell: (r) => el("span", { text: r.val ? money(r.val) : "—" }) },
+  ];
+  return el("div", { class: "k-enttable" }, [sortableTable(columns, rows, { defaultIdx: 0, defaultDir: 1 }).wrap]);
 }
 
 // Option B — a uniform tile per entity in a responsive grid.
@@ -1088,8 +1082,9 @@ async function renderEntityCollection(layout) {
   const settings = await getRuleDefaults();
   const entities = getEntities();
   const body = layout === "cards"
-    ? el("div", { class: "k-etiles" }, entities.map((e) => entityTile(e, settings)))
-    : el("div", { class: "k-erows" }, entities.map((e) => entityRow(e, settings)));
+    // Cards have no headers to click, so they sort by name for a stable order.
+    ? el("div", { class: "k-etiles" }, [...entities].sort((a, b) => a.name.localeCompare(b.name)).map((e) => entityTile(e, settings)))
+    : entityTable(entities, settings);
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle(layout),
