@@ -11,6 +11,7 @@ import { getRuleDefaults } from "../content.js";
 import { ASSET_META } from "../keep/data.js";
 import {
   getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
+  getOrphanEntities, getAllAssets,
   getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
   invalidate, ensureData, DEMO_CREDENTIAL, addRelationship,
   addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest,
@@ -375,6 +376,7 @@ function appBar(active) {
         link("Entities", "#/keep/list", "list"),
         el("span", { class: "k-navswap", attrs: { "aria-hidden": "true", title: "Entities and Relationships are two views of the same thing" } }, [icon("swap", { size: 22 })]),
         link("Relationships", "#/keep/entities", "entities"),
+        link("Assets", "#/keep/assets", "assets"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
       el("div", { class: "k-bar__rt" }, [searchBox(), notifMenu(), accountMenu()]),
@@ -822,8 +824,72 @@ export function renderKeepInsurance() {
   render();
 }
 
+// Assets — every asset across all entities in one sortable table. Assets whose
+// entity didn't load (true orphans) are flagged and sorted to the bottom.
+export function renderKeepAssets() {
+  const rows = getAllAssets();          // [{ asset, entity|null }]
+  const orphanCount = rows.filter((r) => !r.entity).length;
+  const state = { sort: "entity" };
+
+  const orphanRank = (r) => (r.entity ? 0 : 1);
+  function sorted() {
+    const r = [...rows];
+    if (state.sort === "asset") return r.sort((a, b) => a.asset.name.localeCompare(b.asset.name));
+    if (state.sort === "value") return r.sort((a, b) => (b.asset.value || 0) - (a.asset.value || 0));
+    // Entity: grouped by entity name, orphan assets last.
+    return r.sort((a, b) =>
+      orphanRank(a) - orphanRank(b)
+      || (a.entity ? a.entity.name : "").localeCompare(b.entity ? b.entity.name : "")
+      || a.asset.name.localeCompare(b.asset.name));
+  }
+
+  function sortBtn(key, label) {
+    const b = el("button", { class: `k-sortbtn${state.sort === key ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(state.sort === key) } }, [el("span", { text: label })]);
+    b.addEventListener("click", () => { state.sort = key; render(); });
+    return b;
+  }
+
+  function entityCell(entity) {
+    if (!entity) return el("span", { class: "k-orphanbadge", text: "Orphan · no entity" });
+    return el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name });
+  }
+
+  function render() {
+    const headers = ["Asset", "Type", "Entity", "Value", "Policies"];
+    const body = sorted().map(({ asset, entity }) => el("tr", { class: entity ? "" : "k-trorphan" }, [
+      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name })]),
+      el("td", { text: asset.meta || asset.type || "—" }),
+      el("td", {}, [entityCell(entity)]),
+      el("td", { text: asset.value ? money(asset.value) : "—" }),
+      el("td", { text: String((asset.policies || []).length) }),
+    ]));
+
+    const view = page("assets", [
+      el("h1", { class: "k-h1", text: "Assets" }),
+      el("p", { class: "k-sub", text: `Every asset across your entities — ${rows.length} on file${orphanCount ? ` · ${orphanCount} orphan${orphanCount === 1 ? "" : "s"}` : ""}.` }),
+      el("div", { class: "k-sortrow" }, [
+        el("span", { class: "k-sortlbl", text: "Sort" }),
+        sortBtn("entity", "Entity"), sortBtn("asset", "Asset"), sortBtn("value", "Value"),
+      ]),
+      rows.length
+        ? el("div", { class: "k-itable-wrap" }, [
+            el("table", { class: "k-itable" }, [
+              el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
+              el("tbody", {}, body),
+            ]),
+          ])
+        : el("div", { class: "k-empty", text: "No assets yet — add one from any entity." }),
+    ]);
+    mount(view);
+  }
+  render();
+}
+
 export async function renderKeepEntityList() {
   const settings = await getRuleDefaults();
+  // Connected/managed entities in the main list; unlinked ones drop to Orphans.
+  const orphanIds = new Set(getOrphanEntities().map((e) => e.id));
+  const main = getEntities().filter((e) => !orphanIds.has(e.id));
   const view = page("list", [
     el("h1", { class: "k-h1", text: "My entities" }),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
@@ -837,7 +903,8 @@ export async function renderKeepEntityList() {
     ]),
     // Compact list layout (scoped via .k-elist) — tighter than the fuller
     // single-entity detail page, which reuses the same entityPanel.
-    el("div", { class: "k-elist" }, getEntities().map((e) => entityPanel(e, settings))),
+    el("div", { class: "k-elist" }, main.map((e) => entityPanel(e, settings))),
+    orphansSection(),
   ]);
   mount(view);
 }
@@ -975,12 +1042,46 @@ function relationshipMap() {
   return el("div", { class: "k-relmap" }, [svg]);
 }
 
+// An orphan is a managed entity with no relationship links yet. Rendered as a
+// compact card (reusing .k-entcard) and grouped in an "Orphans" box on both the
+// Relationships and My-entities pages, so brand-new/unconnected entities are
+// visible without cluttering the graph as disconnected nodes.
+function orphanCard(entity) {
+  const n = entity.assets.length;
+  return el("a", { class: "k-entcard k-ocard", attrs: { href: `#/keep/entity/${entity.id}` } }, [
+    entityAvatar(entity),
+    el("div", { class: "k-entcard__main" }, [
+      el("div", {}, [
+        el("span", { class: "k-entcard__name", text: entity.name }),
+        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
+      ]),
+      el("div", { class: "k-entcard__meta", text: `${n} asset${n === 1 ? "" : "s"} · not linked yet` }),
+    ]),
+    el("span", { class: "k-entcard__open" }, [el("span", { text: "Open" }), icon("arrow-right", { size: 16 })]),
+  ]);
+}
+
+function orphansSection() {
+  const orphans = getOrphanEntities();
+  if (!orphans.length) return null;
+  return el("section", { class: "k-orphans" }, [
+    el("div", { class: "k-orphans__h" }, [
+      icon("alert", { size: 16 }),
+      el("h2", { text: "Orphans" }),
+      el("span", { class: "k-orphans__count", text: String(orphans.length) }),
+    ]),
+    el("p", { class: "k-orphans__note", text: "Entities with no relationships yet. Open one to connect it to an owner or trust." }),
+    el("div", { class: "k-orphans__grid" }, orphans.map(orphanCard)),
+  ]);
+}
+
 export function renderKeepEntities() {
   const view = page("entities", [
     el("h1", { class: "k-h1", text: "Relationships" }),
     el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
+    orphansSection(),
   ]);
   mount(view);
 }

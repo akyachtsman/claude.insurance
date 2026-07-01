@@ -108,10 +108,8 @@ async function loadTree(knownUser) {
 
   // Index policies under their asset, assets under their entity.
   const polByAsset = groupBy(policyRows.map(adaptPolicy), (p) => p._assetId);
-  const assetsByEntity = groupBy(
-    assetRows.map((a) => adaptAsset(a, polByAsset[a.id] || [])),
-    (a) => a._entityId
-  );
+  const allAssets = assetRows.map((a) => adaptAsset(a, polByAsset[a.id] || []));
+  const assetsByEntity = groupBy(allAssets, (a) => a._entityId);
   const entities = entityRows.map((e) => adaptEntity(e, assetsByEntity[e.id] || []));
 
   const entityById = new Map(entities.map((e) => [e.id, e]));
@@ -130,6 +128,7 @@ async function loadTree(knownUser) {
     },
     entities,
     entityById,
+    assets: allAssets,
     relationships,
     prefs: {
       email: profile.reminder_email !== false,
@@ -229,6 +228,29 @@ export function getEntities() { return cache ? cache.entities.filter((e) => e._m
 
 export function getEntity(id) { return cache ? cache.entityById.get(id) || null : null; }
 
+// Set of entity ids that take part in at least one relationship edge.
+function relatedEntityIds() {
+  const ids = new Set();
+  if (cache) cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
+  return ids;
+}
+
+// Orphans: managed entities not linked to any relationship yet (a just-added
+// business/person/trust before ownership is recorded). "You" (personal) is the
+// root of the graph, never an orphan.
+export function getOrphanEntities() {
+  if (!cache) return [];
+  const related = relatedEntityIds();
+  return cache.entities.filter((e) => e._managed && e.kind !== "personal" && !related.has(e.id));
+}
+
+// Every asset across all entities, each paired with its owning entity (null when
+// the asset points at an entity that didn't load — a true orphan asset).
+export function getAllAssets() {
+  if (!cache) return [];
+  return cache.assets.map((a) => ({ asset: a, entity: cache.entityById.get(a._entityId) || null }));
+}
+
 export function findAsset(assetId) {
   if (!cache) return null;
   for (const entity of cache.entities) {
@@ -254,12 +276,11 @@ export function findPolicy(policyId) {
 export function getMapData() {
   if (!cache) return { nodes: [], edges: [] };
   const ids = new Set();
-  // Every entity the client manages appears on the map — even with no
-  // relationships yet (a just-added entity, or a person, who isn't "owned" and
-  // so has no ownership edge). Previously only entities with an edge showed up,
-  // which hid brand-new and standalone entities.
-  cache.entities.forEach((e) => { if (e._managed) ids.add(e.id); });
-  // Plus any endpoints referenced by a relationship (in case one isn't managed).
+  // The graph shows connected entities — anything in a relationship edge — plus
+  // "You" (personal), which always anchors the map. Entities with no links yet
+  // are handled separately as orphans (getOrphanEntities) so they don't clutter
+  // the graph as disconnected floating nodes.
+  cache.entities.forEach((e) => { if (e._managed && e.kind === "personal") ids.add(e.id); });
   cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
   const nodes = [...ids].map((id) => {
     const e = cache.entityById.get(id);
