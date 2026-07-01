@@ -88,9 +88,6 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* Sprite icons render as filled silhouettes through <use>; re-apply the intended
    outline stroke so the clipboard/double-arrow read cleanly in the switch. */
 .k-seg__btn .icon { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-/* ⟷ connector between the Cards and Relationships segments. */
-.k-seg__swap { display: inline-flex; align-items: center; color: var(--color-accent); margin: 0 2px; }
-.k-seg__swap .icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Orphan-asset flag in the Assets table (assets can be orphaned; entities can't) */
 .k-orphanbadge { font: 800 12px var(--font-sans); background: var(--color-warn-bg, #fff3e0); color: var(--color-warn); padding: 3px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
