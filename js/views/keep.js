@@ -621,6 +621,64 @@ function collectPolicies() {
   return out;
 }
 
+// Shared sortable table. Sorting is driven by clicking the column headers: click
+// a header to sort by it (ascending), click again to flip to descending. The
+// active column shows a ▲/▼ caret. Columns without a `get` are not sortable.
+//   columns: [{ label, get?(row), cell(row) -> node|[nodes], tdClass? }]
+//   opts:    { defaultIdx, defaultDir (1 asc / -1 desc), rowClass(row) }
+// Returns { wrap, entries } — entries [{ row, tr }] so callers can filter (search).
+function sortableTable(columns, rows, opts = {}) {
+  const entries = rows.map((row) => ({
+    row,
+    tr: el("tr", { class: opts.rowClass ? opts.rowClass(row) : "" },
+      columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
+  }));
+  const tbody = el("tbody", {}, entries.map((e) => e.tr));
+
+  const firstSortable = columns.findIndex((c) => c.get);
+  const state = { idx: opts.defaultIdx != null ? opts.defaultIdx : Math.max(0, firstSortable), dir: opts.defaultDir || 1 };
+
+  const ths = columns.map((c, i) => {
+    if (!c.get) return el("th", { text: c.label });
+    const caret = el("span", { class: "k-th__caret" });
+    const th = el("th", { class: "k-th--sort", attrs: { role: "button", tabindex: "0", title: `Sort by ${c.label}` } }, [el("span", { text: c.label }), caret]);
+    const activate = () => {
+      if (state.idx === i) state.dir = -state.dir; else { state.idx = i; state.dir = 1; }
+      apply();
+    };
+    th.addEventListener("click", activate);
+    th.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(); } });
+    th._caret = caret; th._colIdx = i;
+    return th;
+  });
+
+  function apply() {
+    const col = columns[state.idx];
+    if (col && col.get) {
+      [...entries].sort((A, B) => {
+        const av = col.get(A.row), bv = col.get(B.row);
+        const d = (typeof av === "number" && typeof bv === "number")
+          ? av - bv
+          : String(av == null ? "" : av).localeCompare(String(bv == null ? "" : bv));
+        return d * state.dir;
+      }).forEach((e) => tbody.appendChild(e.tr));
+    }
+    ths.forEach((th) => {
+      if (!th._caret) return;
+      const on = th._colIdx === state.idx;
+      th.classList.toggle("is-sorted", on);
+      th.setAttribute("aria-sort", on ? (state.dir === 1 ? "ascending" : "descending") : "none");
+      th._caret.textContent = on ? (state.dir === 1 ? "▲" : "▼") : "";
+    });
+  }
+  apply();
+
+  const wrap = el("div", { class: "k-itable-wrap" }, [
+    el("table", { class: "k-itable" }, [el("thead", {}, [el("tr", {}, ths)]), tbody]),
+  ]);
+  return { wrap, entries };
+}
+
 function statTile(label, value, sub) {
   return el("div", { class: "k-stat" }, [
     el("div", { class: "k-stat__v", text: String(value) }),
@@ -762,18 +820,10 @@ export async function renderKeepLanding() {
   mount(view);
 }
 
-// My Entities — the entities-with-assets view (formerly the dashboard).
-// Insurance — every policy across all entities in one sortable table.
+// Policies — every policy across all entities in one table, sorted by clicking
+// the column headers (defaults to Renewal, soonest first).
 export function renderKeepInsurance() {
   const rows = collectPolicies();
-  const state = { sort: "due" };
-
-  function sorted() {
-    const r = [...rows];
-    if (state.sort === "entity") return r.sort((a, b) => a.entity.name.localeCompare(b.entity.name) || a.policy.line.localeCompare(b.policy.line));
-    if (state.sort === "policy") return r.sort((a, b) => a.policy.line.localeCompare(b.policy.line));
-    return r.sort((a, b) => a.policy.renewalInDays - b.policy.renewalInDays); // due date (soonest/most overdue first)
-  }
 
   function docCell(policy, asset, entity) {
     const docs = policy.documents || [];
@@ -782,107 +832,58 @@ export function renderKeepInsurance() {
       docItem(d, `#/keep/policy/${policy.id}`, [policy.line, asset.name, entity.name])));
   }
 
-  function sortBtn(key, label) {
-    const b = el("button", { class: `k-sortbtn${state.sort === key ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(state.sort === key) } }, [el("span", { text: label })]);
-    b.addEventListener("click", () => { state.sort = key; render(); });
-    return b;
-  }
+  const columns = [
+    { label: "Policy", get: (r) => r.policy.line, cell: (r) => [
+      el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.policy.line }),
+      el("div", { class: "k-imuted", text: r.policy.number || "" }),
+    ] },
+    { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
+    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
+    { label: "Carrier", get: (r) => r.policy.carrier || "", cell: (r) => el("span", { text: r.policy.carrier || "—" }) },
+    { label: "Renewal", get: (r) => r.policy.renewalInDays, cell: (r) => expiryBadge(r.policy.renewalInDays) },
+    { label: "Premium", cell: (r) => el("span", { text: r.policy.premium || "—" }) },
+    { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
+  ];
 
-  function render() {
-    const headers = ["Policy", "Entity", "Asset", "Carrier", "Renewal", "Premium", "Documents"];
-    const body = sorted().map(({ policy, asset, entity }) => el("tr", {}, [
-      el("td", {}, [
-        el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${policy.id}` }, text: policy.line }),
-        el("div", { class: "k-imuted", text: policy.number || "" }),
-      ]),
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name })]),
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name })]),
-      el("td", { text: policy.carrier || "—" }),
-      el("td", {}, [expiryBadge(policy.renewalInDays)]),
-      el("td", { text: policy.premium || "—" }),
-      el("td", {}, [docCell(policy, asset, entity)]),
-    ]));
-
-    const view = page("insurance", [
-      el("h1", { class: "k-h1", text: "Policies" }),
-      el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
-      el("div", { class: "k-sortrow" }, [
-        el("span", { class: "k-sortlbl", text: "Sort" }),
-        sortBtn("due", "Due date"), sortBtn("entity", "Entity"), sortBtn("policy", "Policy"),
-      ]),
-      rows.length
-        ? el("div", { class: "k-itable-wrap" }, [
-            el("table", { class: "k-itable" }, [
-              el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
-              el("tbody", {}, body),
-            ]),
-          ])
-        : el("div", { class: "k-empty", text: "No policies on file yet — your broker adds them as they're bound." }),
-    ]);
-    mount(view);
-  }
-  render();
+  const view = page("insurance", [
+    el("h1", { class: "k-h1", text: "Policies" }),
+    el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
+    rows.length
+      ? sortableTable(columns, rows, { defaultIdx: 4, defaultDir: 1 }).wrap  // Renewal, soonest first
+      : el("div", { class: "k-empty", text: "No policies on file yet — your broker adds them as they're bound." }),
+  ]);
+  mount(view);
 }
 
-// Assets — every asset across all entities in one sortable table. Assets whose
-// entity didn't load (true orphans) are flagged and sorted to the bottom.
+// Assets — every asset across all entities in one table, sorted by clicking the
+// column headers (defaults to Entity). Assets whose entity didn't load (true
+// orphans) are flagged; the "￿" sort key keeps them last when sorting by
+// Entity ascending.
 export function renderKeepAssets() {
   const rows = getAllAssets();          // [{ asset, entity|null }]
   const orphanCount = rows.filter((r) => !r.entity).length;
-  const state = { sort: "entity" };
-
-  const orphanRank = (r) => (r.entity ? 0 : 1);
-  function sorted() {
-    const r = [...rows];
-    if (state.sort === "asset") return r.sort((a, b) => a.asset.name.localeCompare(b.asset.name));
-    if (state.sort === "value") return r.sort((a, b) => (b.asset.value || 0) - (a.asset.value || 0));
-    // Entity: grouped by entity name, orphan assets last.
-    return r.sort((a, b) =>
-      orphanRank(a) - orphanRank(b)
-      || (a.entity ? a.entity.name : "").localeCompare(b.entity ? b.entity.name : "")
-      || a.asset.name.localeCompare(b.asset.name));
-  }
-
-  function sortBtn(key, label) {
-    const b = el("button", { class: `k-sortbtn${state.sort === key ? " on" : ""}`, attrs: { type: "button", "aria-pressed": String(state.sort === key) } }, [el("span", { text: label })]);
-    b.addEventListener("click", () => { state.sort = key; render(); });
-    return b;
-  }
 
   function entityCell(entity) {
     if (!entity) return el("span", { class: "k-orphanbadge", text: "Orphan · no entity" });
     return el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name });
   }
 
-  function render() {
-    const headers = ["Asset", "Type", "Entity", "Value", "Policies"];
-    const body = sorted().map(({ asset, entity }) => el("tr", { class: entity ? "" : "k-trorphan" }, [
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name })]),
-      el("td", { text: asset.meta || asset.type || "—" }),
-      el("td", {}, [entityCell(entity)]),
-      el("td", { text: asset.value ? money(asset.value) : "—" }),
-      el("td", { text: String((asset.policies || []).length) }),
-    ]));
+  const columns = [
+    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
+    { label: "Type", get: (r) => r.asset.meta || r.asset.type || "", cell: (r) => el("span", { text: r.asset.meta || r.asset.type || "—" }) },
+    { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
+    { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
+    { label: "Policies", get: (r) => (r.asset.policies || []).length, cell: (r) => el("span", { text: String((r.asset.policies || []).length) }) },
+  ];
 
-    const view = page("assets", [
-      el("h1", { class: "k-h1", text: "Assets" }),
-      el("p", { class: "k-sub", text: `Every asset across your entities — ${rows.length} on file${orphanCount ? ` · ${orphanCount} orphan${orphanCount === 1 ? "" : "s"}` : ""}.` }),
-      el("div", { class: "k-sortrow" }, [
-        el("span", { class: "k-sortlbl", text: "Sort" }),
-        sortBtn("entity", "Entity"), sortBtn("asset", "Asset"), sortBtn("value", "Value"),
-      ]),
-      rows.length
-        ? el("div", { class: "k-itable-wrap" }, [
-            el("table", { class: "k-itable" }, [
-              el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
-              el("tbody", {}, body),
-            ]),
-          ])
-        : el("div", { class: "k-empty", text: "No assets yet — add one from any entity." }),
-    ]);
-    mount(view);
-  }
-  render();
+  const view = page("assets", [
+    el("h1", { class: "k-h1", text: "Assets" }),
+    el("p", { class: "k-sub", text: `Every asset across your entities — ${rows.length} on file${orphanCount ? ` · ${orphanCount} orphan${orphanCount === 1 ? "" : "s"}` : ""}.` }),
+    rows.length
+      ? sortableTable(columns, rows, { defaultIdx: 2, defaultDir: 1, rowClass: (r) => (r.entity ? "" : "k-trorphan") }).wrap  // Entity
+      : el("div", { class: "k-empty", text: "No assets yet — add one from any entity." }),
+  ]);
+  mount(view);
 }
 
 export async function renderKeepEntityList() {
@@ -1609,76 +1610,44 @@ function collectDocuments() {
   return out;
 }
 
-// Documents — a flat, sortable table: one row per document, with the entity,
-// asset and policy it belongs to, plus a download button.
+// Documents — a flat table: one row per document, with the entity, asset and
+// policy it belongs to, plus a download button. Sort by clicking the columns.
 export function renderKeepDocuments() {
   const rows = collectDocuments();
 
-  const CMP = {
-    document: (a, b) => a.doc.localeCompare(b.doc),
-    policy: (a, b) => a.policy.line.localeCompare(b.policy.line) || a.doc.localeCompare(b.doc),
-    entity: (a, b) => a.entity.name.localeCompare(b.entity.name) || a.asset.name.localeCompare(b.asset.name) || a.doc.localeCompare(b.doc),
-  };
+  const columns = [
+    { label: "Document", get: (r) => r.doc, cell: (r) => [
+      el("span", { class: "k-doc-ic" }, [icon("doc", { size: 15 })]),
+      el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.doc }),
+    ] },
+    { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
+    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
+    { label: "Policy", get: (r) => r.policy.line, cell: (r) => [
+      el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.policy.line }),
+      el("div", { class: "k-imuted", text: r.policy.number || "" }),
+    ] },
+    { label: "Download", cell: (r) => downloadButton(r.doc, [r.policy.line, r.asset.name, r.entity.name]) },
+  ];
 
-  // One <tr> per document (built once; sort re-orders, search toggles hidden).
-  const entries = rows.map((x) => ({
-    x,
-    tr: el("tr", {}, [
-      el("td", {}, [el("span", { class: "k-doc-ic" }, [icon("doc", { size: 15 })]), el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${x.policy.id}` }, text: x.doc })]),
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${x.entity.id}` }, text: x.entity.name })]),
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${x.asset.id}` }, text: x.asset.name })]),
-      el("td", {}, [el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${x.policy.id}` }, text: x.policy.line }), el("div", { class: "k-imuted", text: x.policy.number || "" })]),
-      el("td", {}, [downloadButton(x.doc, [x.policy.line, x.asset.name, x.entity.name])]),
-    ]),
-  }));
-
-  const tbody = el("tbody", {}, entries.map((e) => e.tr));
+  const table = rows.length ? sortableTable(columns, rows, { defaultIdx: 1, defaultDir: 1 }) : null;  // Entity
   const empty = el("div", { class: "k-docs-empty", attrs: { hidden: "" }, text: "No documents match your search." });
-
-  const state = { sort: "entity" };
-  const sortButtons = [];
-  function applySort(key) {
-    state.sort = key;
-    [...entries].sort((A, B) => CMP[key](A.x, B.x)).forEach((e) => tbody.appendChild(e.tr));
-    sortButtons.forEach((b) => { const on = b.dataset.key === key; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
-  }
-  function sortBtn(key, label) {
-    const b = el("button", { class: "k-sortbtn", attrs: { type: "button", "aria-pressed": "false" } }, [el("span", { text: label })]);
-    b.dataset.key = key;
-    b.addEventListener("click", () => applySort(key));
-    sortButtons.push(b);
-    return b;
-  }
 
   const search = el("input", { class: "k-docsearch", attrs: { type: "search", placeholder: "Search documents by name, policy, asset or entity…", "aria-label": "Search documents" } });
   search.addEventListener("input", () => {
     const q = search.value.trim().toLowerCase();
     let any = false;
-    entries.forEach((e) => { const show = !q || e.x.hay.includes(q); e.tr.hidden = !show; if (show) any = true; });
+    table.entries.forEach((e) => { const show = !q || e.row.hay.includes(q); e.tr.hidden = !show; if (show) any = true; });
     empty.hidden = any;
   });
 
-  const headers = ["Document", "Entity", "Asset", "Policy", "Download"];
   const view = page("documents", [
     backLink("#/keep", "home"),
     el("h1", { class: "k-h1", text: "Documents" }),
     el("p", { class: "k-sub", text: rows.length ? `Every document across your policies — ${rows.length} on file.` : "Your documents will appear here." }),
     rows.length ? search : null,
-    rows.length ? el("div", { class: "k-sortrow" }, [
-      el("span", { class: "k-sortlbl", text: "Sort" }),
-      sortBtn("entity", "Entity"), sortBtn("document", "Document"), sortBtn("policy", "Policy"),
-    ]) : null,
-    rows.length
-      ? el("div", { class: "k-itable-wrap" }, [
-          el("table", { class: "k-itable" }, [
-            el("thead", {}, [el("tr", {}, headers.map((h) => el("th", { text: h })))]),
-            tbody,
-          ]),
-        ])
-      : el("div", { class: "k-empty", text: "No documents on file yet." }),
+    rows.length ? table.wrap : el("div", { class: "k-empty", text: "No documents on file yet." }),
     empty,
   ]);
-  if (rows.length) applySort("entity");
   mount(view);
 }
 
