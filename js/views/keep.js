@@ -372,11 +372,11 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
-        link("Policies", "#/keep/insurance", "insurance"),
         link("Entities", "#/keep/list", "list"),
         el("span", { class: "k-navswap", attrs: { "aria-hidden": "true", title: "Entities and Relationships are two views of the same thing" } }, [icon("swap", { size: 22 })]),
         link("Relationships", "#/keep/entities", "entities"),
         link("Assets", "#/keep/assets", "assets"),
+        link("Policies", "#/keep/insurance", "insurance"),
         link("Documents", "#/keep/documents", "documents"),
       ]),
       el("div", { class: "k-bar__rt" }, [searchBox(), notifMenu(), accountMenu()]),
