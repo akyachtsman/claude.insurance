@@ -9,7 +9,7 @@ import { renderCoverage } from "./views/coverage.js";
 import { renderQualify } from "./views/qualify.js";
 import { renderSummary } from "./views/summary.js";
 import {
-  renderKeepLogin, renderKeepLanding, renderKeepInsurance, renderKeepEntityList, renderKeepEntities, renderKeepEntity,
+  renderKeepLogin, renderKeepLanding, renderKeepInsurance, renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity,
   renderKeepAsset, renderKeepAddAsset, renderKeepAddEntity, renderKeepPolicy, renderKeepAssets,
   renderKeepRequest, renderKeepRequests,
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
@@ -96,6 +96,8 @@ async function dispatchKeep(rest) {
       return renderKeepInsurance();
     case "list":
       return renderKeepEntityList();
+    case "grid":
+      return renderKeepEntityGrid();
     case "add-asset":
       return renderKeepAddAsset();
     case "add-entity":

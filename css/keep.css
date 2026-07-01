@@ -89,19 +89,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
    outline stroke so the clipboard/double-arrow read cleanly in the switch. */
 .k-seg__btn .icon { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-/* ── Orphans box (unlinked entities) — on Relationships + My-entities pages ──── */
-.k-orphans { margin-top: var(--space-6); border: 1px dashed var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface); padding: var(--space-6); }
-.k-orphans__h { display: flex; align-items: center; gap: 8px; }
-.k-orphans__h h2 { font: 800 18px var(--font-display); margin: 0; }
-.k-orphans__h .icon { color: var(--color-warn); }
-.k-orphans__count { font: 800 12px var(--font-sans); background: var(--color-warn-bg, #fff3e0); color: var(--color-warn); padding: 2px 10px; border-radius: var(--radius-pill); }
-.k-orphans__note { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin: 6px 0 var(--space-5); }
-.k-orphans__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.k-ocard { padding: 14px 16px; }
-.k-ocard .k-bigav { width: 48px; height: 48px; border-radius: 14px; font-size: 17px; }
-.k-ocard .k-entcard__name { font-size: 16px; }
-
-/* Orphan-asset flag in the Assets table */
+/* Orphan-asset flag in the Assets table (assets can be orphaned; entities can't) */
 .k-orphanbadge { font: 800 12px var(--font-sans); background: var(--color-warn-bg, #fff3e0); color: var(--color-warn); padding: 3px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
 .k-trorphan { background: #fffaf0; }
 
@@ -220,26 +208,36 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-4); }
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
-/* Compact My-entities list: tighter panels than the single-entity detail page. */
-/* Compact My-entities list: roughly half the footprint of the single-entity
-   detail page, which reuses the same entityPanel at full size. */
-.k-elist .k-panel { padding: var(--space-4); margin-bottom: var(--space-3); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
-.k-elist .k-ehead { margin-bottom: var(--space-3); gap: var(--space-3); }
-.k-elist .k-bigav { width: 38px; height: 38px; border-radius: 12px; font-size: 14px; }
-.k-elist .k-bigav .icon { width: 20px; height: 20px; }
-.k-elist .k-ehead h1 { font-size: 16px; }
-.k-elist .k-et { font-size: 10px; padding: 3px 9px; }
-.k-elist .k-emeta { font-size: 12px; margin-top: 2px; }
-.k-elist .k-ehead .k-btn { min-height: 34px; padding: 7px 13px; font-size: 13px; }
-.k-elist .k-ehead .k-btn .icon { width: 15px; height: 15px; }
-.k-elist .k-lbl { font-size: 11px; margin-bottom: var(--space-2); }
-.k-elist .k-grid2 { gap: var(--space-2); }
-.k-elist .k-cc { padding: var(--space-3); gap: var(--space-3); border-radius: var(--radius-md); }
-.k-elist .k-cc .k-cic { width: 34px; height: 34px; border-radius: 11px; }
-.k-elist .k-cc .k-cic .icon { width: 18px; height: 18px; }
-.k-elist .k-cc__name { font-size: 14px; }
-.k-elist .k-cc__meta { font-size: 12px; margin: 1px 0 6px; }
-.k-elist .k-cc__val { font-size: 14px; }
+/* ── Entities · Rows layout (Option A) ──────────────────────────────────────── */
+.k-erows { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+.k-erow { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--color-border); color: inherit; transition: background .12s; }
+.k-erow:last-child { border-bottom: 0; }
+.k-erow:hover { background: var(--color-bg); color: inherit; }
+.k-erow .k-bigav { width: 40px; height: 40px; border-radius: 12px; font-size: 14px; }
+.k-erow .k-bigav .icon { width: 20px; height: 20px; }
+.k-erow__id { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.k-erow__name { font: 700 16px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-erow__sum { font: 600 14px var(--font-sans); color: var(--color-text-secondary); white-space: nowrap; }
+.k-erow__sum b { color: var(--color-text-primary); font-weight: 800; }
+.k-erow__chev { color: var(--color-text-secondary); display: inline-flex; flex: none; }
+.k-erow__chev .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+/* ── Entities · Cards layout (Option B) ─────────────────────────────────────── */
+.k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.k-etile { position: relative; overflow: hidden; text-align: center; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: 22px 18px 18px; transition: transform .14s, box-shadow .14s; }
+.k-etile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
+.k-etile__bar { position: absolute; top: 0; left: 0; right: 0; height: 5px; background: var(--color-border); }
+.k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: var(--color-accent); }
+.k-etile--biz .k-etile__bar { background: #d6333a; }
+.k-etile--trust .k-etile__bar { background: var(--color-warn); }
+.k-etile--np .k-etile__bar { background: var(--color-ok); }
+.k-etile .k-bigav { width: 52px; height: 52px; border-radius: 16px; margin: 4px auto 12px; font-size: 18px; }
+.k-etile .k-bigav .icon { width: 26px; height: 26px; }
+.k-etile__name { font: 700 17px var(--font-display); margin-bottom: 7px; }
+.k-etile .k-et { display: inline-block; margin: 0; }
+.k-etile__stats { display: flex; justify-content: center; gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.k-etile__stat b { display: block; font: 800 18px var(--font-display); color: var(--color-text-primary); }
+.k-etile__stat span { font: 700 11px var(--font-sans); text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-secondary); }
 
 /* ── Asset cards (chunky, rounded) ──────────────────────────────────────────── */
 .k-cc { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
