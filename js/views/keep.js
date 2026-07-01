@@ -835,7 +835,9 @@ export async function renderKeepEntityList() {
       ]),
       el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
     ]),
-    ...getEntities().map((e) => entityPanel(e, settings)),
+    // Compact list layout (scoped via .k-elist) — tighter than the fuller
+    // single-entity detail page, which reuses the same entityPanel.
+    el("div", { class: "k-elist" }, getEntities().map((e) => entityPanel(e, settings))),
   ]);
   mount(view);
 }
