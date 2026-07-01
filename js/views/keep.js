@@ -864,11 +864,16 @@ export function renderKeepAssets() {
   ];
 
   const view = page("assets", [
-    el("h1", { class: "k-h1", text: "Assets" }),
-    el("p", { class: "k-sub", text: `Every asset across your entities — ${rows.length} on file${orphanCount ? ` · ${orphanCount} orphan${orphanCount === 1 ? "" : "s"}` : ""}.` }),
+    el("div", { class: "k-reqhead" }, [
+      el("div", {}, [
+        el("h1", { class: "k-h1", text: "Assets" }),
+        el("p", { class: "k-sub", text: `Every asset across your entities — ${rows.length} on file${orphanCount ? ` · ${orphanCount} orphan${orphanCount === 1 ? "" : "s"}` : ""}.` }),
+      ]),
+      el("a", { class: "k-btn", attrs: { href: "#/keep/add-asset" } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
+    ]),
     rows.length
       ? sortableTable(columns, rows, { defaultIdx: 2, defaultDir: 1, rowClass: (r) => (r.entity ? "" : "k-trorphan") }).wrap  // Entity
-      : el("div", { class: "k-empty", text: "No assets yet — add one from any entity." }),
+      : el("div", { class: "k-empty", text: "No assets yet — use Add asset to add one." }),
   ]);
   mount(view);
 }
