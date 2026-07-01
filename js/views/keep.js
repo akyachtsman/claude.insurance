@@ -915,10 +915,11 @@ export async function renderKeepEntityList() {
       ]),
       el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
     ]),
+    // Orphans surfaced above the main list so unlinked entities are visible.
+    orphansSection(),
     // Compact list layout (scoped via .k-elist) — tighter than the fuller
     // single-entity detail page, which reuses the same entityPanel.
     el("div", { class: "k-elist" }, main.map((e) => entityPanel(e, settings))),
-    orphansSection(),
   ]);
   mount(view);
 }
@@ -1094,9 +1095,9 @@ export function renderKeepEntities() {
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle("map"),
     el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
+    orphansSection(),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
-    orphansSection(),
   ]);
   mount(view);
 }

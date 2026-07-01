@@ -221,12 +221,25 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
 /* Compact My-entities list: tighter panels than the single-entity detail page. */
-.k-elist .k-panel { padding: var(--space-6); margin-bottom: var(--space-4); box-shadow: var(--shadow-md); }
-.k-elist .k-ehead { margin-bottom: var(--space-4); gap: var(--space-4); }
-.k-elist .k-bigav { width: 54px; height: 54px; border-radius: 16px; font-size: 19px; }
-.k-elist .k-ehead h1 { font-size: 21px; }
-.k-elist .k-lbl { margin-bottom: var(--space-3); }
-.k-elist .k-grid2 { gap: var(--space-3); }
+/* Compact My-entities list: roughly half the footprint of the single-entity
+   detail page, which reuses the same entityPanel at full size. */
+.k-elist .k-panel { padding: var(--space-4); margin-bottom: var(--space-3); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.k-elist .k-ehead { margin-bottom: var(--space-3); gap: var(--space-3); }
+.k-elist .k-bigav { width: 38px; height: 38px; border-radius: 12px; font-size: 14px; }
+.k-elist .k-bigav .icon { width: 20px; height: 20px; }
+.k-elist .k-ehead h1 { font-size: 16px; }
+.k-elist .k-et { font-size: 10px; padding: 3px 9px; }
+.k-elist .k-emeta { font-size: 12px; margin-top: 2px; }
+.k-elist .k-ehead .k-btn { min-height: 34px; padding: 7px 13px; font-size: 13px; }
+.k-elist .k-ehead .k-btn .icon { width: 15px; height: 15px; }
+.k-elist .k-lbl { font-size: 11px; margin-bottom: var(--space-2); }
+.k-elist .k-grid2 { gap: var(--space-2); }
+.k-elist .k-cc { padding: var(--space-3); gap: var(--space-3); border-radius: var(--radius-md); }
+.k-elist .k-cc .k-cic { width: 34px; height: 34px; border-radius: 11px; }
+.k-elist .k-cc .k-cic .icon { width: 18px; height: 18px; }
+.k-elist .k-cc__name { font-size: 14px; }
+.k-elist .k-cc__meta { font-size: 12px; margin: 1px 0 6px; }
+.k-elist .k-cc__val { font-size: 14px; }
 
 /* ── Asset cards (chunky, rounded) ──────────────────────────────────────────── */
 .k-cc { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
