@@ -11,7 +11,7 @@ import { getRuleDefaults } from "../content.js";
 import { ASSET_META } from "../keep/data.js";
 import {
   getUser, getEntities, getEntity, findAsset, findPolicy, getMapData,
-  getOrphanEntities, getAllAssets,
+  getAllAssets,
   getPrefs, savePrefs, signIn, signOut, addEntity, addAsset,
   invalidate, ensureData, DEMO_CREDENTIAL, addRelationship,
   addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest,
@@ -392,6 +392,7 @@ function page(active, contentChildren, opts = {}) {
 const KEEP_LABELS = {
   "#/keep": "home",
   "#/keep/list": "entities",
+  "#/keep/grid": "entities",
   "#/keep/insurance": "policies",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
@@ -550,18 +551,6 @@ function joinDots(bits) {
     out.push(el("span", { text: b }));
   });
   return out;
-}
-
-function entityPanel(entity, settings) {
-  const variant = panelVariant(entity);
-  const body = entity.assets.length
-    ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
-    : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." });
-  return el("section", { class: `k-panel ${variant}` }, [
-    entityHead(entity, settings, "#/keep/add-asset"),
-    el("div", { class: "k-lbl", text: "Assets in this entity" }),
-    body,
-  ]);
 }
 
 // ── views ────────────────────────────────────────────────────────────────────
@@ -884,44 +873,19 @@ export function renderKeepAssets() {
   mount(view);
 }
 
-// Segmented switch that flips the Entities tab between the List and the
-// Relationships map — the two views of the same set of entities. `active` is
-// "list" or "map"; each segment deep-links to its route.
+// Segmented switch across the three views of the same entities: a compact Rows
+// list, a Cards grid, and the Relationships map. `active` is "rows" | "cards" |
+// "map"; each segment deep-links to its route.
 function entitiesToggle(active) {
   const seg = (label, iconName, href, key) => el("a", {
     class: `k-seg__btn${active === key ? " is-on" : ""}`,
     attrs: { href, role: "tab", "aria-selected": String(active === key) },
-  }, [icon(iconName, { size: 17 }), el("span", { text: label })]);
+  }, [icon(iconName, { size: 16 }), el("span", { text: label })]);
   return el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entities view" } }, [
-    seg("List", "clipboard", "#/keep/list", "list"),
+    seg("Rows", "clipboard", "#/keep/list", "rows"),
+    seg("Cards", "book", "#/keep/grid", "cards"),
     seg("Relationships", "swap", "#/keep/entities", "map"),
   ]);
-}
-
-export async function renderKeepEntityList() {
-  const settings = await getRuleDefaults();
-  // Connected/managed entities in the main list; unlinked ones drop to Orphans.
-  const orphanIds = new Set(getOrphanEntities().map((e) => e.id));
-  const main = getEntities().filter((e) => !orphanIds.has(e.id));
-  const view = page("list", [
-    el("h1", { class: "k-h1", text: "Entities" }),
-    entitiesToggle("list"),
-    el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
-    el("div", { class: "k-privacyrow" }, [
-      el("div", { class: "k-privacy" }, [
-        icon("lock", { size: 16 }),
-        el("span", { text: "Encrypted & private — only you and your broker." }),
-        el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
-      ]),
-      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
-    ]),
-    // Orphans surfaced above the main list so unlinked entities are visible.
-    orphansSection(),
-    // Compact list layout (scoped via .k-elist) — tighter than the fuller
-    // single-entity detail page, which reuses the same entityPanel.
-    el("div", { class: "k-elist" }, main.map((e) => entityPanel(e, settings))),
-  ]);
-  mount(view);
 }
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
@@ -1057,45 +1021,82 @@ function relationshipMap() {
   return el("div", { class: "k-relmap" }, [svg]);
 }
 
-// An orphan is a managed entity with no relationship links yet. Rendered as a
-// compact card (reusing .k-entcard) and grouped in an "Orphans" box on both the
-// Relationships and My-entities pages, so brand-new/unconnected entities are
-// visible without cluttering the graph as disconnected nodes.
-function orphanCard(entity) {
-  const n = entity.assets.length;
-  return el("a", { class: "k-entcard k-ocard", attrs: { href: `#/keep/entity/${entity.id}` } }, [
-    entityAvatar(entity),
-    el("div", { class: "k-entcard__main" }, [
-      el("div", {}, [
-        el("span", { class: "k-entcard__name", text: entity.name }),
-        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
-      ]),
-      el("div", { class: "k-entcard__meta", text: `${n} asset${n === 1 ? "" : "s"} · not linked yet` }),
+// Total insured/estimated value across an entity's assets.
+function entityValue(entity) {
+  return entity.assets.reduce((t, a) => t + (a.value || 0), 0);
+}
+// Summary nodes: "N assets · M gaps · $value" with the numbers bold.
+function entitySumNodes(sum, val) {
+  const out = [el("b", { text: String(sum.assets) }), el("span", { text: ` asset${sum.assets === 1 ? "" : "s"}` })];
+  if (sum.gaps) { out.push(sep(), el("b", { text: String(sum.gaps) }), el("span", { text: ` gap${sum.gaps === 1 ? "" : "s"}` })); }
+  out.push(sep(), el("b", { text: val ? money(val) : "—" }));
+  return out;
+}
+
+// Option A — one compact row per entity (click to open its detail).
+function entityRow(entity, settings) {
+  const sum = entitySummary(entity, settings);
+  return el("a", { class: "k-erow", attrs: { href: `#/keep/entity/${entity.id}` } }, [
+    el("div", { class: "k-erow__id" }, [
+      entityAvatar(entity),
+      el("span", { class: "k-erow__name", text: entity.name }),
+      el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
     ]),
-    el("span", { class: "k-entcard__open" }, [el("span", { text: "Open" }), icon("arrow-right", { size: 16 })]),
+    el("span", { class: "k-erow__sum" }, entitySumNodes(sum, entityValue(entity))),
+    el("span", { class: "k-erow__chev" }, [icon("arrow-right", { size: 18 })]),
   ]);
 }
 
-function orphansSection() {
-  const orphans = getOrphanEntities();
-  if (!orphans.length) return null;
-  return el("section", { class: "k-orphans" }, [
-    el("div", { class: "k-orphans__h" }, [
-      icon("alert", { size: 16 }),
-      el("h2", { text: "Orphans" }),
-      el("span", { class: "k-orphans__count", text: String(orphans.length) }),
+// Option B — a uniform tile per entity in a responsive grid.
+function entityTile(entity, settings) {
+  const sum = entitySummary(entity, settings);
+  const val = entityValue(entity);
+  const stat = (v, l) => el("div", { class: "k-etile__stat" }, [el("b", { text: String(v) }), el("span", { text: l })]);
+  return el("a", { class: `k-etile k-etile--${colorSuffix(entity)}`, attrs: { href: `#/keep/entity/${entity.id}` } }, [
+    el("span", { class: "k-etile__bar" }),
+    entityAvatar(entity),
+    el("div", { class: "k-etile__name", text: entity.name }),
+    el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
+    el("div", { class: "k-etile__stats" }, [
+      stat(sum.assets, sum.assets === 1 ? "Asset" : "Assets"),
+      stat(sum.gaps, sum.gaps === 1 ? "Gap" : "Gaps"),
+      stat(val ? money(val) : "—", "Value"),
     ]),
-    el("p", { class: "k-orphans__note", text: "Entities with no relationships yet. Open one to connect it to an owner or trust." }),
-    el("div", { class: "k-orphans__grid" }, orphans.map(orphanCard)),
   ]);
 }
+
+// Shared Entities collection: the Rows and Cards layouts share the header,
+// privacy row and "New entity" button; only the body markup differs.
+async function renderEntityCollection(layout) {
+  const settings = await getRuleDefaults();
+  const entities = getEntities();
+  const body = layout === "cards"
+    ? el("div", { class: "k-etiles" }, entities.map((e) => entityTile(e, settings)))
+    : el("div", { class: "k-erows" }, entities.map((e) => entityRow(e, settings)));
+  const view = page("list", [
+    el("h1", { class: "k-h1", text: "Entities" }),
+    entitiesToggle(layout),
+    el("div", { class: "k-privacyrow" }, [
+      el("div", { class: "k-privacy" }, [
+        icon("lock", { size: 16 }),
+        el("span", { text: "Encrypted & private — only you and your broker." }),
+        el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
+      ]),
+      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
+    ]),
+    entities.length ? body : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
+  ]);
+  mount(view);
+}
+
+export function renderKeepEntityList() { return renderEntityCollection("rows"); }
+export function renderKeepEntityGrid() { return renderEntityCollection("cards"); }
 
 export function renderKeepEntities() {
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle("map"),
     el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
-    orphansSection(),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
   ]);

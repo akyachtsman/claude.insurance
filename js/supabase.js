@@ -228,22 +228,6 @@ export function getEntities() { return cache ? cache.entities.filter((e) => e._m
 
 export function getEntity(id) { return cache ? cache.entityById.get(id) || null : null; }
 
-// Set of entity ids that take part in at least one relationship edge.
-function relatedEntityIds() {
-  const ids = new Set();
-  if (cache) cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
-  return ids;
-}
-
-// Orphans: managed entities not linked to any relationship yet (a just-added
-// business/person/trust before ownership is recorded). "You" (personal) is the
-// root of the graph, never an orphan.
-export function getOrphanEntities() {
-  if (!cache) return [];
-  const related = relatedEntityIds();
-  return cache.entities.filter((e) => e._managed && e.kind !== "personal" && !related.has(e.id));
-}
-
 // Every asset across all entities, each paired with its owning entity (null when
 // the asset points at an entity that didn't load — a true orphan asset).
 export function getAllAssets() {
@@ -278,8 +262,8 @@ export function getMapData() {
   const ids = new Set();
   // The graph shows connected entities — anything in a relationship edge — plus
   // "You" (personal), which always anchors the map. Entities with no links yet
-  // are handled separately as orphans (getOrphanEntities) so they don't clutter
-  // the graph as disconnected floating nodes.
+  // simply don't appear in the relationship graph (they're never "orphans");
+  // they still show in the Rows/Cards entity lists.
   cache.entities.forEach((e) => { if (e._managed && e.kind === "personal") ids.add(e.id); });
   cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
   const nodes = [...ids].map((id) => {
