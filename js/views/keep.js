@@ -884,7 +884,9 @@ function entitiesToggle(active) {
   return el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entities view" } }, [
     seg("Rows", "clipboard", "#/keep/list", "rows"),
     seg("Cards", "book", "#/keep/grid", "cards"),
-    seg("Relationships", "swap", "#/keep/entities", "map"),
+    // ⟷ connector: Cards and Relationships are two views of the same entities.
+    el("span", { class: "k-seg__swap", attrs: { "aria-hidden": "true", title: "Cards and Relationships are two views of the same entities" } }, [icon("swap", { size: 18 })]),
+    seg("Relationships", "handshake", "#/keep/entities", "map"),
   ]);
 }
 
