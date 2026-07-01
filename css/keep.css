@@ -88,6 +88,22 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-entcard__meta { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 4px; }
 .k-entcard__open { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); font: 800 13px var(--font-sans); white-space: nowrap; }
 
+/* ── Orphans box (unlinked entities) — on Relationships + My-entities pages ──── */
+.k-orphans { margin-top: var(--space-6); border: 1px dashed var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface); padding: var(--space-6); }
+.k-orphans__h { display: flex; align-items: center; gap: 8px; }
+.k-orphans__h h2 { font: 800 18px var(--font-display); margin: 0; }
+.k-orphans__h .icon { color: var(--color-warn); }
+.k-orphans__count { font: 800 12px var(--font-sans); background: var(--color-warn-bg, #fff3e0); color: var(--color-warn); padding: 2px 10px; border-radius: var(--radius-pill); }
+.k-orphans__note { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin: 6px 0 var(--space-5); }
+.k-orphans__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.k-ocard { padding: 14px 16px; }
+.k-ocard .k-bigav { width: 48px; height: 48px; border-radius: 14px; font-size: 17px; }
+.k-ocard .k-entcard__name { font-size: 16px; }
+
+/* Orphan-asset flag in the Assets table */
+.k-orphanbadge { font: 800 12px var(--font-sans); background: var(--color-warn-bg, #fff3e0); color: var(--color-warn); padding: 3px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
+.k-trorphan { background: #fffaf0; }
+
 /* ── Documents (Entity -> Asset -> Policy -> docs) ──────────────────────────── */
 .k-docsearch { width: 100%; min-height: 48px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 16px; font: 600 15px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; margin-bottom: var(--space-5); }
 .k-docsearch:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
