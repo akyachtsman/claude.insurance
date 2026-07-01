@@ -214,6 +214,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 11px; }
 .k-enttable .k-etcell__name { font: 700 15px var(--font-display); }
 .k-enttable .k-et { margin-left: 0; }
+.k-etsub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 
 /* ── Entities · Cards layout (Option B) ─────────────────────────────────────── */
 .k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
@@ -234,6 +235,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-etile .k-bigav .icon { width: 26px; height: 26px; }
 .k-etile__name { font: 700 17px var(--font-display); margin-bottom: 7px; }
 .k-etile .k-et { display: inline-block; margin: 0; }
+.k-etile__sub { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 5px; }
 .k-etile__stats { display: flex; justify-content: center; gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border); }
 .k-etile__stat b { display: block; font: 800 18px var(--font-display); color: var(--color-text-primary); }
 .k-etile__stat span { font: 700 11px var(--font-sans); text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-secondary); }
