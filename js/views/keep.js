@@ -1072,6 +1072,18 @@ function entityTile(entity, settings) {
 
 // Shared Entities collection: the Rows and Cards layouts share the header,
 // privacy row and "New entity" button; only the body markup differs.
+// Shared privacy line + "New entity" button, shown across all Entities views.
+function entitiesPrivacyRow() {
+  return el("div", { class: "k-privacyrow" }, [
+    el("div", { class: "k-privacy" }, [
+      icon("lock", { size: 16 }),
+      el("span", { text: "Encrypted & private — only you and your broker." }),
+      el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
+    ]),
+    el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
+  ]);
+}
+
 async function renderEntityCollection(layout) {
   const settings = await getRuleDefaults();
   const entities = getEntities();
@@ -1081,14 +1093,7 @@ async function renderEntityCollection(layout) {
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle(layout),
-    el("div", { class: "k-privacyrow" }, [
-      el("div", { class: "k-privacy" }, [
-        icon("lock", { size: 16 }),
-        el("span", { text: "Encrypted & private — only you and your broker." }),
-        el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
-      ]),
-      el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),
-    ]),
+    entitiesPrivacyRow(),
     entities.length ? body : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
   ]);
   mount(view);
@@ -1101,7 +1106,7 @@ export function renderKeepEntities() {
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle("map"),
-    el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
+    entitiesPrivacyRow(),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
   ]);
