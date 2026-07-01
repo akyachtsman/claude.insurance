@@ -43,6 +43,18 @@ function saveRelPositions(state) {
   catch (e) { /* storage unavailable — ignore */ }
 }
 
+// Persist the drag-reordered order of the entity Cards grid (per browser), as an
+// array of entity ids. Empty/absent → fall back to the default (name) order.
+const CARD_ORDER_KEY = "keep:entity-card-order";
+function loadCardOrder() {
+  try { const v = JSON.parse(localStorage.getItem(CARD_ORDER_KEY)); return Array.isArray(v) ? v : []; }
+  catch (e) { return []; }
+}
+function saveCardOrder(ids) {
+  try { localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(ids)); }
+  catch (e) { /* storage unavailable — ignore */ }
+}
+
 // Reminder preferences live on the user's profile (loaded with the Keep data).
 // activeSchedule reflects the saved set; changes persist via savePrefs().
 function activeSchedule() {
@@ -1051,7 +1063,7 @@ function entityTile(entity, settings) {
   const sum = entitySummary(entity, settings);
   const val = entityValue(entity);
   const stat = (v, l) => el("div", { class: "k-etile__stat" }, [el("b", { text: String(v) }), el("span", { text: l })]);
-  return el("a", { class: `k-etile k-etile--${colorSuffix(entity)}`, attrs: { href: `#/keep/entity/${entity.id}` } }, [
+  return el("a", { class: `k-etile k-etile--${colorSuffix(entity)}`, attrs: { href: `#/keep/entity/${entity.id}`, draggable: "true", "data-id": entity.id } }, [
     el("span", { class: "k-etile__bar" }),
     entityAvatar(entity),
     el("div", { class: "k-etile__name", text: entity.name }),
@@ -1078,13 +1090,75 @@ function entitiesPrivacyRow() {
   ]);
 }
 
+// Order entities for the Cards grid: the saved drag order first, then any
+// entity not in the saved order (new ones) appended in name order.
+function orderedForCards(entities) {
+  const order = loadCardOrder();
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...entities].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id) : Infinity;
+    const rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
+    return ra - rb || a.name.localeCompare(b.name);
+  });
+}
+
+// Which tile the dragged card should be inserted before, given the cursor — the
+// nearest tile whose center is after the cursor in reading order (null = end).
+function tileBefore(container, x, y) {
+  let best = null, bestDist = Infinity;
+  for (const t of container.querySelectorAll(".k-etile:not(.k-etile--drag)")) {
+    const r = t.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const after = (y < cy - r.height / 2) || (Math.abs(y - cy) <= r.height / 2 && x < cx);
+    if (!after) continue;
+    const d = Math.hypot(x - cx, y - cy);
+    if (d < bestDist) { bestDist = d; best = t; }
+  }
+  return best;
+}
+
+// Drag-to-reorder for the Cards grid (HTML5 DnD); persists the new order.
+function enableCardDrag(grid) {
+  let dragEl = null;
+  grid.addEventListener("dragstart", (e) => {
+    const tile = e.target.closest(".k-etile");
+    if (!tile) return;
+    dragEl = tile;
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", tile.dataset.id); } catch (_) { /* Safari */ }
+    requestAnimationFrame(() => tile.classList.add("k-etile--drag"));
+  });
+  grid.addEventListener("dragover", (e) => {
+    if (!dragEl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const before = tileBefore(grid, e.clientX, e.clientY);
+    if (before) grid.insertBefore(dragEl, before);
+    else grid.appendChild(dragEl);
+  });
+  grid.addEventListener("drop", (e) => { if (dragEl) e.preventDefault(); });
+  grid.addEventListener("dragend", () => {
+    if (!dragEl) return;
+    dragEl.classList.remove("k-etile--drag");
+    dragEl = null;
+    saveCardOrder([...grid.querySelectorAll(".k-etile")].map((t) => t.dataset.id));
+  });
+}
+
 async function renderEntityCollection(layout) {
   const settings = await getRuleDefaults();
   const entities = getEntities();
-  const body = layout === "cards"
-    // Cards have no headers to click, so they sort by name for a stable order.
-    ? el("div", { class: "k-etiles" }, [...entities].sort((a, b) => a.name.localeCompare(b.name)).map((e) => entityTile(e, settings)))
-    : entityTable(entities, settings);
+  let body;
+  if (layout === "cards") {
+    const grid = el("div", { class: "k-etiles k-etiles--drag" }, orderedForCards(entities).map((e) => entityTile(e, settings)));
+    enableCardDrag(grid);
+    body = el("div", {}, [
+      el("p", { class: "k-relcaption k-relcaption--top", text: "Drag cards to rearrange — your order is saved on this device." }),
+      grid,
+    ]);
+  } else {
+    body = entityTable(entities, settings);
+  }
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle(layout),
