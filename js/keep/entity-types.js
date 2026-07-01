@@ -53,5 +53,13 @@ export function kindForType(typeLabel) {
   return TYPE_TO_KIND[typeLabel] || "business";
 }
 
+// Nonprofit businesses get their own (green) colour category, distinct from the
+// (red) for-profit businesses. The RLS/DB `kind` stays "business"; only the
+// display colour differs, keyed off the specific type label.
+export const NONPROFIT_TYPES = ["Nonprofit Corporation"];
+export function isNonprofitType(typeLabel) {
+  return NONPROFIT_TYPES.includes(typeLabel);
+}
+
 // Default selected type (first business type).
 export const DEFAULT_ENTITY_TYPE = ENTITY_TYPE_GROUPS[0].types[0];

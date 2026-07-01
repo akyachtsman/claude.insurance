@@ -1,7 +1,7 @@
 // node --test js/keep/entity-types.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ENTITY_TYPE_GROUPS, TYPE_TO_KIND, kindForType, DEFAULT_ENTITY_TYPE } from "./entity-types.js";
+import { ENTITY_TYPE_GROUPS, TYPE_TO_KIND, kindForType, DEFAULT_ENTITY_TYPE, isNonprofitType } from "./entity-types.js";
 
 test("groups are non-empty and use valid category kinds", () => {
   assert.ok(ENTITY_TYPE_GROUPS.length >= 2);
@@ -42,4 +42,13 @@ test("type labels are unique across groups", () => {
 
 test("DEFAULT_ENTITY_TYPE is a real business type", () => {
   assert.equal(kindForType(DEFAULT_ENTITY_TYPE), "business");
+});
+
+test("isNonprofitType splits nonprofit (green) from for-profit (red) businesses", () => {
+  assert.equal(isNonprofitType("Nonprofit Corporation"), true);
+  assert.equal(isNonprofitType("LLC"), false);
+  assert.equal(isNonprofitType("C Corporation"), false);
+  assert.equal(isNonprofitType("Revocable Trust"), false);
+  // Every nonprofit type is still a business kind under the hood.
+  assert.equal(kindForType("Nonprofit Corporation"), "business");
 });
