@@ -373,8 +373,6 @@ function appBar(active) {
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
         link("Entities", "#/keep/list", "list"),
-        el("span", { class: "k-navswap", attrs: { "aria-hidden": "true", title: "Entities and Relationships are two views of the same thing" } }, [icon("swap", { size: 22 })]),
-        link("Relationships", "#/keep/entities", "entities"),
         link("Assets", "#/keep/assets", "assets"),
         link("Policies", "#/keep/insurance", "insurance"),
         link("Documents", "#/keep/documents", "documents"),
@@ -886,13 +884,28 @@ export function renderKeepAssets() {
   mount(view);
 }
 
+// Segmented switch that flips the Entities tab between the List and the
+// Relationships map — the two views of the same set of entities. `active` is
+// "list" or "map"; each segment deep-links to its route.
+function entitiesToggle(active) {
+  const seg = (label, iconName, href, key) => el("a", {
+    class: `k-seg__btn${active === key ? " is-on" : ""}`,
+    attrs: { href, role: "tab", "aria-selected": String(active === key) },
+  }, [icon(iconName, { size: 17 }), el("span", { text: label })]);
+  return el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entities view" } }, [
+    seg("List", "clipboard", "#/keep/list", "list"),
+    seg("Relationships", "swap", "#/keep/entities", "map"),
+  ]);
+}
+
 export async function renderKeepEntityList() {
   const settings = await getRuleDefaults();
   // Connected/managed entities in the main list; unlinked ones drop to Orphans.
   const orphanIds = new Set(getOrphanEntities().map((e) => e.id));
   const main = getEntities().filter((e) => !orphanIds.has(e.id));
   const view = page("list", [
-    el("h1", { class: "k-h1", text: "My entities" }),
+    el("h1", { class: "k-h1", text: "Entities" }),
+    entitiesToggle("list"),
     el("p", { class: "k-sub", text: "Your coverage, organized by entity." }),
     el("div", { class: "k-privacyrow" }, [
       el("div", { class: "k-privacy" }, [
@@ -1077,8 +1090,9 @@ function orphansSection() {
 }
 
 export function renderKeepEntities() {
-  const view = page("entities", [
-    el("h1", { class: "k-h1", text: "Relationships" }),
+  const view = page("list", [
+    el("h1", { class: "k-h1", text: "Entities" }),
+    entitiesToggle("map"),
     el("p", { class: "k-sub", text: "How you, your businesses and trusts connect. Drag any node to rearrange; tap your own entities to open them." }),
     relationshipMap(),
     el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
@@ -1092,9 +1106,9 @@ export async function renderKeepEntity(params, id) {
   if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
   const variant = panelVariant(entity);
-  const view = page("entities", [
-    backLink("#/keep/entities", "entities"),
-    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(), el("span", { text: entity.name })]),
+  const view = page("list", [
+    backLink("#/keep/list", "entities"),
+    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
       entityHead(entity, settings, "#/keep/add-asset"),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
@@ -1127,7 +1141,7 @@ export async function renderKeepAsset(params, id) {
   const sections = [
     backLink(`#/keep/entity/${entity.id}`, entity.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(),
+      el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("span", { text: asset.name }),
     ]),
@@ -1172,7 +1186,7 @@ export async function renderKeepAsset(params, id) {
     el("span", { text: ". Your licensed broker confirms what's available and what it costs." }),
   ]));
 
-  mount(page("entities", sections, { narrow: true }));
+  mount(page("list", sections, { narrow: true }));
 }
 
 const ASSET_CHOICES = [
@@ -1205,7 +1219,7 @@ export function renderKeepAddAsset() {
   }
 
   function stepOne() {
-    return page("entities", [
+    return page("list", [
       kProgress(1, 2, () => go(originHref("#/keep"))),
       el("h1", { class: "k-h1", text: "What would you like to add?" }),
       el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
@@ -1255,7 +1269,7 @@ export function renderKeepAddAsset() {
       submit, error,
     ]);
     form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
-    return page("entities", [kProgress(2, 2, () => { state.step = 1; render(); }), form], { narrow: true });
+    return page("list", [kProgress(2, 2, () => { state.step = 1; render(); }), form], { narrow: true });
   }
 
   function render() { mount(state.step === 1 ? stepOne() : stepTwo()); }
@@ -1365,7 +1379,7 @@ export function renderKeepAddEntity() {
     submit, error,
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); create(); });
-  mount(page("entities", [
+  mount(page("list", [
     backLink("#/keep", "home"),
     form,
   ], { narrow: true }));
@@ -1401,7 +1415,7 @@ export function renderKeepPolicy(params, id) {
   const sections = [
     backLink(`#/keep/asset/${asset.id}`, asset.name),
     el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(),
+      el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(),
       el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
       el("a", { attrs: { href: `#/keep/asset/${asset.id}` }, text: asset.name }), sep(),
       el("span", { text: "Policy" }),
@@ -1463,7 +1477,7 @@ export function renderKeepPolicy(params, id) {
   ]);
   sections.push(grp("doc", "Documents & history", docs));
 
-  mount(page("entities", sections, { narrow: true }));
+  mount(page("list", sections, { narrow: true }));
 }
 
 // Request a policy enhancement. Optional policyId pre-fills the context from a
