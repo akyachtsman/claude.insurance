@@ -528,6 +528,25 @@ function colorSuffix(entity) {
 }
 function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
 
+// The broad entity type shown as the category: Individual (you + people),
+// Business, or Trust.
+function entityCategory(entity) {
+  if (entity.kind === "business") return "Business";
+  if (entity.kind === "trust") return "Trust";
+  return "Individual"; // personal + person
+}
+
+// The specific subtype (Revocable trust, LLC, Spouse…). Seeded rows keep it in
+// either `subtype` or `label`, and the other field holds a generic category
+// word — so pick the first candidate that isn't generic. "You" for yourself.
+const GENERIC_TYPE = new Set(["business", "trust", "individual", "personal", "you · personal", ""]);
+function entitySubtype(entity) {
+  for (const c of [entity.subtype, entity.label]) {
+    if (c && !GENERIC_TYPE.has(c.trim().toLowerCase())) return c;
+  }
+  return entity.kind === "personal" ? "You" : "—";
+}
+
 function entityAvatar(entity) {
   // Businesses (red / nonprofit green) and trusts (yellow) get an icon avatar;
   // you and family members (blue) show their initials.
@@ -539,15 +558,17 @@ function entityAvatar(entity) {
 
 function entityHead(entity, settings, addHref) {
   const sum = entitySummary(entity, settings);
-  const metaBits = entity.kind === "business"
+  const sub = entitySubtype(entity);
+  const base = entity.kind === "business"
     ? [entity.meta || "", `${sum.assets} assets`, `${sum.gaps} gap${sum.gaps === 1 ? "" : "s"}`]
     : [`${sum.assets} assets`, `${sum.inPlace} coverages in place`, `${sum.gaps} gap${sum.gaps === 1 ? "" : "s"}`];
+  const metaBits = (sub !== "—" ? [sub] : []).concat(base);
   return el("div", { class: "k-ehead" }, [
     entityAvatar(entity),
     el("div", {}, [
       el("div", {}, [
         el("h1", { text: entity.name }),
-        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
+        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entityCategory(entity) }),
       ]),
       el("div", { class: "k-emeta" }, joinDots(metaBits)),
     ]),
@@ -1043,14 +1064,16 @@ function entityValue(entity) {
   return entity.assets.reduce((t, a) => t + (a.value || 0), 0);
 }
 // Option A — a sortable table: click a column header to sort by it (Entity,
-// Type, Assets, Gaps or Value); click again to flip direction.
+// Type, Subtype, Assets, Gaps or Value); click again to flip direction. Type is
+// the broad category (Individual/Business/Trust); Subtype is the specific kind.
 function entityTable(entities, settings) {
   const rows = entities.map((e) => ({ e, sum: entitySummary(e, settings), val: entityValue(e) }));
   const columns = [
     { label: "Entity", get: (r) => r.e.name, cell: (r) => el("a", { class: "k-etcell k-ilink", attrs: { href: `#/keep/entity/${r.e.id}` } }, [
       entityAvatar(r.e), el("span", { class: "k-etcell__name", text: r.e.name }),
     ]) },
-    { label: "Type", get: (r) => r.e.label || "", cell: (r) => el("span", { class: `k-et k-et--${colorSuffix(r.e)}`, text: r.e.label }) },
+    { label: "Type", get: (r) => entityCategory(r.e), cell: (r) => el("span", { class: `k-et k-et--${colorSuffix(r.e)}`, text: entityCategory(r.e) }) },
+    { label: "Subtype", get: (r) => entitySubtype(r.e), cell: (r) => el("span", { class: "k-etsub", text: entitySubtype(r.e) }) },
     { label: "Assets", get: (r) => r.e.assets.length, cell: (r) => el("span", { text: String(r.e.assets.length) }) },
     { label: "Gaps", get: (r) => r.sum.gaps, cell: (r) => el("span", { text: String(r.sum.gaps) }) },
     { label: "Value", get: (r) => r.val, cell: (r) => el("span", { text: r.val ? money(r.val) : "—" }) },
@@ -1067,7 +1090,8 @@ function entityTile(entity, settings) {
     el("span", { class: "k-etile__bar" }),
     entityAvatar(entity),
     el("div", { class: "k-etile__name", text: entity.name }),
-    el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
+    el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entityCategory(entity) }),
+    entitySubtype(entity) !== "—" ? el("div", { class: "k-etile__sub", text: entitySubtype(entity) }) : null,
     el("div", { class: "k-etile__stats" }, [
       stat(sum.assets, sum.assets === 1 ? "Asset" : "Assets"),
       stat(sum.gaps, sum.gaps === 1 ? "Gap" : "Gaps"),

@@ -30,7 +30,7 @@ export const ENTITY_TYPE_GROUPS = [
     ],
   },
   {
-    category: "People", kind: "person",
+    category: "Individual", kind: "person",
     types: [
       "Spouse",
       "Domestic Partner",
