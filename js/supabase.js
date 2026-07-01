@@ -254,6 +254,12 @@ export function findPolicy(policyId) {
 export function getMapData() {
   if (!cache) return { nodes: [], edges: [] };
   const ids = new Set();
+  // Every entity the client manages appears on the map — even with no
+  // relationships yet (a just-added entity, or a person, who isn't "owned" and
+  // so has no ownership edge). Previously only entities with an edge showed up,
+  // which hid brand-new and standalone entities.
+  cache.entities.forEach((e) => { if (e._managed) ids.add(e.id); });
+  // Plus any endpoints referenced by a relationship (in case one isn't managed).
   cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
   const nodes = [...ids].map((id) => {
     const e = cache.entityById.get(id);
