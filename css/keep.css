@@ -177,22 +177,26 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 
 /* ── Entity panels (tinted boxes that hold assets) ──────────────────────────── */
 .k-panel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-8); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
-/* Entity-type colour coordination: Me = blue · Business = green · Trust = amber */
+/* Entity-type colour coordination:
+   You / People = blue · Business = red · Nonprofit = green · Trust & Estate = yellow */
 .k-panel--me { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 55%,#fff); }
-.k-panel--biz { background: linear-gradient(150deg,#e2f6ec,#eafaf3 60%,#fff); }
+.k-panel--person { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 55%,#fff); }
+.k-panel--biz { background: linear-gradient(150deg,#fdecec,#fef4f4 60%,#fff); }
+.k-panel--np { background: linear-gradient(150deg,#e2f6ec,#eafaf3 60%,#fff); }
 .k-panel--trust { background: linear-gradient(150deg,#fff3e0,#fffaf0 60%,#fff); }
-.k-panel--person { background: linear-gradient(150deg,#ffe9f0,#fff5f8 60%,#fff); }
 .k-ehead { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-6); flex-wrap: wrap; }
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); color: #fff; display: grid; place-items: center; font: 800 27px var(--font-display); box-shadow: var(--shadow-md); flex: none; }
-.k-bigav--biz { background: linear-gradient(135deg,#39b3ff,#0e8e66); }
+.k-bigav--person { background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); }
+.k-bigav--biz { background: linear-gradient(135deg,#ff6b6f,#d6333a); }
+.k-bigav--np { background: linear-gradient(135deg,#39d98a,#0e8e66); }
 .k-bigav--trust { background: linear-gradient(135deg,#f6c25a,#c9870a); }
-.k-bigav--person { background: linear-gradient(135deg,#ff8fb3,#d6336c); }
 .k-ehead h1 { font: 700 27px var(--font-display); letter-spacing: -.01em; display: inline; }
 .k-et { font: 800 12px var(--font-sans); background: var(--color-accent); color: #fff; padding: 5px 13px; border-radius: var(--radius-pill); margin-left: var(--space-2); white-space: nowrap; }
 .k-et--me { background: var(--color-accent); }
-.k-et--biz { background: var(--color-ok); }
+.k-et--person { background: var(--color-accent); }
+.k-et--biz { background: #d6333a; }
+.k-et--np { background: var(--color-ok); }
 .k-et--trust { background: var(--color-warn); }
-.k-et--person { background: #d6336c; }
 .k-emeta { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-2); }
 .k-emeta b { color: var(--color-text-primary); font-weight: 800; }
 .k-ehead .k-btn { margin-left: auto; }

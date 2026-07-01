@@ -261,6 +261,7 @@ export function getMapData() {
     return {
       id: e.id,
       kind: e.kind,
+      subtype: e.subtype || e.label || "",
       name: e.name,
       sub: e.label || e.subtype || "",
       initials: e.initials,

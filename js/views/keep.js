@@ -21,7 +21,7 @@ import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
-import { ENTITY_TYPE_GROUPS, kindForType } from "../keep/entity-types.js";
+import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -506,18 +506,20 @@ function assetCard(asset, settings) {
 }
 
 // Per-type colour coordination, consistent across the app:
-//   Me / personal → blue · Business → green · Trust & Estate → amber · People → rose.
-function entKindSuffix(kind) {
-  return kind === "business" ? "biz" : kind === "trust" ? "trust" : kind === "person" ? "person" : "me";
+//   You / People → blue · Business → red · Nonprofit → green · Trust & Estate → yellow.
+function colorSuffix(entity) {
+  if (entity.kind === "business") return isNonprofitType(entity.subtype || entity.label) ? "np" : "biz";
+  if (entity.kind === "trust") return "trust";
+  if (entity.kind === "person") return "person";
+  return "me";
 }
-function panelVariant(kind) { return `k-panel--${entKindSuffix(kind)}`; }
+function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
 
 function entityAvatar(entity) {
-  // Businesses and trusts get an icon avatar (business green, trust amber);
-  // you (blue) and family members (rose) show their initials.
+  // Businesses (red / nonprofit green) and trusts (yellow) get an icon avatar;
+  // you and family members (blue) show their initials.
   if (entity.kind === "business" || entity.kind === "trust") {
-    const cls = entity.kind === "business" ? "k-bigav k-bigav--biz" : "k-bigav k-bigav--trust";
-    return el("span", { class: cls }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
+    return el("span", { class: `k-bigav k-bigav--${colorSuffix(entity)}` }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
   }
   return el("span", { class: `k-bigav${entity.kind === "person" ? " k-bigav--person" : ""}`, text: entity.initials });
 }
@@ -532,7 +534,7 @@ function entityHead(entity, settings, addHref) {
     el("div", {}, [
       el("div", {}, [
         el("h1", { text: entity.name }),
-        el("span", { class: `k-et k-et--${entKindSuffix(entity.kind)}`, text: entity.label }),
+        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entity.label }),
       ]),
       el("div", { class: "k-emeta" }, joinDots(metaBits)),
     ]),
@@ -551,7 +553,7 @@ function joinDots(bits) {
 }
 
 function entityPanel(entity, settings) {
-  const variant = panelVariant(entity.kind);
+  const variant = panelVariant(entity);
   const body = entity.assets.length
     ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
     : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." });
@@ -846,20 +848,25 @@ function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; 
 // for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
-  person: { fill: "#fff", avFill: "#FFE3EC", avText: "#D6336C", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
-  biz: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  biz: { fill: "#fff", avFill: "#fbe0e1", avText: "#c42b30", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  np: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
 };
-// DB entity kind → REL_STYLE key (personal renders as the gradient "me" node).
-function relStyleKey(kind) {
-  return kind === "personal" ? "me" : kind === "business" ? "biz" : kind === "trust" ? "trust" : "person";
+// DB entity node → REL_STYLE key. Personal renders as the gradient "me" node;
+// nonprofit businesses (green) split from for-profit businesses (red) by subtype.
+function relStyleKey(node) {
+  if (node.kind === "personal") return "me";
+  if (node.kind === "business") return isNonprofitType(node.subtype) ? "np" : "biz";
+  if (node.kind === "trust") return "trust";
+  return "person";
 }
 // Column-based auto-layout: people col 0, trusts col 1, businesses col 2.
-const REL_COL = { me: 0, person: 0, trust: 1, biz: 2 };
+const REL_COL = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 const REL_X = [30, 390, 740];
 function relLayout(H) {
   const data = getMapData();
-  const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n.kind) }));
+  const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
   const cols = [[], [], []];
   nodes.forEach((n) => cols[REL_COL[n.sk]].push(n));
   cols.forEach((list, c) => {
@@ -980,7 +987,7 @@ export async function renderKeepEntity(params, id) {
   const entity = getEntity(id);
   if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
-  const variant = panelVariant(entity.kind);
+  const variant = panelVariant(entity);
   const view = page("entities", [
     backLink("#/keep/entities", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/entities" }, text: "Relationships" }), sep(), el("span", { text: entity.name })]),
@@ -1195,18 +1202,37 @@ export function renderKeepAddEntity() {
   const me = owners.find((e) => e.kind === "personal") || owners[0];
   if (me) addRow(me.id, "Owner", 100); else refreshTotal();
 
-  const ownership = el("div", { class: "k-grp" }, [
-    el("div", { class: "k-grp__h" }, [icon("handshake", { size: 15 }), el("span", { text: "Ownership" })]),
-    el("p", { class: "k-setnote", text: "Who owns this entity? Add owners from your existing entities and give each a stake. Stakes can total up to 100%." }),
+  const ownEditor = el("div", {}, [
     ownRows,
     el("div", { class: "k-own__foot" }, [addOwnerBtn, ownTotal]),
   ]);
+  // A person is a whole individual — they aren't split into ownership stakes, so
+  // the stake editor is replaced by a fixed 100% note when the type is a person.
+  const personNote = el("p", { class: "k-setnote", attrs: { hidden: "hidden" }, text: "A person is a whole individual — they're always 100% themselves and can't be split into ownership stakes." });
+  const ownership = el("div", { class: "k-grp" }, [
+    el("div", { class: "k-grp__h" }, [icon("handshake", { size: 15 }), el("span", { text: "Ownership" })]),
+    el("p", { class: "k-setnote", text: "Who owns this entity? Add owners from your existing entities and give each a stake. Stakes can total up to 100%." }),
+    ownEditor,
+    personNote,
+  ]);
+
+  // Toggle the ownership editor off for people (100%, not divisible).
+  function isPersonType() { return kindForType(typeSelect.value) === "person"; }
+  function syncType() {
+    const person = isPersonType();
+    ownEditor.hidden = person;
+    personNote.hidden = !person;
+    nameInput.setAttribute("placeholder", person ? "e.g. Jordan Mercer" : "e.g. Coastal Cafe LLC");
+  }
+  typeSelect.addEventListener("change", syncType);
+  syncType();
 
   async function create() {
     error.textContent = "";
     const name = nameInput.value.trim();
     if (!name) { error.textContent = "Give this entity a name."; return; }
-    const rows = readRows().filter((r) => r.ownerId);
+    // People aren't split into stakes; everyone else records ownership rows.
+    const rows = isPersonType() ? [] : readRows().filter((r) => r.ownerId);
     const v = validateOwnership(rows);
     if (!v.ok) { error.textContent = v.error; return; }
 
