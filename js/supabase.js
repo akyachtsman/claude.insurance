@@ -276,6 +276,7 @@ export function getMapData() {
       name: e.name,
       sub: e.label || e.subtype || "",
       initials: e.initials,
+      assetNames: (e.assets || []).map((a) => a.name),
       href: e._managed ? `#/keep/entity/${e.id}` : null,
     };
   }).filter(Boolean);

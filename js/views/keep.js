@@ -928,6 +928,15 @@ function entitiesToggle(active) {
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
+// Two-letter initials for an asset name: first letters of the first two words
+// that contain a letter (so "123 Marina Way" → "MW", "Ghost Van" → "GV").
+function assetInitials(name) {
+  const words = String(name || "").trim().split(/\s+/).filter((w) => /[a-z]/i.test(w));
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (String(name || "").replace(/\s/g, "").slice(0, 2) || "?").toUpperCase();
+}
+
 // Where the ray from a node centre (cx,cy, half-size hw/hh) toward (tx,ty)
 // crosses the node's rectangle border — used to trim edges to the card edge so
 // the ownership arrowhead sits in the gap, not hidden under a card.
@@ -978,7 +987,7 @@ function relLayout(H) {
 }
 
 function relationshipMap() {
-  const W = 970, H = 420, NODE_W = 200, NODE_H = 72, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+  const W = 970, H = 440, NODE_W = 200, NODE_H = 92, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
   const { nodes, edges } = relLayout(H);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   // Restore any saved positions over the default auto-layout (clamped to canvas).
@@ -1035,11 +1044,33 @@ function relationshipMap() {
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}` }
       : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample)` });
     g.appendChild(s("rect", { x: n.x, y: n.cy - NODE_H / 2, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
-    const ax = n.x + 38;
-    g.appendChild(s("circle", { cx: ax, cy: n.cy, r: 20, fill: o.avFill }));
-    g.appendChild(svgText(n.initials, { x: ax, y: n.cy + 5, "text-anchor": "middle", "font-size": "14", "font-weight": "800", fill: o.avText, "font-family": FD }));
-    g.appendChild(svgText(n.name, { x: ax + 30, y: n.cy - 2, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
-    g.appendChild(svgText(n.sub, { x: ax + 30, y: n.cy + 16, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    const ax = n.x + 34, avy = n.cy - 12;
+    g.appendChild(s("circle", { cx: ax, cy: avy, r: 18, fill: o.avFill }));
+    g.appendChild(svgText(n.initials, { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD }));
+    g.appendChild(svgText(n.name, { x: ax + 28, y: n.cy - 16, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
+    g.appendChild(svgText(n.sub, { x: ax + 28, y: n.cy - 1, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+
+    // Little circles for the assets this entity owns — initials inside, full name
+    // on hover. Overflow collapses to a "+N" chip.
+    const owned = n.assetNames || [];
+    if (owned.length) {
+      const dark = n.sk === "me";
+      const cFill = dark ? "rgba(255,255,255,.22)" : "#EEF2FB";
+      const cText = dark ? "#ffffff" : "#3A4A6B";
+      const cStroke = dark ? "rgba(255,255,255,.4)" : "#DCE4F4";
+      const MAX = 5, shown = owned.length > MAX ? 4 : owned.length;
+      let cx = n.x + 22;
+      const chip = (label, tip) => {
+        const grp = s("g", {});
+        grp.appendChild(s("circle", { cx, cy: n.cy + 22, r: 10, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
+        grp.appendChild(svgText(label, { x: cx, y: n.cy + 25, "text-anchor": "middle", "font-size": "8.5", "font-weight": "800", fill: cText, "font-family": FS }));
+        if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
+        g.appendChild(grp);
+        cx += 22;
+      };
+      for (let i = 0; i < shown; i++) chip(assetInitials(owned[i]), owned[i]);
+      if (owned.length > MAX) chip("+" + (owned.length - 4), owned.slice(4).join(", "));
+    }
 
     // Pointer-drag (mouse + touch): move the node, edges follow. A press with no
     // real movement counts as a tap → open (for real entities).
