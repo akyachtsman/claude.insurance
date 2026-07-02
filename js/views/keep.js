@@ -1141,9 +1141,49 @@ function tileBefore(container, x, y) {
   return best;
 }
 
-// Drag-to-reorder for the Cards grid (HTML5 DnD); persists the new order.
+// FLIP: run `mutate()` (which reorders tiles) then animate every tile from its
+// old box to its new one so the grid glides into place instead of snapping.
+function flipReorder(grid, mutate) {
+  const before = new Map([...grid.querySelectorAll(".k-etile")].map((t) => [t, t.getBoundingClientRect()]));
+  mutate();
+  for (const t of grid.querySelectorAll(".k-etile")) {
+    const a = before.get(t); if (!a) continue;
+    const b = t.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top;
+    if (!dx && !dy) continue;
+    t.style.transition = "none";
+    t.style.transform = `translate(${dx}px, ${dy}px)`;
+    requestAnimationFrame(() => {
+      t.style.transition = "transform .2s ease";
+      t.style.transform = "";
+    });
+    setTimeout(() => { t.style.transition = ""; t.style.transform = ""; }, 240);
+  }
+}
+
+// Drag-to-reorder for the Cards grid (HTML5 DnD). A drop-bar shows where the
+// card will land (no reflow while dragging); the reorder animates on drop.
 function enableCardDrag(grid) {
   let dragEl = null;
+  const bar = el("div", { class: "k-dropbar", attrs: { "aria-hidden": "true" } });
+  bar.hidden = true;
+  grid.appendChild(bar);
+
+  function showBar(before) {
+    const g = grid.getBoundingClientRect();
+    let r, x;
+    if (before) { r = before.getBoundingClientRect(); x = r.left - g.left - 8; }
+    else {
+      const tiles = grid.querySelectorAll(".k-etile");
+      const last = tiles[tiles.length - 1];
+      if (!last) { bar.hidden = true; return; }
+      r = last.getBoundingClientRect(); x = r.right - g.left + 4;
+    }
+    bar.style.transform = `translate(${x}px, ${r.top - g.top}px)`;
+    bar.style.height = `${r.height}px`;
+    bar.hidden = false;
+  }
+
   grid.addEventListener("dragstart", (e) => {
     const tile = e.target.closest(".k-etile");
     if (!tile) return;
@@ -1156,16 +1196,25 @@ function enableCardDrag(grid) {
     if (!dragEl) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    const before = tileBefore(grid, e.clientX, e.clientY);
-    if (before) grid.insertBefore(dragEl, before);
-    else grid.appendChild(dragEl);
+    showBar(tileBefore(grid, e.clientX, e.clientY));   // only move the indicator
   });
-  grid.addEventListener("drop", (e) => { if (dragEl) e.preventDefault(); });
-  grid.addEventListener("dragend", () => {
+  grid.addEventListener("drop", (e) => {
     if (!dragEl) return;
-    dragEl.classList.remove("k-etile--drag");
+    e.preventDefault();
+    const before = tileBefore(grid, e.clientX, e.clientY);
+    const el2 = dragEl;
+    flipReorder(grid, () => {
+      if (before) grid.insertBefore(el2, before); else grid.appendChild(el2);
+      grid.appendChild(bar);   // keep the (absolute) bar out of the tile order
+    });
+    bar.hidden = true;
+    el2.classList.remove("k-etile--drag");
     dragEl = null;
     saveCardOrder([...grid.querySelectorAll(".k-etile")].map((t) => t.dataset.id));
+  });
+  grid.addEventListener("dragend", () => {
+    bar.hidden = true;
+    if (dragEl) { dragEl.classList.remove("k-etile--drag"); dragEl = null; }
   });
 }
 
