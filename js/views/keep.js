@@ -1473,7 +1473,7 @@ export function renderKeepAddAsset() {
         el("a", { attrs: { href: "#/keep/add-entity" }, text: "entity" }),
         el("span", { text: " — create it first, then add its operating business and assets to it." }),
       ]),
-    ], { narrow: true });
+    ]);
   }
 
   function stepTwo() {
