@@ -1377,6 +1377,7 @@ const ASSET_GROUPS = [
     { type: "home", label: "Vacation / second home", sub: "A home you don't live in full-time", icon: "home" },
     { type: "home", label: "Mobile / manufactured home", sub: "Manufactured housing", icon: "home" },
     { type: "other", label: "Land / vacant lot", sub: "Undeveloped land you own", icon: "shield" },
+    { type: "commercial-space", label: "Commercial property", sub: "Office, retail or space you own", icon: "commercial-property" },
   ] },
   { title: "Vehicles", items: [
     { type: "auto", label: "Car, truck or SUV", sub: "Personal vehicle", icon: "auto" },
@@ -1384,6 +1385,7 @@ const ASSET_GROUPS = [
     { type: "auto", label: "RV / motorhome", sub: "Recreational vehicle", icon: "auto" },
     { type: "auto", label: "ATV / off-road", sub: "ATV, UTV or dirt bike", icon: "auto" },
     { type: "watercraft", label: "Boat / watercraft", sub: "Boat, yacht or jet ski", icon: "boat" },
+    { type: "commercial-auto", label: "Commercial vehicle", sub: "Van or truck used for business", icon: "commercial-auto" },
   ] },
   { title: "Valuables & belongings", items: [
     { type: "valuables", label: "Jewelry & watches", sub: "Rings, watches, fine jewelry", icon: "gem" },
@@ -1391,6 +1393,7 @@ const ASSET_GROUPS = [
     { type: "valuables", label: "Collectibles", sub: "Wine, coins, memorabilia", icon: "gem" },
     { type: "valuables", label: "Firearms", sub: "Guns & related equipment", icon: "gem" },
     { type: "valuables", label: "Electronics & equipment", sub: "High-value gear", icon: "gem" },
+    { type: "commercial-space", label: "Commercial equipment", sub: "Tools, machinery, inventory", icon: "briefcase" },
   ] },
   { title: "Business", items: [
     { type: "business", label: "Restaurant", sub: "Full-service or fast casual", icon: "briefcase" },
@@ -1415,11 +1418,6 @@ const ASSET_GROUPS = [
     { type: "business", label: "Childcare / education", sub: "Daycare, school, tutoring", icon: "briefcase" },
     { type: "business", label: "Nonprofit / charity", sub: "Charitable or member org", icon: "briefcase" },
     { type: "business", label: "Other business", sub: "Any other operating business", icon: "briefcase" },
-  ] },
-  { title: "Commercial property & equipment", items: [
-    { type: "commercial-space", label: "Commercial property", sub: "Office, retail or space you own", icon: "commercial-property" },
-    { type: "commercial-auto", label: "Commercial vehicle", sub: "Van or truck used for business", icon: "commercial-auto" },
-    { type: "commercial-space", label: "Business equipment", sub: "Tools, machinery, inventory", icon: "briefcase" },
   ] },
   { title: "Other", items: [
     { type: "other", label: "Other asset", sub: "Anything else of value", icon: "shield" },
