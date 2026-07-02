@@ -928,6 +928,21 @@ function entitiesToggle(active) {
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
+// Where the ray from a node centre (cx,cy, half-size hw/hh) toward (tx,ty)
+// crosses the node's rectangle border — used to trim edges to the card edge so
+// the ownership arrowhead sits in the gap, not hidden under a card.
+function nodeBorderPoint(cx, cy, hw, hh, tx, ty) {
+  const dx = tx - cx, dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const t = Math.min(hw / Math.abs(dx || 1e-6), hh / Math.abs(dy || 1e-6));
+  return { x: cx + dx * t, y: cy + dy * t };
+}
+// Move point p a distance `d` toward q.
+function movePointToward(p, q, d) {
+  const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
+  return { x: p.x + (dx / len) * d, y: p.y + (dy / len) * d };
+}
+
 // Inline-SVG relationship graph, built live from the entity_relationships table.
 // People (you + related individuals) sit on the left, trusts in the middle,
 // businesses on the right; each edge is labeled with the role (and stake). Nodes
@@ -983,21 +998,30 @@ function relationshipMap() {
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
       s("stop", { offset: "0", "stop-color": "#6F9BFF" }), s("stop", { offset: "1", "stop-color": "#2F6AF6" }),
     ]),
+    // Arrowhead pointing from an owner to the entity it owns.
+    s("marker", { id: "rel-arrow", viewBox: "0 0 10 10", refX: "8.5", refY: "5", markerWidth: "9", markerHeight: "9", orient: "auto", markerUnits: "userSpaceOnUse" }, [
+      s("path", { d: "M0,0 L10,5 L0,10 L2.5,5 Z", fill: "#8f7fd6" }),
+    ]),
   ]));
 
   // Edge paths first (drawn under the nodes); labels are appended after the nodes
   // so they stay readable on top. Keep refs to reposition during drag.
   const edgeRefs = edges.map((e) => {
-    const path = s("path", { fill: "none", stroke: "#cdbef5", "stroke-width": "2.5" });
+    const path = s("path", { fill: "none", stroke: "#c3b2f0", "stroke-width": "2.5", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)" });
     svg.appendChild(path);
     const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#E3EBFA" });
     const ltext = svgText(e.label, { "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#55607F", "font-family": FS });
     return { ...e, path, lrect, ltext };
   });
+  const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 5;
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
       const a = center(er.from), b = center(er.to);
-      er.path.setAttribute("d", `M ${a.x} ${a.y} L ${b.x} ${b.y}`);
+      // Trim the line to each card's border, leaving a small gap — the edge runs
+      // from the owner (er.from) and the arrowhead lands on what it owns (er.to).
+      const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
+      const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
+      er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, lw = er.label.length * 6.4 + 24;
       er.lrect.setAttribute("x", mx - lw / 2); er.lrect.setAttribute("y", my - 13); er.lrect.setAttribute("width", lw);
       er.ltext.setAttribute("x", mx); er.ltext.setAttribute("y", my + 4);
@@ -1271,7 +1295,7 @@ export function renderKeepEntities() {
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Drag nodes to rearrange the map. Entities you manage open when tapped; related parties are shown for context." }),
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns. Drag nodes to rearrange; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }
