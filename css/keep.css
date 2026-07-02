@@ -317,6 +317,8 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-track { height: 8px; background: var(--color-border); border-radius: var(--radius-pill); overflow: hidden; margin-top: var(--space-3); }
 .k-track > i { display: block; height: 100%; background: var(--color-accent); border-radius: var(--radius-pill); }
 .k-choicegroup { font: 800 12px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); margin: var(--space-6) 0 var(--space-2); }
+.k-choicenote { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-6); text-align: center; }
+.k-choicenote a { color: var(--color-accent); font-weight: 800; }
 .k-choicegroup:first-of-type { margin-top: var(--space-5); }
 .k-choices { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
 .k-choice { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: 72px; padding: var(--space-4) var(--space-5); border: 2px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); color: var(--color-text-primary); font-family: inherit; text-align: left; cursor: pointer; transition: border-color .14s, transform .14s, box-shadow .14s; }

@@ -311,7 +311,7 @@ export async function savePrefs(prefs) {
 export async function addEntity({ kind, name, typeLabel }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in" };
-  const label = kind === "personal" ? "You · personal" : (typeLabel || (kind === "trust" ? "Trust" : "Business"));
+  const label = kind === "personal" ? "You · personal" : (typeLabel || (kind === "trust" ? "Trust" : "Company"));
   const { data, error } = await supabase.from("entities")
     .insert({ owner: user.id, kind, name, label, subtype: typeLabel || null })
     .select().single();
