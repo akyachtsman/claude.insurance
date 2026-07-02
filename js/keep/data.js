@@ -256,4 +256,5 @@ export const ASSET_META = {
   valuables: { cic: "gem", icon: "gem" },
   "commercial-space": { cic: "cp", icon: "commercial-property" },
   "commercial-auto": { cic: "auto", icon: "commercial-auto" },
+  business: { cic: "cp", icon: "briefcase" },
 };

@@ -66,6 +66,19 @@ const CATALOG = {
     ],
     recommend: new Set(),
   },
+  // An operating business (going concern) held by a company/entity — BOP-style.
+  business: {
+    must: [
+      { id: "general-liability", title: "General liability", why: "Third-party injury and property-damage claims", icon: "general-liability" },
+      { id: "business-income", title: "Business income", why: "Lost revenue if operations are interrupted", icon: "briefcase" },
+      { id: "commercial-property", title: "Property & contents", why: "Equipment, fixtures and inventory", icon: "commercial-property" },
+    ],
+    recommend: new Set(),
+    suggest: [
+      { id: "cyber", title: "Cyber liability", why: "If you take card payments or store customer data", icon: "cyber" },
+      { id: "workers-comp", title: "Workers' compensation", why: "Required once you have employees", icon: "workers-comp" },
+    ],
+  },
 };
 
 export function analyzeAsset(asset, settings) {

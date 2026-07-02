@@ -5,7 +5,7 @@
 
 export const ENTITY_TYPE_GROUPS = [
   {
-    category: "Business", kind: "business",
+    category: "Company", kind: "business",
     types: [
       "LLC",
       "C Corporation",

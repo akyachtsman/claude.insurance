@@ -531,7 +531,7 @@ function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
 // The broad entity type shown as the category: Individual (you + people),
 // Business, or Trust.
 function entityCategory(entity) {
-  if (entity.kind === "business") return "Business";
+  if (entity.kind === "business") return "Company";
   if (entity.kind === "trust") return "Trust";
   return "Individual"; // personal + person
 }
@@ -539,7 +539,7 @@ function entityCategory(entity) {
 // The specific subtype (Revocable trust, LLC, Spouse…). Seeded rows keep it in
 // either `subtype` or `label`, and the other field holds a generic category
 // word — so pick the first candidate that isn't generic. "You" for yourself.
-const GENERIC_TYPE = new Set(["business", "trust", "individual", "personal", "you · personal", ""]);
+const GENERIC_TYPE = new Set(["business", "company", "trust", "individual", "personal", "you · personal", ""]);
 function entitySubtype(entity) {
   for (const c of [entity.subtype, entity.label]) {
     if (c && !GENERIC_TYPE.has(c.trim().toLowerCase())) return c;
@@ -1225,7 +1225,7 @@ function enableCardDrag(grid, saveRoot) {
 // Businesses, then Trusts. Each row scrolls horizontally if it overflows.
 const CARD_GROUPS = [
   { title: "Individuals", match: (e) => e.kind === "personal" || e.kind === "person" },
-  { title: "Businesses", match: (e) => e.kind === "business" },
+  { title: "Companies", match: (e) => e.kind === "business" },
   { title: "Trusts", match: (e) => e.kind === "trust" },
 ];
 
@@ -1393,10 +1393,33 @@ const ASSET_GROUPS = [
     { type: "valuables", label: "Electronics & equipment", sub: "High-value gear", icon: "gem" },
   ] },
   { title: "Business", items: [
-    { type: "commercial-space", label: "Commercial property", sub: "Office, retail or space you use", icon: "commercial-property" },
+    { type: "business", label: "Restaurant", sub: "Full-service or fast casual", icon: "briefcase" },
+    { type: "business", label: "Café / coffee shop", sub: "Coffee, bakery, quick-serve", icon: "briefcase" },
+    { type: "business", label: "Bar / nightclub", sub: "Tavern, brewery, lounge", icon: "briefcase" },
+    { type: "business", label: "Hotel / hospitality", sub: "Hotel, motel, B&B", icon: "briefcase" },
+    { type: "business", label: "Retail store", sub: "Shop, boutique, showroom", icon: "briefcase" },
+    { type: "business", label: "Grocery / convenience", sub: "Market, deli, convenience", icon: "briefcase" },
+    { type: "business", label: "E-commerce / online", sub: "Online store or marketplace", icon: "briefcase" },
+    { type: "business", label: "Salon / spa / barber", sub: "Beauty & personal care", icon: "briefcase" },
+    { type: "business", label: "Gym / fitness", sub: "Studio, gym, wellness", icon: "briefcase" },
+    { type: "business", label: "Auto service", sub: "Repair, body, detailing", icon: "briefcase" },
+    { type: "business", label: "Medical / dental practice", sub: "Clinic, dental, therapy", icon: "briefcase" },
+    { type: "business", label: "Professional services", sub: "Law, accounting, consulting", icon: "briefcase" },
+    { type: "business", label: "Real estate / property mgmt", sub: "Brokerage, landlord, PM", icon: "briefcase" },
+    { type: "business", label: "Construction / contractor", sub: "GC, remodeler, developer", icon: "briefcase" },
+    { type: "business", label: "Trades", sub: "Electrical, plumbing, HVAC", icon: "briefcase" },
+    { type: "business", label: "Manufacturing", sub: "Production or fabrication", icon: "briefcase" },
+    { type: "business", label: "Warehouse / distribution", sub: "Storage, wholesale, 3PL", icon: "briefcase" },
+    { type: "business", label: "Transportation / logistics", sub: "Trucking, delivery, rideshare", icon: "briefcase" },
+    { type: "business", label: "Farm / agriculture", sub: "Farm, ranch, vineyard", icon: "briefcase" },
+    { type: "business", label: "Childcare / education", sub: "Daycare, school, tutoring", icon: "briefcase" },
+    { type: "business", label: "Nonprofit / charity", sub: "Charitable or member org", icon: "briefcase" },
+    { type: "business", label: "Other business", sub: "Any other operating business", icon: "briefcase" },
+  ] },
+  { title: "Commercial property & equipment", items: [
+    { type: "commercial-space", label: "Commercial property", sub: "Office, retail or space you own", icon: "commercial-property" },
     { type: "commercial-auto", label: "Commercial vehicle", sub: "Van or truck used for business", icon: "commercial-auto" },
     { type: "commercial-space", label: "Business equipment", sub: "Tools, machinery, inventory", icon: "briefcase" },
-    { type: "business", label: "A business or company", sub: "Add it as an entity instead", icon: "briefcase", entity: true },
   ] },
   { title: "Other", items: [
     { type: "other", label: "Other asset", sub: "Anything else of value", icon: "shield" },
@@ -1443,6 +1466,13 @@ export function renderKeepAddAsset() {
       el("h1", { class: "k-h1", text: "What would you like to add?" }),
       el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
       ...groups,
+      // A company/LLC is the legal entity that holds assets; the operating
+      // business itself (restaurant, shop…) is one of those assets.
+      el("p", { class: "k-choicenote" }, [
+        el("span", { text: "A company or LLC is a legal " }),
+        el("a", { attrs: { href: "#/keep/add-entity" }, text: "entity" }),
+        el("span", { text: " — create it first, then add its operating business and assets to it." }),
+      ]),
     ], { narrow: true });
   }
 
