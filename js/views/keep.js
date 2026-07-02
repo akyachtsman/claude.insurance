@@ -1356,9 +1356,12 @@ export async function renderKeepAsset(params, id) {
   const { entity, asset } = found;
   const settings = await getRuleDefaults();
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
+  // Fall back to a neutral marker for any asset type not in ASSET_META (e.g. a
+  // freshly-added "other"/land asset) so the detail page never blanks out.
+  const assetMeta = ASSET_META[asset.type] || { cic: "home", icon: "shield" };
 
   const covRow = (c) => el("div", { class: `k-crow${c.status === "gap" ? " gap" : ""}` }, [
-    el("span", { class: `k-cic k-cic--${ASSET_META[asset.type] ? ASSET_META[asset.type].cic : "home"}` }, [icon(c.icon, { size: 26 })]),
+    el("span", { class: `k-cic k-cic--${assetMeta.cic}` }, [icon(c.icon, { size: 26 })]),
     el("div", { class: "k-crow__main" }, [
       el("div", { class: "k-crow__name", text: c.title }),
       el("div", { class: "k-crow__why", text: c.why }),
@@ -1376,7 +1379,7 @@ export async function renderKeepAsset(params, id) {
       el("span", { text: asset.name }),
     ]),
     el("div", { class: "k-ahero" }, [
-      el("span", { class: `k-cic k-cic--${ASSET_META[asset.type].cic}` }, [icon(ASSET_META[asset.type].icon, { size: 34 })]),
+      el("span", { class: `k-cic k-cic--${assetMeta.cic}` }, [icon(assetMeta.icon, { size: 34 })]),
       el("div", {}, [
         el("h1", { text: asset.name }),
         el("div", { class: "k-facts" }, asset.facts.map((f) => el("span", { text: f })).concat(asset.value ? [el("span", {}, [el("span", { text: "Est. " }), el("b", { text: money(asset.value) })])] : [])),
