@@ -1364,13 +1364,43 @@ export async function renderKeepAsset(params, id) {
   mount(page("list", sections, { narrow: true }));
 }
 
-const ASSET_CHOICES = [
-  { type: "home", label: "Home or condo", sub: "You own and live here", icon: "home" },
-  { type: "home", label: "Rental property", sub: "You rent it to others", icon: "commercial-property" },
-  { type: "auto", label: "Vehicle", sub: "Car, truck or motorcycle", icon: "auto" },
-  { type: "watercraft", label: "Watercraft", sub: "Boat, jet ski or yacht", icon: "boat" },
-  { type: "valuables", label: "Jewelry & valuables", sub: "Art, jewelry, collectibles", icon: "gem" },
-  { type: "business", label: "Business", sub: "A company you own or run", icon: "briefcase" },
+// Asset choices grouped by section. `type` is the underlying category that
+// drives icon + coverage analysis (home/auto/watercraft/valuables/commercial-*/
+// other); `label` is the specific kind stored on the asset and shown in lists.
+// `entity: true` diverts to the add-entity flow (a company is an entity).
+const ASSET_GROUPS = [
+  { title: "Property", items: [
+    { type: "home", label: "Home", sub: "Single-family you own & live in", icon: "home" },
+    { type: "home", label: "Condo", sub: "Condominium unit", icon: "home" },
+    { type: "home", label: "Townhouse", sub: "Attached home you own", icon: "home" },
+    { type: "home", label: "Rental property", sub: "You rent it to others", icon: "commercial-property" },
+    { type: "home", label: "Vacation / second home", sub: "A home you don't live in full-time", icon: "home" },
+    { type: "home", label: "Mobile / manufactured home", sub: "Manufactured housing", icon: "home" },
+    { type: "other", label: "Land / vacant lot", sub: "Undeveloped land you own", icon: "shield" },
+  ] },
+  { title: "Vehicles", items: [
+    { type: "auto", label: "Car, truck or SUV", sub: "Personal vehicle", icon: "auto" },
+    { type: "auto", label: "Motorcycle", sub: "Motorcycle or scooter", icon: "auto" },
+    { type: "auto", label: "RV / motorhome", sub: "Recreational vehicle", icon: "auto" },
+    { type: "auto", label: "ATV / off-road", sub: "ATV, UTV or dirt bike", icon: "auto" },
+    { type: "watercraft", label: "Boat / watercraft", sub: "Boat, yacht or jet ski", icon: "boat" },
+  ] },
+  { title: "Valuables & belongings", items: [
+    { type: "valuables", label: "Jewelry & watches", sub: "Rings, watches, fine jewelry", icon: "gem" },
+    { type: "valuables", label: "Fine art", sub: "Paintings, sculpture", icon: "gem" },
+    { type: "valuables", label: "Collectibles", sub: "Wine, coins, memorabilia", icon: "gem" },
+    { type: "valuables", label: "Firearms", sub: "Guns & related equipment", icon: "gem" },
+    { type: "valuables", label: "Electronics & equipment", sub: "High-value gear", icon: "gem" },
+  ] },
+  { title: "Business", items: [
+    { type: "commercial-space", label: "Commercial property", sub: "Office, retail or space you use", icon: "commercial-property" },
+    { type: "commercial-auto", label: "Commercial vehicle", sub: "Van or truck used for business", icon: "commercial-auto" },
+    { type: "commercial-space", label: "Business equipment", sub: "Tools, machinery, inventory", icon: "briefcase" },
+    { type: "business", label: "A business or company", sub: "Add it as an entity instead", icon: "briefcase", entity: true },
+  ] },
+  { title: "Other", items: [
+    { type: "other", label: "Other asset", sub: "Anything else of value", icon: "shield" },
+  ] },
 ];
 
 // Progress header with a working Back control (onBack is a callback).
@@ -1389,24 +1419,30 @@ export function renderKeepAddAsset() {
   const state = { step: 1, type: null, label: null };
 
   function chooseType(c) {
-    if (c.type === "business") { go("#/keep/add-entity"); return; }
+    if (c.entity) { go("#/keep/add-entity"); return; }
     state.type = c.type; state.label = c.label; state.step = 2; render();
   }
 
+  function choiceBtn(c) {
+    const btn = el("button", { class: "k-choice", attrs: { type: "button" } }, [
+      el("span", { class: "k-cic" }, [icon(c.icon, { size: 26 })]),
+      el("span", { class: "k-choice__label" }, [el("span", { text: c.label }), el("small", { text: c.sub })]),
+      icon("arrow-right", { size: 22, class: "k-choice__arrow" }),
+    ]);
+    btn.addEventListener("click", () => chooseType(c));
+    return btn;
+  }
+
   function stepOne() {
+    const groups = ASSET_GROUPS.flatMap((g) => [
+      el("div", { class: "k-choicegroup", text: g.title }),
+      el("div", { class: "k-choices" }, g.items.map(choiceBtn)),
+    ]);
     return page("list", [
       kProgress(1, 2, () => go(originHref("#/keep"))),
       el("h1", { class: "k-h1", text: "What would you like to add?" }),
       el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
-      el("div", { class: "k-choices" }, ASSET_CHOICES.map((c) => {
-        const btn = el("button", { class: "k-choice", attrs: { type: "button" } }, [
-          el("span", { class: "k-cic" }, [icon(c.icon, { size: 26 })]),
-          el("span", { class: "k-choice__label" }, [el("span", { text: c.label }), el("small", { text: c.sub })]),
-          icon("arrow-right", { size: 22, class: "k-choice__arrow" }),
-        ]);
-        btn.addEventListener("click", () => chooseType(c));
-        return btn;
-      })),
+      ...groups,
     ], { narrow: true });
   }
 
