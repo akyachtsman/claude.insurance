@@ -257,4 +257,7 @@ export const ASSET_META = {
   "commercial-space": { cic: "cp", icon: "commercial-property" },
   "commercial-auto": { cic: "auto", icon: "commercial-auto" },
   business: { cic: "cp", icon: "briefcase" },
+  // "other" covers land/vacant lots and any miscellaneous asset (see ASSET_GROUPS
+  // in keep.js). Kept in sync so these render an icon/colour instead of crashing.
+  other: { cic: "home", icon: "shield" },
 };
