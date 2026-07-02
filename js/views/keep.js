@@ -1161,9 +1161,12 @@ function flipReorder(grid, mutate) {
   }
 }
 
-// Drag-to-reorder for the Cards grid (HTML5 DnD). A drop-bar shows where the
+// Drag-to-reorder within a card strip (HTML5 DnD). A drop-bar shows where the
 // card will land (no reflow while dragging); the reorder animates on drop.
-function enableCardDrag(grid) {
+// `saveRoot` is the element whose full tile order is persisted (defaults to the
+// strip itself; for type-grouped strips it's the wrapper spanning all groups).
+function enableCardDrag(grid, saveRoot) {
+  const root = saveRoot || grid;
   let dragEl = null;
   const bar = el("div", { class: "k-dropbar", attrs: { "aria-hidden": "true" } });
   bar.hidden = true;
@@ -1210,7 +1213,7 @@ function enableCardDrag(grid) {
     bar.hidden = true;
     el2.classList.remove("k-etile--drag");
     dragEl = null;
-    saveCardOrder([...grid.querySelectorAll(".k-etile")].map((t) => t.dataset.id));
+    saveCardOrder([...root.querySelectorAll(".k-etile")].map((t) => t.dataset.id));
   });
   grid.addEventListener("dragend", () => {
     bar.hidden = true;
@@ -1218,16 +1221,34 @@ function enableCardDrag(grid) {
   });
 }
 
+// Cards are grouped into type rows in a fixed order: Individuals, then
+// Businesses, then Trusts. Each row scrolls horizontally if it overflows.
+const CARD_GROUPS = [
+  { title: "Individuals", match: (e) => e.kind === "personal" || e.kind === "person" },
+  { title: "Businesses", match: (e) => e.kind === "business" },
+  { title: "Trusts", match: (e) => e.kind === "trust" },
+];
+
 async function renderEntityCollection(layout) {
   const settings = await getRuleDefaults();
   const entities = getEntities();
   let body;
   if (layout === "cards") {
-    const grid = el("div", { class: "k-etiles k-etiles--drag" }, orderedForCards(entities).map((e) => entityTile(e, settings)));
-    enableCardDrag(grid);
+    const ordered = orderedForCards(entities);
+    const groupsWrap = el("div", { class: "k-etgroups" });
+    for (const g of CARD_GROUPS) {
+      const items = ordered.filter(g.match);
+      if (!items.length) continue;                 // hide empty type rows
+      const strip = el("div", { class: "k-etstrip" }, items.map((e) => entityTile(e, settings)));
+      enableCardDrag(strip, groupsWrap);            // reorder within the row; persist the full order
+      groupsWrap.appendChild(el("section", { class: "k-etgroup" }, [
+        el("div", { class: "k-etgroup__h" }, [el("h2", { text: g.title }), el("span", { class: "k-etgroup__count", text: String(items.length) })]),
+        strip,
+      ]));
+    }
     body = el("div", {}, [
-      el("p", { class: "k-relcaption k-relcaption--top", text: "Drag cards to rearrange — your order is saved on this device." }),
-      grid,
+      el("p", { class: "k-relcaption k-relcaption--top", text: "Grouped by type. Drag cards to rearrange within a row — your order is saved on this device." }),
+      groupsWrap,
     ]);
   } else {
     body = entityTable(entities, settings);

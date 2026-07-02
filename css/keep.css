@@ -220,10 +220,19 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; position: relative; }
 .k-etile { position: relative; overflow: hidden; text-align: center; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: 22px 18px 18px; transition: transform .14s, box-shadow .14s; }
 .k-etile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
-/* Draggable Cards grid: grab affordance + a faded card that stays put while a
+/* Cards grouped into type rows (Individuals · Businesses · Trusts); each row
+   scrolls horizontally when it overflows. */
+.k-etgroup { margin-bottom: var(--space-6); }
+.k-etgroup__h { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); }
+.k-etgroup__h h2 { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); margin: 0; }
+.k-etgroup__count { font: 800 12px var(--font-sans); background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-secondary); padding: 2px 9px; border-radius: var(--radius-pill); }
+.k-etstrip { position: relative; display: flex; gap: 14px; overflow-x: auto; padding: 4px 2px 12px; scroll-snap-type: x proximity; }
+.k-etstrip .k-etile { flex: 0 0 220px; scroll-snap-align: start; }
+
+/* Draggable Cards: grab affordance + a faded card that stays put while a
    drop-bar shows where it will land; the reorder animates on drop (FLIP). */
-.k-etiles--drag .k-etile { cursor: grab; }
-.k-etiles--drag .k-etile:active { cursor: grabbing; }
+.k-etstrip .k-etile { cursor: grab; }
+.k-etstrip .k-etile:active { cursor: grabbing; }
 .k-etile--drag { opacity: .4; box-shadow: var(--shadow-sm); }
 .k-etile--drag:hover { transform: none; }
 .k-dropbar { position: absolute; top: 0; left: 0; width: 4px; border-radius: 3px; background: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); pointer-events: none; z-index: 6; transition: transform .1s ease, height .1s ease; }
