@@ -190,18 +190,21 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-panel--np { background: linear-gradient(150deg,#e2f6ec,#eafaf3 60%,#fff); }
 .k-panel--trust { background: linear-gradient(150deg,#fff3e0,#fffaf0 60%,#fff); }
 .k-ehead { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-6); flex-wrap: wrap; }
-.k-bigav { width: 78px; height: 78px; border-radius: 24px; background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); color: #fff; display: grid; place-items: center; font: 800 27px var(--font-display); box-shadow: var(--shadow-md); flex: none; }
-.k-bigav--person { background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); }
-.k-bigav--biz { background: linear-gradient(135deg,#ff6b6f,#d6333a); }
-.k-bigav--np { background: linear-gradient(135deg,#39d98a,#0e8e66); }
-.k-bigav--trust { background: linear-gradient(135deg,#f6c25a,#c9870a); }
+/* Entity colours — soft pastel tints with a coloured icon/initials + text
+   (Individual = blue · Business = light red · Nonprofit = light green ·
+   Trust = light orange). */
+.k-bigav { width: 78px; height: 78px; border-radius: 24px; background: #E7EFFE; color: #2F6AF6; display: grid; place-items: center; font: 800 27px var(--font-display); box-shadow: var(--shadow-sm); flex: none; }
+.k-bigav .icon { fill: currentColor; }
+.k-bigav--person { background: #E7EFFE; color: #2F6AF6; }
+.k-bigav--biz { background: #FBE1E2; color: #D6333A; }
+.k-bigav--np { background: #DEF4E9; color: #0E8E66; }
+.k-bigav--trust { background: #FBEBCF; color: #B5660A; }
 .k-ehead h1 { font: 700 27px var(--font-display); letter-spacing: -.01em; display: inline; }
-.k-et { font: 800 12px var(--font-sans); background: var(--color-accent); color: #fff; padding: 5px 13px; border-radius: var(--radius-pill); margin-left: var(--space-2); white-space: nowrap; }
-.k-et--me { background: var(--color-accent); }
-.k-et--person { background: var(--color-accent); }
-.k-et--biz { background: #d6333a; }
-.k-et--np { background: var(--color-ok); }
-.k-et--trust { background: var(--color-warn); }
+.k-et { font: 800 12px var(--font-sans); background: #E7EFFE; color: #2F6AF6; padding: 5px 13px; border-radius: var(--radius-pill); margin-left: var(--space-2); white-space: nowrap; }
+.k-et--me, .k-et--person { background: #E7EFFE; color: #2F6AF6; }
+.k-et--biz { background: #FBE1E2; color: #D6333A; }
+.k-et--np { background: #DEF4E9; color: #0E8E66; }
+.k-et--trust { background: #FBEBCF; color: #B5660A; }
 .k-emeta { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-2); }
 .k-emeta b { color: var(--color-text-primary); font-weight: 800; }
 .k-ehead .k-btn { margin-left: auto; }
@@ -239,10 +242,10 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-dropbar[hidden] { display: none; }
 .k-relcaption--top { margin: 0 0 var(--space-4); }
 .k-etile__bar { position: absolute; top: 0; left: 0; right: 0; height: 5px; background: var(--color-border); }
-.k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: var(--color-accent); }
-.k-etile--biz .k-etile__bar { background: #d6333a; }
-.k-etile--trust .k-etile__bar { background: var(--color-warn); }
-.k-etile--np .k-etile__bar { background: var(--color-ok); }
+.k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: #9DBCFF; }
+.k-etile--biz .k-etile__bar { background: #F0A6A9; }
+.k-etile--trust .k-etile__bar { background: #F0C879; }
+.k-etile--np .k-etile__bar { background: #7FD4A8; }
 .k-etile .k-bigav { width: 52px; height: 52px; border-radius: 16px; margin: 4px auto 12px; font-size: 18px; }
 .k-etile .k-bigav .icon { width: 26px; height: 26px; }
 .k-etile__name { font: 700 17px var(--font-display); margin-bottom: 7px; }
