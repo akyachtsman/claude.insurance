@@ -648,12 +648,30 @@ function collectPolicies() {
 //   opts:    { defaultIdx, defaultDir (1 asc / -1 desc), rowClass(row) }
 // Returns { wrap, entries } — entries [{ row, tr }] so callers can filter (search).
 function sortableTable(columns, rows, opts = {}) {
-  const entries = rows.map((row) => ({
-    row,
-    tr: el("tr", { class: opts.rowClass ? opts.rowClass(row) : "" },
-      columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
-  }));
+  const entries = rows.map((row) => {
+    // Optional whole-row link: clicking anywhere on the row (except an inner
+    // link/button) navigates to opts.rowHref(row). The row keeps its per-cell
+    // anchor for keyboard focus + middle-click; this just widens the hit target.
+    const href = opts.rowHref ? opts.rowHref(row) : null;
+    const cls = [opts.rowClass ? opts.rowClass(row) : "", href ? "k-row--link" : ""].filter(Boolean).join(" ");
+    return {
+      row, href,
+      tr: el("tr", { class: cls },
+        columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
+    };
+  });
   const tbody = el("tbody", {}, entries.map((e) => e.tr));
+
+  // Delegated row navigation: a plain click on a linked row opens it, but clicks
+  // on an inner <a>/<button> are left to the native element.
+  if (opts.rowHref) {
+    tbody.addEventListener("click", (ev) => {
+      if (ev.target.closest("a, button")) return;
+      const tr = ev.target.closest("tr");
+      const entry = entries.find((e) => e.tr === tr);
+      if (entry && entry.href) location.hash = entry.href;
+    });
+  }
 
   const firstSortable = columns.findIndex((c) => c.get);
   const state = { idx: opts.defaultIdx != null ? opts.defaultIdx : Math.max(0, firstSortable), dir: opts.defaultDir || 1 };
@@ -1133,7 +1151,9 @@ function entityTable(entities, settings) {
     { label: "Gaps", get: (r) => r.sum.gaps, cell: (r) => el("span", { text: String(r.sum.gaps) }) },
     { label: "Value", get: (r) => r.val, cell: (r) => el("span", { text: r.val ? money(r.val) : "—" }) },
   ];
-  return el("div", { class: "k-enttable" }, [sortableTable(columns, rows, { defaultIdx: 0, defaultDir: 1 }).wrap]);
+  return el("div", { class: "k-enttable" }, [sortableTable(columns, rows, {
+    defaultIdx: 0, defaultDir: 1, rowHref: (r) => `#/keep/entity/${r.e.id}`,
+  }).wrap]);
 }
 
 // Option B — a uniform tile per entity in a responsive grid.
