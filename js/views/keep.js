@@ -563,36 +563,6 @@ function entityAvatar(entity) {
   return el("span", { class: `k-bigav${entity.kind === "person" ? " k-bigav--person" : ""}`, text: entity.initials });
 }
 
-function entityHead(entity, settings, addHref) {
-  const sum = entitySummary(entity, settings);
-  const sub = entitySubtype(entity);
-  const base = entity.kind === "business"
-    ? [entity.meta || "", `${sum.assets} assets`, `${sum.gaps} gap${sum.gaps === 1 ? "" : "s"}`]
-    : [`${sum.assets} assets`, `${sum.inPlace} coverages in place`, `${sum.gaps} gap${sum.gaps === 1 ? "" : "s"}`];
-  const metaBits = (sub !== "—" ? [sub] : []).concat(base);
-  return el("div", { class: "k-ehead" }, [
-    entityAvatar(entity),
-    el("div", {}, [
-      el("div", {}, [
-        el("h1", { text: entity.name }),
-        el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entityCategory(entity) }),
-      ]),
-      el("div", { class: "k-emeta" }, joinDots(metaBits)),
-    ]),
-    el("a", { class: "k-btn", attrs: { href: addHref } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
-  ]);
-}
-
-// Interleave " · " separators as text nodes between meta spans.
-function joinDots(bits) {
-  const out = [];
-  bits.filter(Boolean).forEach((b, i) => {
-    if (i) out.push(sep());
-    out.push(el("span", { text: b }));
-  });
-  return out;
-}
-
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
   const emailInput = el("input", { attrs: { type: "text", value: DEMO_CREDENTIAL.email, autocomplete: "username" } });
@@ -1362,15 +1332,48 @@ export async function renderKeepEntity(params, id) {
   const entity = getEntity(id);
   if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
-  const variant = panelVariant(entity);
+  const suffix = colorSuffix(entity);
+  const sum = entitySummary(entity, settings);
+  const value = entityValue(entity);
+  const subtype = entitySubtype(entity);
+
+  // Compact identity header (avatar + name + category) with the primary action.
+  const header = el("div", { class: "k-ehero" }, [
+    entityAvatar(entity),
+    el("div", { class: "k-ehero__id" }, [
+      el("div", { class: "k-ehero__top" }, [
+        el("h1", { text: entity.name }),
+        el("span", { class: `k-et k-et--${suffix}`, text: entityCategory(entity) }),
+      ]),
+      subtype !== "—" ? el("div", { class: "k-ehero__sub", text: subtype }) : null,
+    ]),
+    el("a", { class: "k-btn", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
+  ]);
+
+  // At-a-glance parameters, each in its own block — fills the panel tidily
+  // instead of leaving one large empty box.
+  const paramList = [
+    { l: "Category", v: entityCategory(entity) },
+    { l: "Subtype", v: subtype === "—" ? "Not set" : subtype },
+    { l: "Assets", v: String(sum.assets) },
+    { l: "Coverage in place", v: String(sum.inPlace) },
+    { l: "Open gaps", v: String(sum.gaps), tone: sum.gaps > 0 ? "warn" : null },
+    { l: "Insured value", v: value ? money(value) : "—" },
+  ];
+  const paramGrid = el("div", { class: "k-params" }, paramList.map((p) =>
+    el("div", { class: `k-param${p.tone ? ` k-param--${p.tone}` : ""}` }, [
+      el("div", { class: "k-param__l", text: p.l }),
+      el("div", { class: "k-param__v", text: p.v }),
+    ])));
+
   const view = page("list", [
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    el("section", { class: `k-panel ${variant}` }, [
-      entityHead(entity, settings, `#/keep/add-asset/${entity.id}`),
+    el("section", { class: `k-epanel k-panel--${suffix}` }, [header, paramGrid]),
+    el("section", { class: "k-eassets" }, [
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
       entity.assets.length
-        ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
+        ? el("div", { class: "k-agrid" }, entity.assets.map((a) => assetCard(a, settings)))
         : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
     ]),
   ]);
