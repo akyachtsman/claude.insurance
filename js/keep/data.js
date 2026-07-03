@@ -249,15 +249,18 @@ export function findPolicy(policyId) {
 }
 
 // Asset-type display metadata (icon + the rounded icon-tile color class).
+// Per asset-type presentation: `cic`/`icon` for the marker, `label` for the
+// canonical category shown in the Type column (a fixed vocabulary, so the column
+// stays consistent instead of echoing each asset's freeform meta text).
 export const ASSET_META = {
-  home: { cic: "home", icon: "home" },
-  auto: { cic: "auto", icon: "auto" },
-  watercraft: { cic: "boat", icon: "boat" },
-  valuables: { cic: "gem", icon: "gem" },
-  "commercial-space": { cic: "cp", icon: "commercial-property" },
-  "commercial-auto": { cic: "auto", icon: "commercial-auto" },
-  business: { cic: "cp", icon: "briefcase" },
+  home: { cic: "home", icon: "home", label: "Home" },
+  auto: { cic: "auto", icon: "auto", label: "Vehicle" },
+  watercraft: { cic: "boat", icon: "boat", label: "Watercraft" },
+  valuables: { cic: "gem", icon: "gem", label: "Valuables" },
+  "commercial-space": { cic: "cp", icon: "commercial-property", label: "Commercial space" },
+  "commercial-auto": { cic: "auto", icon: "commercial-auto", label: "Commercial auto" },
+  business: { cic: "cp", icon: "briefcase", label: "Business" },
   // "other" covers land/vacant lots and any miscellaneous asset (see ASSET_GROUPS
   // in keep.js). Kept in sync so these render an icon/colour instead of crashing.
-  other: { cic: "home", icon: "shield" },
+  other: { cic: "home", icon: "shield", label: "Other" },
 };

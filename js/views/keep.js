@@ -442,6 +442,13 @@ function cic(asset) {
   return el("span", { class: `k-cic k-cic--${meta.cic}` }, [icon(meta.icon, { size: 28 })]);
 }
 
+// Canonical category label for an asset's type (Home, Vehicle, Commercial space…)
+// — a fixed vocabulary, so the Type column never echoes freeform meta text.
+function assetTypeLabel(asset) {
+  const meta = ASSET_META[asset.type];
+  return (meta && meta.label) || "Other";
+}
+
 function statusPill(st) {
   return el("span", { class: `k-pill k-pill--${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]);
 }
@@ -908,7 +915,7 @@ export function renderKeepAssets() {
 
   const columns = [
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
-    { label: "Type", get: (r) => r.asset.meta || r.asset.type || "", cell: (r) => el("span", { text: r.asset.meta || r.asset.type || "—" }) },
+    { label: "Type", get: (r) => assetTypeLabel(r.asset), cell: (r) => el("span", { text: assetTypeLabel(r.asset) }) },
     { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
     { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
     { label: "Policies", get: (r) => (r.asset.policies || []).length, cell: (r) => el("span", { text: String((r.asset.policies || []).length) }) },
