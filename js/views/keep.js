@@ -1137,13 +1137,21 @@ function entityTable(entities, settings) {
 function entityTile(entity, settings) {
   const sum = entitySummary(entity, settings);
   const val = entityValue(entity);
+  const suffix = colorSuffix(entity);
+  const subtype = entitySubtype(entity);
   const stat = (v, l) => el("div", { class: "k-etile__stat" }, [el("b", { text: String(v) }), el("span", { text: l })]);
-  return el("a", { class: `k-etile k-etile--${colorSuffix(entity)}`, attrs: { href: `#/keep/entity/${entity.id}`, draggable: "true", "data-id": entity.id } }, [
+  // Landscape tile: colour bar + avatar on the left, name/type in the middle,
+  // stats on the right — wider and shorter than a stacked card.
+  return el("a", { class: `k-etile k-etile--${suffix}`, attrs: { href: `#/keep/entity/${entity.id}`, draggable: "true", "data-id": entity.id } }, [
     el("span", { class: "k-etile__bar" }),
     entityAvatar(entity),
-    el("div", { class: "k-etile__name", text: entity.name }),
-    el("span", { class: `k-et k-et--${colorSuffix(entity)}`, text: entityCategory(entity) }),
-    entitySubtype(entity) !== "—" ? el("div", { class: "k-etile__sub", text: entitySubtype(entity) }) : null,
+    el("div", { class: "k-etile__body" }, [
+      el("div", { class: "k-etile__name", text: entity.name }),
+      el("div", { class: "k-etile__meta" }, [
+        el("span", { class: `k-et k-et--${suffix}`, text: entityCategory(entity) }),
+        subtype !== "—" ? el("span", { class: "k-etile__sub", text: subtype }) : null,
+      ]),
+    ]),
     el("div", { class: "k-etile__stats" }, [
       stat(sum.assets, sum.assets === 1 ? "Asset" : "Assets"),
       stat(sum.gaps, sum.gaps === 1 ? "Gap" : "Gaps"),
