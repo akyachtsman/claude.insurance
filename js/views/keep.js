@@ -969,21 +969,28 @@ function relStyleKey(node) {
 // Column-based auto-layout: people col 0, trusts col 1, businesses col 2.
 const REL_COL = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 const REL_X = [30, 390, 740];
-function relLayout(H) {
+// Node box height + the minimum breathing room to keep between stacked boxes.
+const REL_NODE_H = 92, REL_VGAP = 30, REL_PAD = 70, REL_MIN_H = 440;
+// Lay the columns out and, crucially, size the canvas to the busiest column so
+// boxes never pack tighter than one node height + gap — the map grows taller as
+// more entities are added instead of muddling them together.
+function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
   const cols = [[], [], []];
   nodes.forEach((n) => cols[REL_COL[n.sk]].push(n));
+  const maxK = Math.max(1, cols[0].length, cols[1].length, cols[2].length);
+  const H = Math.max(REL_MIN_H, 2 * REL_PAD + maxK * (REL_NODE_H + REL_VGAP));
   cols.forEach((list, c) => {
     const k = list.length || 1;
-    list.forEach((n, i) => { n.x = REL_X[c]; n.cy = Math.round(70 + (i + 0.5) * ((H - 140) / k)); });
+    list.forEach((n, i) => { n.x = REL_X[c]; n.cy = Math.round(REL_PAD + (i + 0.5) * ((H - 2 * REL_PAD) / k)); });
   });
-  return { nodes, edges: data.edges };
+  return { nodes, edges: data.edges, H };
 }
 
 function relationshipMap() {
-  const W = 970, H = 440, NODE_W = 200, NODE_H = 92, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
-  const { nodes, edges } = relLayout(H);
+  const W = 970, NODE_W = 200, NODE_H = 92, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+  const { nodes, edges, H } = relLayout();
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   // Restore any saved positions over the default auto-layout (clamped to canvas).
   const saved = loadRelPositions();
