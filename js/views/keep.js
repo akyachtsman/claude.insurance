@@ -648,12 +648,30 @@ function collectPolicies() {
 //   opts:    { defaultIdx, defaultDir (1 asc / -1 desc), rowClass(row) }
 // Returns { wrap, entries } — entries [{ row, tr }] so callers can filter (search).
 function sortableTable(columns, rows, opts = {}) {
-  const entries = rows.map((row) => ({
-    row,
-    tr: el("tr", { class: opts.rowClass ? opts.rowClass(row) : "" },
-      columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
-  }));
+  const entries = rows.map((row) => {
+    // Optional whole-row link: clicking anywhere on the row (except an inner
+    // link/button) navigates to opts.rowHref(row). The row keeps its per-cell
+    // anchor for keyboard focus + middle-click; this just widens the hit target.
+    const href = opts.rowHref ? opts.rowHref(row) : null;
+    const cls = [opts.rowClass ? opts.rowClass(row) : "", href ? "k-row--link" : ""].filter(Boolean).join(" ");
+    return {
+      row, href,
+      tr: el("tr", { class: cls },
+        columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
+    };
+  });
   const tbody = el("tbody", {}, entries.map((e) => e.tr));
+
+  // Delegated row navigation: a plain click on a linked row opens it, but clicks
+  // on an inner <a>/<button> are left to the native element.
+  if (opts.rowHref) {
+    tbody.addEventListener("click", (ev) => {
+      if (ev.target.closest("a, button")) return;
+      const tr = ev.target.closest("tr");
+      const entry = entries.find((e) => e.tr === tr);
+      if (entry && entry.href) location.hash = entry.href;
+    });
+  }
 
   const firstSortable = columns.findIndex((c) => c.get);
   const state = { idx: opts.defaultIdx != null ? opts.defaultIdx : Math.max(0, firstSortable), dir: opts.defaultDir || 1 };
@@ -1133,7 +1151,9 @@ function entityTable(entities, settings) {
     { label: "Gaps", get: (r) => r.sum.gaps, cell: (r) => el("span", { text: String(r.sum.gaps) }) },
     { label: "Value", get: (r) => r.val, cell: (r) => el("span", { text: r.val ? money(r.val) : "—" }) },
   ];
-  return el("div", { class: "k-enttable" }, [sortableTable(columns, rows, { defaultIdx: 0, defaultDir: 1 }).wrap]);
+  return el("div", { class: "k-enttable" }, [sortableTable(columns, rows, {
+    defaultIdx: 0, defaultDir: 1, rowHref: (r) => `#/keep/entity/${r.e.id}`,
+  }).wrap]);
 }
 
 // Option B — a uniform tile per entity in a responsive grid.
@@ -1356,9 +1376,12 @@ export async function renderKeepAsset(params, id) {
   const { entity, asset } = found;
   const settings = await getRuleDefaults();
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
+  // Fall back to a neutral marker for any asset type not in ASSET_META (e.g. a
+  // freshly-added "other"/land asset) so the detail page never blanks out.
+  const assetMeta = ASSET_META[asset.type] || { cic: "home", icon: "shield" };
 
   const covRow = (c) => el("div", { class: `k-crow${c.status === "gap" ? " gap" : ""}` }, [
-    el("span", { class: `k-cic k-cic--${ASSET_META[asset.type] ? ASSET_META[asset.type].cic : "home"}` }, [icon(c.icon, { size: 26 })]),
+    el("span", { class: `k-cic k-cic--${assetMeta.cic}` }, [icon(c.icon, { size: 26 })]),
     el("div", { class: "k-crow__main" }, [
       el("div", { class: "k-crow__name", text: c.title }),
       el("div", { class: "k-crow__why", text: c.why }),
@@ -1376,7 +1399,7 @@ export async function renderKeepAsset(params, id) {
       el("span", { text: asset.name }),
     ]),
     el("div", { class: "k-ahero" }, [
-      el("span", { class: `k-cic k-cic--${ASSET_META[asset.type].cic}` }, [icon(ASSET_META[asset.type].icon, { size: 34 })]),
+      el("span", { class: `k-cic k-cic--${assetMeta.cic}` }, [icon(assetMeta.icon, { size: 34 })]),
       el("div", {}, [
         el("h1", { text: asset.name }),
         el("div", { class: "k-facts" }, asset.facts.map((f) => el("span", { text: f })).concat(asset.value ? [el("span", {}, [el("span", { text: "Est. " }), el("b", { text: money(asset.value) })])] : [])),
