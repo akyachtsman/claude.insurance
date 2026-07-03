@@ -1299,7 +1299,7 @@ async function renderEntityCollection(layout) {
       ]));
     }
     body = el("div", {}, [
-      el("p", { class: "k-relcaption k-relcaption--top", text: "Grouped by type. Drag cards to rearrange within a row — your order is saved on this device." }),
+      el("p", { class: "k-relcaption k-relcaption--top", text: "Grouped by type. Drag cards to rearrange — your order is saved on this device." }),
       groupsWrap,
     ]);
   } else {
