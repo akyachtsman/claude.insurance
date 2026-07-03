@@ -1360,7 +1360,7 @@ export async function renderKeepEntity(params, id) {
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-panel ${variant}` }, [
-      entityHead(entity, settings, "#/keep/add-asset"),
+      entityHead(entity, settings, `#/keep/add-asset/${entity.id}`),
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
       entity.assets.length
         ? el("div", { class: "k-grid2" }, entity.assets.map((a) => assetCard(a, settings)))
@@ -1513,8 +1513,11 @@ function kProgress(stepNum, totalSteps, onBack) {
 }
 
 // Add asset: step 1 pick a type, step 2 name it + pick the entity, then write.
-export function renderKeepAddAsset() {
+export function renderKeepAddAsset(preselectEntityId) {
   const entities = getEntities();
+  // When launched from an entity's page (#/keep/add-asset/:id) the new asset
+  // should belong to that entity, not silently default to the first one.
+  const preselect = entities.some((e) => e.id === preselectEntityId) ? preselectEntityId : null;
   const state = { step: 1, type: null, label: null };
 
   function chooseType(c) {
@@ -1557,6 +1560,7 @@ export function renderKeepAddAsset() {
     const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. 123 Marina Way" } });
     const valueInput = el("input", { attrs: { type: "number", min: "0", placeholder: "Estimated value (optional)" } });
     const entSelect = el("select", {}, entities.map((e) => el("option", { attrs: { value: e.id }, text: e.name })));
+    if (preselect) entSelect.value = preselect;
     const error = el("p", { class: "k-error", attrs: { role: "alert" } });
     const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: `Add ${lower}` }), icon("arrow-right", { size: 20 })]);
 

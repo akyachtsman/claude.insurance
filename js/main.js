@@ -99,7 +99,7 @@ async function dispatchKeep(rest) {
     case "grid":
       return renderKeepEntityGrid();
     case "add-asset":
-      return renderKeepAddAsset();
+      return renderKeepAddAsset(id);
     case "add-entity":
       return renderKeepAddEntity();
     case "entities":
