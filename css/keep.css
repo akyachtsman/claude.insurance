@@ -211,6 +211,22 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-4); }
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
+/* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
+.k-epanel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-7); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
+.k-ehero { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.k-ehero__id { min-width: 0; }
+.k-ehero__top { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.k-ehero__top h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; }
+.k-ehero__sub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 3px; }
+.k-ehero .k-btn { margin-left: auto; }
+.k-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--space-3); margin-top: var(--space-6); }
+.k-param { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 13px 16px; }
+.k-param__l { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .06em; color: var(--color-text-secondary); }
+.k-param__v { font: 800 19px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; margin-top: 4px; }
+.k-param--warn .k-param__v { color: #D6333A; }
+.k-eassets { margin-bottom: var(--space-6); }
+.k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: var(--space-4); }
+
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
 .k-enttable .k-bigav .icon { width: 17px; height: 17px; }
@@ -582,6 +598,9 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
   .k-nav { display: none; }
   .k-banner .k-btn { margin-left: 0; }
   .k-stats { grid-template-columns: 1fr 1fr; }
+  .k-params { grid-template-columns: 1fr 1fr; }
+  .k-agrid { grid-template-columns: 1fr; }
+  .k-ehero .k-btn { margin-left: 0; }
   .k-search__in { width: 160px; }
 }
 @media (max-width: 480px) {
