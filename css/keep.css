@@ -237,7 +237,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 
 /* ── Entities · Cards layout (Option B) ─────────────────────────────────────── */
 .k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; position: relative; }
-.k-etile { position: relative; overflow: hidden; text-align: center; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 15px 14px 13px; transition: transform .14s, box-shadow .14s; }
+.k-etile { position: relative; overflow: hidden; text-align: center; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 12px 10px 11px; transition: transform .14s, box-shadow .14s; }
 .k-etile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
 /* Cards grouped into type rows (Individuals · Businesses · Trusts); each row
    scrolls horizontally when it overflows. */
@@ -245,8 +245,8 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-etgroup__h { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); }
 .k-etgroup__h h2 { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); margin: 0; }
 .k-etgroup__count { font: 800 12px var(--font-sans); background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-secondary); padding: 2px 9px; border-radius: var(--radius-pill); }
-.k-etstrip { position: relative; display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 10px; scroll-snap-type: x proximity; }
-.k-etstrip .k-etile { flex: 0 0 178px; scroll-snap-align: start; }
+.k-etstrip { position: relative; display: flex; flex-wrap: wrap; gap: 9px; padding: 4px 2px 10px; }
+.k-etstrip .k-etile { flex: 0 0 132px; }
 
 /* Draggable Cards: grab affordance + a faded card that stays put while a
    drop-bar shows where it will land; the reorder animates on drop (FLIP). */
@@ -262,14 +262,14 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-etile--biz .k-etile__bar { background: #F0A6A9; }
 .k-etile--trust .k-etile__bar { background: #F0C879; }
 .k-etile--np .k-etile__bar { background: #7FD4A8; }
-.k-etile .k-bigav { width: 42px; height: 42px; border-radius: 13px; margin: 2px auto 9px; font-size: 15px; }
-.k-etile .k-bigav .icon { width: 21px; height: 21px; }
-.k-etile__name { font: 700 15px var(--font-display); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.k-etile .k-et { display: inline-block; margin: 0; font-size: 11px; padding: 3px 10px; }
-.k-etile__sub { font: 600 11px var(--font-sans); color: var(--color-text-secondary); margin-top: 4px; }
-.k-etile__stats { display: flex; justify-content: center; gap: 12px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--color-border); }
-.k-etile__stat b { display: block; font: 800 15px var(--font-display); color: var(--color-text-primary); }
-.k-etile__stat span { font: 700 10px var(--font-sans); text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-secondary); }
+.k-etile .k-bigav { width: 34px; height: 34px; border-radius: 11px; margin: 1px auto 7px; font-size: 13px; }
+.k-etile .k-bigav .icon { width: 17px; height: 17px; }
+.k-etile__name { font: 700 13px var(--font-display); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-etile .k-et { display: inline-block; margin: 0; font-size: 10px; padding: 2px 8px; }
+.k-etile__sub { font: 600 10px var(--font-sans); color: var(--color-text-secondary); margin-top: 3px; }
+.k-etile__stats { display: flex; justify-content: center; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--color-border); }
+.k-etile__stat b { display: block; font: 800 13px var(--font-display); color: var(--color-text-primary); }
+.k-etile__stat span { font: 700 9px var(--font-sans); text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-secondary); }
 
 /* ── Asset cards (chunky, rounded) ──────────────────────────────────────────── */
 .k-cc { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
