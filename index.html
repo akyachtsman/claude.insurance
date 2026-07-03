@@ -5,13 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Harborline Insurance — Understand your coverage</title>
   <meta name="description" content="Learn what insurance coverage fits your household or business in plain language, then share your needs with a licensed broker. Anonymous — a lead summary, not a quote.">
-  <link rel="stylesheet" href="css/tokens.css">
-  <link rel="stylesheet" href="css/base.css">
-  <link rel="stylesheet" href="css/components.css">
-  <link rel="stylesheet" href="css/views.css">
-  <link rel="stylesheet" href="css/forms.css">
-  <link rel="stylesheet" href="css/motion.css">
-  <link rel="stylesheet" href="css/keep.css">
+  <!-- Stylesheets with per-load cache-busting, mirroring the JS bootstrap below.
+       Static <link>s would be served from cache, so a deploy that changes both
+       CSS and JS could load fresh JS (new class names) against stale CSS (old
+       rules) and render broken. Injecting each sheet with a fresh ?v= keeps CSS
+       and JS in lockstep. Runs synchronously in <head> (render-blocking, no
+       FOUC); <noscript> falls back to plain links. -->
+  <script>
+    (function () {
+      var V = Date.now().toString(36);
+      var SHEETS = ["css/tokens.css", "css/base.css", "css/components.css", "css/views.css", "css/forms.css", "css/motion.css", "css/keep.css"];
+      SHEETS.forEach(function (href) {
+        var l = document.createElement("link");
+        l.rel = "stylesheet";
+        l.href = href + "?v=" + V;
+        document.head.appendChild(l);
+      });
+    })();
+  </script>
+  <noscript>
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/views.css">
+    <link rel="stylesheet" href="css/forms.css">
+    <link rel="stylesheet" href="css/motion.css">
+    <link rel="stylesheet" href="css/keep.css">
+  </noscript>
 </head>
 <body>
   <a class="skip-link" href="#app">Skip to content</a>
