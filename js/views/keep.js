@@ -1566,7 +1566,14 @@ export function renderKeepAddAsset(preselectEntityId) {
     const lower = state.label.toLowerCase();
     const nameInput = el("input", { attrs: { type: "text", placeholder: "e.g. 123 Marina Way" } });
     const valueInput = el("input", { attrs: { type: "number", min: "0", placeholder: "Estimated value (optional)" } });
-    const entSelect = el("select", {}, entities.map((e) => el("option", { attrs: { value: e.id }, text: e.name })));
+    // With no entity context and more than one entity to choose from, force an
+    // explicit pick instead of silently defaulting to the first entity ("Me") —
+    // otherwise assets quietly land on the wrong entity.
+    const needsPick = !preselect && entities.length > 1;
+    const entSelect = el("select", {}, [
+      needsPick ? el("option", { attrs: { value: "", disabled: "disabled", selected: "selected" }, text: "Select an entity…" }) : null,
+      ...entities.map((e) => el("option", { attrs: { value: e.id }, text: e.name })),
+    ].filter(Boolean));
     if (preselect) entSelect.value = preselect;
     const error = el("p", { class: "k-error", attrs: { role: "alert" } });
     const submit = el("button", { class: "k-btn k-btn--block", attrs: { type: "submit" } }, [el("span", { text: `Add ${lower}` }), icon("arrow-right", { size: 20 })]);
@@ -1574,6 +1581,7 @@ export function renderKeepAddAsset(preselectEntityId) {
     async function create() {
       const name = nameInput.value.trim();
       if (!name) { error.textContent = "Give this asset a name."; return; }
+      if (!entSelect.value) { error.textContent = "Choose which entity this belongs to."; return; }
       submit.setAttribute("disabled", "disabled"); submit.querySelector("span").textContent = "Adding…";
       const res = await addAsset({
         entityId: entSelect.value, type: state.type, name,
