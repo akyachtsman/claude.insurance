@@ -1054,11 +1054,17 @@ function relationshipMap() {
       const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
       const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
       er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
-      // Place the tag right where the arrow leaves the owner — a short way along
-      // the edge from the owner's border — so it reads next to its owner instead
-      // of colliding with other edges in the middle.
-      const lp = movePointToward(s0, e0, 26);
-      const lw = (er.tag.length * 6.6) + 18;
+      // Place the tag INSIDE the owner box, near the side the arrow leaves from.
+      // Siblings (several stakes from one owner) are spread vertically by amplifying
+      // each edge's own up/down direction, then clamped to the box — so they read
+      // inside their owner instead of clumping at one exit point or crowding the
+      // congested middle.
+      const bp = nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y);
+      const side = Math.sign(bp.x - a.x) || 1;
+      const lx = a.x + side * (HW - 26);
+      const ly = Math.max(a.y - (HH - 15), Math.min(a.y + (HH - 15), a.y + (bp.y - a.y) * 2.6));
+      const lp = { x: lx, y: ly };
+      const lw = (er.tag.length * 6.6) + 16;
       er.lrect.setAttribute("x", lp.x - lw / 2); er.lrect.setAttribute("y", lp.y - 11); er.lrect.setAttribute("width", lw);
       er.ltext.setAttribute("x", lp.x); er.ltext.setAttribute("y", lp.y + 4);
     });
