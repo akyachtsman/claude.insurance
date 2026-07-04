@@ -1035,11 +1035,15 @@ function relationshipMap() {
   // Edge paths first (drawn under the nodes); labels are appended after the nodes
   // so they stay readable on top. Keep refs to reposition during drag.
   const edgeRefs = edges.map((e) => {
+    // Tag the edge at the owner end with the stake percentage (e.g. "40%") — a
+    // role word ("Trustee") when there's no percentage — instead of a wordy pill
+    // stranded at the crossed-over midpoint.
+    const tag = e.stake || e.role || "";
     const path = s("path", { fill: "none", stroke: "#c3b2f0", "stroke-width": "2.5", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)" });
     svg.appendChild(path);
-    const lrect = s("rect", { rx: 13, height: 26, fill: "#ffffff", stroke: "#E3EBFA" });
-    const ltext = svgText(e.label, { "text-anchor": "middle", "font-size": "12", "font-weight": "700", fill: "#55607F", "font-family": FS });
-    return { ...e, path, lrect, ltext };
+    const lrect = s("rect", { rx: 11, height: 22, fill: "#ffffff", stroke: "#E3EBFA" });
+    const ltext = svgText(tag, { "text-anchor": "middle", "font-size": "11.5", "font-weight": "800", fill: "#55607F", "font-family": FS });
+    return { ...e, tag, path, lrect, ltext };
   });
   const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 5;
   const updateEdges = () => {
@@ -1050,9 +1054,13 @@ function relationshipMap() {
       const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
       const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
       er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, lw = er.label.length * 6.4 + 24;
-      er.lrect.setAttribute("x", mx - lw / 2); er.lrect.setAttribute("y", my - 13); er.lrect.setAttribute("width", lw);
-      er.ltext.setAttribute("x", mx); er.ltext.setAttribute("y", my + 4);
+      // Place the tag right where the arrow leaves the owner — a short way along
+      // the edge from the owner's border — so it reads next to its owner instead
+      // of colliding with other edges in the middle.
+      const lp = movePointToward(s0, e0, 26);
+      const lw = (er.tag.length * 6.6) + 18;
+      er.lrect.setAttribute("x", lp.x - lw / 2); er.lrect.setAttribute("y", lp.y - 11); er.lrect.setAttribute("width", lw);
+      er.ltext.setAttribute("x", lp.x); er.ltext.setAttribute("y", lp.y + 4);
     });
   };
 

@@ -287,6 +287,7 @@ export function getMapData() {
     .filter((r) => present.has(r.from) && present.has(r.to))
     .map((r) => ({
       from: r.from, to: r.to,
+      role: r.role, stake: r.stake || "",
       label: r.role + (r.stake ? ` · ${r.stake}` : ""),
     }));
   return { nodes, edges };
