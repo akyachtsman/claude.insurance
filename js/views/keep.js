@@ -31,16 +31,30 @@ const BROKER_NAME = "Rosa Alvarez";
 // Breadcrumb separator node (kept as one helper so the glyph isn't duplicated).
 function sep() { return el("span", { text: "  ·  " }); }
 
-// Persist Relationships-map node positions (per browser) so dragged layouts survive
-// re-renders, navigation and reloads. Keyed by entity id → {x, cy}.
+// Persist Relationships-map node positions (per browser) so a dragged layout
+// survives re-renders, navigation and reloads — but only while the graph is
+// unchanged. Saved positions are tagged with a signature of the current entities
+// and relationships; when that changes (an entity or link added/removed), the old
+// positions are dropped so the map re-organizes itself with a fresh auto-layout.
 const REL_POS_KEY = "keep:relmap-positions";
-function loadRelPositions() {
-  try { return JSON.parse(localStorage.getItem(REL_POS_KEY)) || {}; }
-  catch (e) { return {}; }
+// A stable fingerprint of the graph's shape: which nodes exist and how they link.
+function relSignature(nodes, edges) {
+  const ns = nodes.map((n) => n.id).sort().join(",");
+  const es = edges.map((e) => `${e.from}>${e.to}`).sort().join(",");
+  return `${ns}|${es}`;
 }
-function saveRelPositions(state) {
-  try { localStorage.setItem(REL_POS_KEY, JSON.stringify(Object.assign(loadRelPositions(), state))); }
-  catch (e) { /* storage unavailable — ignore */ }
+function loadRelPositions(sig) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REL_POS_KEY));
+    if (raw && raw.sig === sig && raw.pos) return raw.pos;
+  } catch (e) { /* fall through */ }
+  return {};
+}
+function saveRelPositions(sig, state) {
+  try {
+    const pos = Object.assign(loadRelPositions(sig), state);
+    localStorage.setItem(REL_POS_KEY, JSON.stringify({ sig, pos }));
+  } catch (e) { /* storage unavailable — ignore */ }
 }
 
 // Persist the drag-reordered order of the entity Cards grid (per browser), as an
@@ -992,8 +1006,11 @@ function relationshipMap() {
   const W = 970, NODE_W = 200, NODE_H = 92, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
   const { nodes, edges, H } = relLayout();
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  // Restore any saved positions over the default auto-layout (clamped to canvas).
-  const saved = loadRelPositions();
+  // Restore a saved layout only if it belongs to this exact graph; if the entities
+  // or links changed, `saved` is empty and the fresh auto-layout is used, so the
+  // map reorganizes itself after every change.
+  const sig = relSignature(nodes, edges);
+  const saved = loadRelPositions(sig);
   nodes.forEach((n) => {
     if (saved[n.id]) {
       n.x = clamp(saved[n.id].x, 0, W - NODE_W);
@@ -1099,7 +1116,7 @@ function relationshipMap() {
       if (!dragging) return;
       dragging = false;
       try { g.releasePointerCapture(pid); } catch (e) { /* ignore */ }
-      if (moved) saveRelPositions(state);          // remember the new layout
+      if (moved) saveRelPositions(sig, state);     // remember the new layout for this graph
       else if (interactive) location.hash = n.href; // a tap → open
     };
     g.addEventListener("pointerup", end);
