@@ -5,11 +5,11 @@ name: Pages Deploy Retry
 # leaves the site on the previous version until someone manually re-runs it.
 #
 # Triggered by `page_build` (the event GitHub actually emits for Pages builds — the
-# dynamically-generated Pages deploy workflow does NOT fire `workflow_run`, so that
-# can't be used). On each build it looks up the latest managed Pages deploy run and,
-# if it FAILED, re-runs it (a full re-run reliably clears the transient error).
-# Bounded by run_attempt (< 4) so a genuinely broken deploy can't loop — after a few
-# tries it stops and pages-monitor.yml opens its tracking issue.
+# dynamically-generated Pages deploy workflow does NOT fire `workflow_run`). Because
+# page_build can arrive while the deploy is still in progress, we POLL the latest
+# managed Pages run until it reaches a terminal state, then re-run it if it FAILED
+# (a full re-run reliably clears the transient error). Bounded by run_attempt (< 4)
+# so a genuinely broken deploy can't loop — then pages-monitor.yml opens its issue.
 #
 # Purely additive — no change to the Pages source or the existing deploy/monitor.
 on:
@@ -20,34 +20,51 @@ permissions:
   actions: write
   contents: read
 
+# Serialize retries so overlapping page_build events don't double-trigger a re-run.
+concurrency:
+  group: pages-retry
+  cancel-in-progress: false
+
 jobs:
   retry:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Re-run the latest failed Pages deployment
+      - name: Re-run the latest Pages deployment if it failed
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Newest managed Pages deploy run (matched by its workflow name).
-          run=$(gh api "repos/${REPO}/actions/runs?per_page=20" \
-            --jq 'first(.workflow_runs[] | select(.name == "pages build and deployment"))')
+          latest() {
+            gh api "repos/${REPO}/actions/runs?per_page=20" \
+              --jq 'first(.workflow_runs[] | select(.name == "pages build and deployment"))'
+          }
+          run=$(latest)
           if [ -z "$run" ] || [ "$run" = "null" ]; then
-            echo "No managed Pages deploy run found — nothing to do."
-            exit 0
+            echo "No managed Pages deploy run found — nothing to do."; exit 0
           fi
-          id=$(echo "$run"      | jq -r '.id')
-          status=$(echo "$run"  | jq -r '.status')
-          concl=$(echo "$run"   | jq -r '.conclusion')
+          id=$(echo "$run" | jq -r '.id')
+          attempt=$(echo "$run" | jq -r '.run_attempt')
+
+          # page_build can fire mid-deploy — wait for this run to finish (up to ~3 min)
+          # before deciding, so we don't skip a failure that's still in flight.
+          status=$(echo "$run" | jq -r '.status')
+          for i in $(seq 1 9); do
+            [ "$status" = "completed" ] && break
+            sleep 20
+            run=$(gh api "repos/${REPO}/actions/runs/${id}" --jq '{status:.status, conclusion:.conclusion, run_attempt:.run_attempt}')
+            status=$(echo "$run" | jq -r '.status')
+          done
+          concl=$(echo "$run" | jq -r '.conclusion')
           attempt=$(echo "$run" | jq -r '.run_attempt')
           echo "Latest Pages deploy: id=${id} status=${status} conclusion=${concl} attempt=${attempt}"
+
           if [ "$status" = "completed" ] && [ "$concl" = "failure" ] && [ "$attempt" -lt 4 ]; then
             echo "Deploy failed (attempt ${attempt}) — re-running to clear the transient publish error."
-            sleep 20
+            sleep 15
             gh run rerun "$id" --repo "$REPO"
             echo "Requested re-run of Pages deploy ${id}."
           else
-            echo "No retry needed (not a bounded failure)."
+            echo "No retry needed."
           fi
