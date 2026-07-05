@@ -1019,10 +1019,19 @@ function relLayout() {
 // below REL_MIN_NODE_PX; past that it holds size and the map pans (drag on
 // desktop; native touch-scroll on iPad). Re-runs on container resize.
 function fitRelMap(wrap, svg, W) {
-  let ro = null;
+  let ro = null, wasConnected = false;
   const apply = () => {
-    if (ro && !wrap.isConnected) { ro.disconnect(); return; }   // stop observing a torn-down map
-    const plan = fitPlan({ contentW: W, containerW: wrap.clientWidth || 0, nodeW: REL_NODE_W, minNodePx: REL_MIN_NODE_PX });
+    // Only disconnect once the map has actually been mounted and then torn down —
+    // the first apply() runs before mount (relationshipMap returns wrap to be
+    // mounted after), so isConnected is false then too, and we must not stop early.
+    if (wrap.isConnected) wasConnected = true;
+    else if (wasConnected) { if (ro) ro.disconnect(); return; }
+    // clientWidth includes the card's horizontal padding, which the width:100%
+    // SVG does not fill; subtract it so the node floor isn't under-measured near
+    // the fit/pan threshold.
+    const cs = getComputedStyle(wrap);
+    const inner = (wrap.clientWidth || 0) - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const plan = fitPlan({ contentW: W, containerW: Math.max(0, inner), nodeW: REL_NODE_W, minNodePx: REL_MIN_NODE_PX });
     if (plan.mode === "pan") {
       svg.style.width = `${plan.renderW}px`;
       svg.style.maxWidth = "none";
