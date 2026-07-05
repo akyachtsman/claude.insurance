@@ -30,8 +30,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "Codex review $REVIEW_ID on PR #$PR_NUMBER — state=$REVIEW_STATE"
+          # No fallback here on purpose: a transient API failure must fail the
+          # step (and get retried) rather than read as "0 inline comments" and
+          # silently skip the flag.
           inline=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" \
-            --jq 'length' 2>/dev/null || echo 0)
+            --jq 'length')
           echo "Inline comments on this review: $inline"
           state_lc=$(echo "$REVIEW_STATE" | tr '[:upper:]' '[:lower:]')
           if [ "$state_lc" = "changes_requested" ] || \

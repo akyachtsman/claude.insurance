@@ -4,7 +4,8 @@ name: Pages Monitor
 # opens/updates a single deduplicated tracking issue (which notifies the owner).
 # Success is reported in the job summary only — no inbox noise. Uses only
 # GITHUB_TOKEN — no external services. workflow_dispatch allows a manual liveness
-# re-check. The live URL is derived generically, so this file is portable as-is.
+# re-check. The live URL comes from the Pages API (so user-site repos and custom
+# domains work), with a generic derivation as fallback — portable as-is.
 on:
   page_build:
   workflow_dispatch:
@@ -12,6 +13,7 @@ on:
 permissions:
   contents: read
   issues: write
+  pages: read   # lets the Pages API return the real html_url
 
 jobs:
   monitor:
@@ -29,8 +31,14 @@ jobs:
           ISSUE_LABEL: 'pages-deploy-failure'
         run: |
           set -euo pipefail
-          repo_name="${REPO#*/}"
-          url="https://${OWNER}.github.io/${repo_name}/"
+          # Real Pages URL from the API (covers <owner>.github.io user-site
+          # repos and custom domains); generic derivation as the fallback.
+          url=$(gh api "repos/$REPO/pages" --jq '.html_url // empty' 2>/dev/null || true)
+          if [ -z "$url" ]; then
+            repo_name="${REPO#*/}"
+            url="https://${OWNER}.github.io/${repo_name}/"
+          fi
+          case "$url" in */) ;; *) url="${url}/" ;; esac
           status="${BUILD_STATUS:-manual}"
           short="${BUILD_COMMIT:0:7}"
           echo "page_build status: $status (commit ${short:-n/a}) — target $url"
