@@ -37,7 +37,9 @@ function sep() { return el("span", { text: "  ·  " }); }
 // unchanged. Saved positions are tagged with a signature of the current entities
 // and relationships; when that changes (an entity or link added/removed), the old
 // positions are dropped so the map re-organizes itself with a fresh auto-layout.
-const REL_POS_KEY = "keep:relmap-positions";
+// The ":v2" suffix invalidates positions saved under the old column layout — their
+// coordinates predate the top-down layered layout and would otherwise overlap.
+const REL_POS_KEY = "keep:relmap-positions:v2";
 // A stable fingerprint of the graph's shape: which nodes exist and how they link.
 function relSignature(nodes, edges) {
   const ns = nodes.map((n) => n.id).sort().join(",");
@@ -1126,7 +1128,11 @@ function relationshipMap() {
       // from the owner (er.from) and the arrowhead lands on what it owns (er.to).
       const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
       const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
-      er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
+      // Vertical S-curve between the two trimmed border points: control points sit
+      // at the midpoint height, so a top-down ownership edge bows smoothly (and the
+      // arrowhead meets the owned box vertically). Adapts to any dragged position.
+      const my0 = (s0.y + e0.y) / 2;
+      er.path.setAttribute("d", `M ${s0.x} ${s0.y} C ${s0.x} ${my0}, ${e0.x} ${my0}, ${e0.x} ${e0.y}`);
       if (er.lrect) {                          // centre the role label on the line
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         const lw = (er.role.length * 6.1) + 16;
