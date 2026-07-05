@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, layeredLayout, fitPlan } from "../keep/relmap.js";
+import { capTablesByEntity, layeredLayout } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -993,58 +993,68 @@ function relLayout() {
   return { nodes, edges: data.edges, W, H };
 }
 
-// Fit-to-width, then pan. The SVG scales to the container until a box would drop
-// below REL_MIN_NODE_PX; past that it holds size and the map pans (drag on
-// desktop; native touch-scroll on iPad). Re-runs on container resize.
-function fitRelMap(wrap, svg, W) {
-  let ro = null, wasConnected = false;
-  const apply = () => {
-    // Only disconnect once the map has actually been mounted and then torn down —
-    // the first apply() runs before mount (relationshipMap returns wrap to be
-    // mounted after), so isConnected is false then too, and we must not stop early.
-    if (wrap.isConnected) wasConnected = true;
-    else if (wasConnected) { if (ro) ro.disconnect(); return; }
-    // clientWidth includes the card's horizontal padding, which the width:100%
-    // SVG does not fill; subtract it so the node floor isn't under-measured near
-    // the fit/pan threshold.
-    const cs = getComputedStyle(wrap);
-    const inner = (wrap.clientWidth || 0) - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    const plan = fitPlan({ contentW: W, containerW: Math.max(0, inner), nodeW: REL_NODE_W, minNodePx: REL_MIN_NODE_PX });
-    if (plan.mode === "pan") {
-      svg.style.width = `${plan.renderW}px`;
-      svg.style.maxWidth = "none";
-      wrap.classList.add("k-relmap--pan");
-    } else {
-      svg.style.width = "";                 // fall back to the CSS width:100%
-      svg.style.maxWidth = `${W}px`;
-      wrap.classList.remove("k-relmap--pan");
-    }
+// The map is a fixed-size viewport you pan in 2D: the whole chart translates under
+// the pointer (drag anywhere on the background — mouse or touch), in both axes.
+// On first paint it scales to fit the viewport but never below the readable node
+// floor, so a large chart overflows and you drag to reach the rest. A press that
+// lands on a node without moving opens it.
+function setupRelViewport(wrap, svg, W, H) {
+  const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
+  let k = 1, tx = 0, ty = 0, fitted = false;
+  const applyT = () => { svg.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
+  // Keep at least a margin of the chart on-screen; centre it on the axes where it fits.
+  const clampPan = (vw, vh) => {
+    const cw = W * k, ch = H * k, M = 48;
+    tx = cw <= vw ? (vw - cw) / 2 : Math.min(M, Math.max(vw - cw - M, tx));
+    ty = ch <= vh ? (vh - ch) / 2 : Math.min(M, Math.max(vh - ch - M, ty));
   };
-  if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(apply); ro.observe(wrap); }
-  apply();
-}
+  const fit = () => {
+    const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
+    if (!vw || !vh) return;
+    k = Math.max(MIN_K, Math.min(vw / W, vh / H, 1));   // fit the whole chart, but not below the node floor
+    tx = (vw - W * k) / 2; ty = (vh - H * k) / 2;        // centre it
+    clampPan(vw, vh); applyT(); fitted = true;
+  };
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => {
+      if (!wrap.isConnected) { if (fitted) ro.disconnect(); return; }
+      fit();                                              // recompute fit scale + re-centre on every resize
+    });
+    ro.observe(wrap);
+  }
+  fit();
 
-// Drag-to-pan the whole canvas in unison (desktop mouse). Touch uses the
-// container's native horizontal scroll; a press that lands on a node is left to
-// that node's own drag handler.
-function enableRelPan(wrap) {
-  let panning = false, sx = 0, sy = 0, sl = 0, st = 0;
+  // Drag-to-pan (mouse + touch). Opening a node is a genuine `click` (below), so it
+  // also works for screen-reader activation and click-dispatching tests; a click
+  // that merely concludes a pan is ignored via the `moved` flag.
+  let down = false, moved = false, sx = 0, sy = 0, otx = 0, oty = 0, pressNode = null;
   wrap.addEventListener("pointerdown", (ev) => {
-    if (ev.pointerType === "touch") return;
-    if (ev.target.closest && ev.target.closest(".k-relnode")) return;
-    panning = true; sx = ev.clientX; sy = ev.clientY; sl = wrap.scrollLeft; st = wrap.scrollTop;
+    down = true; moved = false; sx = ev.clientX; sy = ev.clientY; otx = tx; oty = ty;
+    pressNode = ev.target.closest ? ev.target.closest(".k-relnode--link") : null;
     wrap.classList.add("is-grabbing");
+    try { wrap.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
   });
   wrap.addEventListener("pointermove", (ev) => {
-    if (!panning) return;
-    wrap.scrollLeft = sl - (ev.clientX - sx);
-    wrap.scrollTop = st - (ev.clientY - sy);
+    if (!down) return;
+    const dx = ev.clientX - sx, dy = ev.clientY - sy;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    tx = otx + dx; ty = oty + dy;
+    clampPan(wrap.clientWidth || 0, wrap.clientHeight || 0); applyT();
     ev.preventDefault();
   });
-  const end = () => { panning = false; wrap.classList.remove("is-grabbing"); };
+  const end = () => { down = false; wrap.classList.remove("is-grabbing"); };
   wrap.addEventListener("pointerup", end);
   wrap.addEventListener("pointercancel", end);
-  wrap.addEventListener("pointerleave", end);
+  // Navigate on a real click (not the tail of a pan). Pointer capture can retarget
+  // the click to the wrapper, so fall back to the node the press started on; a
+  // synthesized/AT click (no press) hits the node directly via ev.target. Delegated
+  // so it also covers screen-reader activation and click-dispatching tests.
+  wrap.addEventListener("click", (ev) => {
+    if (moved) return;
+    const node = (ev.target.closest && ev.target.closest(".k-relnode--link")) || pressNode;
+    const href = node && node.getAttribute("data-href");
+    if (href) location.hash = href;
+  });
 }
 
 function relationshipMap() {
@@ -1058,7 +1068,7 @@ function relationshipMap() {
   nodes.forEach((n) => { pos[n.id] = { x: n.x, cy: n.cy }; });
   const center = (id) => ({ x: pos[id].x + NODE_W / 2, y: pos[id].cy });
 
-  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
       s("stop", { offset: "0", "stop-color": "#6F9BFF" }), s("stop", { offset: "1", "stop-color": "#2F6AF6" }),
@@ -1177,10 +1187,10 @@ function relationshipMap() {
       g.appendChild(barG);
     }
 
-    // Tap / click (or Enter/Space) opens an entity you manage. No dragging — node
-    // positions belong to the auto-layout, not the user.
+    // Opening: a tap/click is resolved by the viewport pan controller via data-href
+    // (so a drag never counts as a tap); Enter/Space opens via the keyboard.
     if (interactive) {
-      g.addEventListener("click", () => { location.hash = n.href; });
+      g.setAttribute("data-href", n.href);
       g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); location.hash = n.href; } });
     }
 
@@ -1192,8 +1202,7 @@ function relationshipMap() {
   updateEdges();
 
   const wrap = el("div", { class: "k-relmap" }, [svg]);
-  enableRelPan(wrap);
-  fitRelMap(wrap, svg, W);
+  setupRelViewport(wrap, svg, W, H);
   return wrap;
 }
 
@@ -1419,7 +1428,7 @@ export function renderKeepEntities() {
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag to pan when the map is wider than the screen; tap an entity you manage to open it." }),
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag anywhere to move the map around; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }
