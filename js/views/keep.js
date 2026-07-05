@@ -32,31 +32,9 @@ const BROKER_NAME = "Rosa Alvarez";
 // Breadcrumb separator node (kept as one helper so the glyph isn't duplicated).
 function sep() { return el("span", { text: "  ·  " }); }
 
-// Persist Relationships-map node positions (per browser) so a dragged layout
-// survives re-renders, navigation and reloads — but only while the graph is
-// unchanged. Saved positions are tagged with a signature of the current entities
-// and relationships; when that changes (an entity or link added/removed), the old
-// positions are dropped so the map re-organizes itself with a fresh auto-layout.
-const REL_POS_KEY = "keep:relmap-positions";
-// A stable fingerprint of the graph's shape: which nodes exist and how they link.
-function relSignature(nodes, edges) {
-  const ns = nodes.map((n) => n.id).sort().join(",");
-  const es = edges.map((e) => `${e.from}>${e.to}`).sort().join(",");
-  return `${ns}|${es}`;
-}
-function loadRelPositions(sig) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(REL_POS_KEY));
-    if (raw && raw.sig === sig && raw.pos) return raw.pos;
-  } catch (e) { /* fall through */ }
-  return {};
-}
-function saveRelPositions(sig, state) {
-  try {
-    const pos = Object.assign(loadRelPositions(sig), state);
-    localStorage.setItem(REL_POS_KEY, JSON.stringify({ sig, pos }));
-  } catch (e) { /* storage unavailable — ignore */ }
-}
+// The Relationships map is fully auto-laid-out — the user never drags boxes, so
+// there are no per-browser saved positions to persist. Every render places nodes
+// purely from the layered layout (see keep/relmap.js layeredLayout).
 
 // Persist the drag-reordered order of the entity Cards grid (per browser), as an
 // array of entity ids. Empty/absent → fall back to the default (name) order.
@@ -1074,21 +1052,11 @@ function relationshipMap() {
   const { nodes, edges, W, H } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  // Restore a saved layout only if it belongs to this exact graph; if the entities
-  // or links changed, `saved` is empty and the fresh auto-layout is used, so the
-  // map reorganizes itself after every change.
-  const sig = relSignature(nodes, edges);
-  const saved = loadRelPositions(sig);
-  nodes.forEach((n) => {
-    if (saved[n.id]) {
-      n.x = clamp(saved[n.id].x, 0, W - NODE_W);
-      n.cy = clamp(saved[n.id].cy, NODE_H / 2, H - NODE_H / 2);
-    }
-  });
-  const state = {};
-  nodes.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
-  const center = (id) => ({ x: state[id].x + NODE_W / 2, y: state[id].cy });
+  // Every node sits at its computed layered-layout position — no dragging, no
+  // persistence, so the map is always the clean auto-layout.
+  const pos = {};
+  nodes.forEach((n) => { pos[n.id] = { x: n.x, cy: n.cy }; });
+  const center = (id) => ({ x: pos[id].x + NODE_W / 2, y: pos[id].cy });
 
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
@@ -1126,7 +1094,11 @@ function relationshipMap() {
       // from the owner (er.from) and the arrowhead lands on what it owns (er.to).
       const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
       const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
-      er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
+      // Vertical S-curve between the two trimmed border points: control points sit
+      // at the midpoint height, so a top-down ownership edge bows smoothly (and the
+      // arrowhead meets the owned box vertically). Adapts to any dragged position.
+      const my0 = (s0.y + e0.y) / 2;
+      er.path.setAttribute("d", `M ${s0.x} ${s0.y} C ${s0.x} ${my0}, ${e0.x} ${my0}, ${e0.x} ${e0.y}`);
       if (er.lrect) {                          // centre the role label on the line
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         const lw = (er.role.length * 6.1) + 16;
@@ -1205,38 +1177,12 @@ function relationshipMap() {
       g.appendChild(barG);
     }
 
-    // Pointer-drag (mouse + touch): move the node, edges follow. A press with no
-    // real movement counts as a tap → open (for real entities).
-    let dragging = false, moved = false, sx = 0, sy = 0, bx = 0, by = 0, pid = null;
-    g.addEventListener("pointerdown", (ev) => {
-      dragging = true; moved = false; pid = ev.pointerId;
-      sx = ev.clientX; sy = ev.clientY; bx = state[n.id].x; by = state[n.id].cy;
-      try { g.setPointerCapture(pid); } catch (e) { /* ignore */ }
-      ev.stopPropagation();                    // don't also start a background pan
-      ev.preventDefault();
-    });
-    g.addEventListener("pointermove", (ev) => {
-      if (!dragging) return;
-      const rect = svg.getBoundingClientRect();
-      const scale = rect.width ? W / rect.width : 1;
-      const dxc = ev.clientX - sx, dyc = ev.clientY - sy;
-      if (Math.abs(dxc) + Math.abs(dyc) > 4) moved = true;
-      const nx = clamp(bx + dxc * scale, 0, W - NODE_W);
-      const ny = clamp(by + dyc * scale, NODE_H / 2, H - NODE_H / 2);
-      state[n.id] = { x: nx, cy: ny };
-      g.setAttribute("transform", `translate(${nx - n.x} ${ny - n.cy})`);
-      updateEdges();
-    });
-    const end = () => {
-      if (!dragging) return;
-      dragging = false;
-      try { g.releasePointerCapture(pid); } catch (e) { /* ignore */ }
-      if (moved) saveRelPositions(sig, state);     // remember the new layout for this graph
-      else if (interactive) location.hash = n.href; // a tap → open
-    };
-    g.addEventListener("pointerup", end);
-    g.addEventListener("pointercancel", end);
-    if (interactive) g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); location.hash = n.href; } });
+    // Tap / click (or Enter/Space) opens an entity you manage. No dragging — node
+    // positions belong to the auto-layout, not the user.
+    if (interactive) {
+      g.addEventListener("click", () => { location.hash = n.href; });
+      g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); location.hash = n.href; } });
+    }
 
     svg.appendChild(g);
   });
@@ -1473,7 +1419,7 @@ export function renderKeepEntities() {
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag a node to rearrange, or drag the background to pan; tap an entity you manage to open it." }),
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag to pan when the map is wider than the screen; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }

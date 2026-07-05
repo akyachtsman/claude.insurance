@@ -68,8 +68,7 @@ body.in-keep { background: var(--color-bg); }
 .k-relsvg { width: 100%; height: auto; display: block; }
 .k-relmap--pan { cursor: grab; }
 .k-relmap--pan.is-grabbing { cursor: grabbing; }
-.k-relnode { cursor: grab; touch-action: none; }
-.k-relnode:active { cursor: grabbing; }
+.k-relnode--link { cursor: pointer; }
 .k-relnode--link:hover > rect, .k-relnode--link:focus-visible > rect { stroke: var(--color-accent); stroke-width: 2.5; }
 .k-relnode--link:focus { outline: none; }
 .k-relcaption { text-align: center; font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 6px; }
