@@ -1018,19 +1018,19 @@ function setupRelViewport(wrap, svg, W, H) {
   if (typeof ResizeObserver !== "undefined") {
     const ro = new ResizeObserver(() => {
       if (!wrap.isConnected) { if (fitted) ro.disconnect(); return; }
-      if (!fitted) fit();                                 // first real measurement (pre-mount size is 0)
-      else { clampPan(wrap.clientWidth || 0, wrap.clientHeight || 0); applyT(); }
+      fit();                                              // recompute fit scale + re-centre on every resize
     });
     ro.observe(wrap);
   }
   fit();
 
-  // Drag-to-pan (mouse + touch). A press with no real movement on a node opens it.
-  let down = false, moved = false, sx = 0, sy = 0, otx = 0, oty = 0, hitHref = null;
+  // Drag-to-pan (mouse + touch). Opening a node is a genuine `click` (below), so it
+  // also works for screen-reader activation and click-dispatching tests; a click
+  // that merely concludes a pan is ignored via the `moved` flag.
+  let down = false, moved = false, sx = 0, sy = 0, otx = 0, oty = 0, pressNode = null;
   wrap.addEventListener("pointerdown", (ev) => {
     down = true; moved = false; sx = ev.clientX; sy = ev.clientY; otx = tx; oty = ty;
-    const node = ev.target.closest ? ev.target.closest(".k-relnode--link") : null;
-    hitHref = node ? node.getAttribute("data-href") : null;
+    pressNode = ev.target.closest ? ev.target.closest(".k-relnode--link") : null;
     wrap.classList.add("is-grabbing");
     try { wrap.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
   });
@@ -1042,13 +1042,19 @@ function setupRelViewport(wrap, svg, W, H) {
     clampPan(wrap.clientWidth || 0, wrap.clientHeight || 0); applyT();
     ev.preventDefault();
   });
-  const end = () => {
-    if (!down) return;
-    down = false; wrap.classList.remove("is-grabbing");
-    if (!moved && hitHref) location.hash = hitHref;       // a tap → open
-  };
+  const end = () => { down = false; wrap.classList.remove("is-grabbing"); };
   wrap.addEventListener("pointerup", end);
-  wrap.addEventListener("pointercancel", () => { down = false; wrap.classList.remove("is-grabbing"); });
+  wrap.addEventListener("pointercancel", end);
+  // Navigate on a real click (not the tail of a pan). Pointer capture can retarget
+  // the click to the wrapper, so fall back to the node the press started on; a
+  // synthesized/AT click (no press) hits the node directly via ev.target. Delegated
+  // so it also covers screen-reader activation and click-dispatching tests.
+  wrap.addEventListener("click", (ev) => {
+    if (moved) return;
+    const node = (ev.target.closest && ev.target.closest(".k-relnode--link")) || pressNode;
+    const href = node && node.getAttribute("data-href");
+    if (href) location.hash = href;
+  });
 }
 
 function relationshipMap() {
