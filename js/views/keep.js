@@ -23,6 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
+import { capTablesByEntity, layeredLayout, fitPlan } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -972,6 +973,11 @@ const REL_STYLE = {
   np: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
 };
+// Owner-type colours for ownership edges and cap-table segments — the project's
+// original palette (blue = people, red = business, amber = trust, green =
+// nonprofit), so a colour on the map always reads as an entity type, not a
+// per-owner rainbow. Matches the accent/danger/warn/ok tokens in tokens.css.
+const REL_TYPE_COLOR = { me: "#2F6AF6", person: "#6E9BF5", biz: "#C42B30", trust: "#B5660A", np: "#0E8E66" };
 // DB entity node → REL_STYLE key. Personal renders as the gradient "me" node;
 // nonprofit businesses (green) split from for-profit businesses (red) by subtype.
 function relStyleKey(node) {
@@ -980,31 +986,81 @@ function relStyleKey(node) {
   if (node.kind === "trust") return "trust";
   return "person";
 }
-// Column-based auto-layout: people col 0, trusts col 1, businesses col 2.
-const REL_COL = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
-const REL_X = [30, 390, 740];
-// Node box height + the minimum breathing room to keep between stacked boxes.
-const REL_NODE_H = 92, REL_VGAP = 30, REL_PAD = 70, REL_MIN_H = 440;
-// Lay the columns out and, crucially, size the canvas to the busiest column so
-// boxes never pack tighter than one node height + gap — the map grows taller as
-// more entities are added instead of muddling them together.
+// Node geometry and layout spacing. The map lays out top-down by ownership depth
+// (owners above what they own) — see keep/relmap.js layeredLayout — and sizes the
+// canvas to the busiest row and the depth of the deepest chain, so boxes never
+// pack tighter than one node + gap.
+const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 46, REL_PAD = 34;
+// Below this on-screen box width the map stops shrinking and pans instead.
+const REL_MIN_NODE_PX = 150;
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
-  const cols = [[], [], []];
-  nodes.forEach((n) => cols[REL_COL[n.sk]].push(n));
-  const maxK = Math.max(1, cols[0].length, cols[1].length, cols[2].length);
-  const H = Math.max(REL_MIN_H, 2 * REL_PAD + maxK * (REL_NODE_H + REL_VGAP));
-  cols.forEach((list, c) => {
-    const k = list.length || 1;
-    list.forEach((n, i) => { n.x = REL_X[c]; n.cy = Math.round(REL_PAD + (i + 0.5) * ((H - 2 * REL_PAD) / k)); });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const { order, rows } = layeredLayout(nodes, data.edges);
+  const maxCols = Math.max(1, ...order.map((r) => rows[r].length));
+  const W = REL_PAD * 2 + maxCols * REL_NODE_W + (maxCols - 1) * REL_HGAP;
+  const H = REL_PAD * 2 + order.length * REL_NODE_H + Math.max(0, order.length - 1) * REL_VGAP;
+  order.forEach((r, ri) => {
+    const ids = rows[r];
+    const rowW = ids.length * REL_NODE_W + (ids.length - 1) * REL_HGAP;
+    const x0 = (W - rowW) / 2;
+    ids.forEach((id, i) => {
+      const n = byId.get(id);
+      n.x = Math.round(x0 + i * (REL_NODE_W + REL_HGAP));
+      n.cy = Math.round(REL_PAD + ri * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
+    });
   });
-  return { nodes, edges: data.edges, H };
+  return { nodes, edges: data.edges, W, H };
+}
+
+// Fit-to-width, then pan. The SVG scales to the container until a box would drop
+// below REL_MIN_NODE_PX; past that it holds size and the map pans (drag on
+// desktop; native touch-scroll on iPad). Re-runs on container resize.
+function fitRelMap(wrap, svg, W) {
+  const apply = () => {
+    const plan = fitPlan({ contentW: W, containerW: wrap.clientWidth || 0, nodeW: REL_NODE_W, minNodePx: REL_MIN_NODE_PX });
+    if (plan.mode === "pan") {
+      svg.style.width = `${plan.renderW}px`;
+      svg.style.maxWidth = "none";
+      wrap.classList.add("k-relmap--pan");
+    } else {
+      svg.style.width = "";                 // fall back to the CSS width:100%
+      svg.style.maxWidth = `${W}px`;
+      wrap.classList.remove("k-relmap--pan");
+    }
+  };
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(apply).observe(wrap);
+  apply();
+}
+
+// Drag-to-pan the whole canvas in unison (desktop mouse). Touch uses the
+// container's native horizontal scroll; a press that lands on a node is left to
+// that node's own drag handler.
+function enableRelPan(wrap) {
+  let panning = false, sx = 0, sy = 0, sl = 0, st = 0;
+  wrap.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "touch") return;
+    if (ev.target.closest && ev.target.closest(".k-relnode")) return;
+    panning = true; sx = ev.clientX; sy = ev.clientY; sl = wrap.scrollLeft; st = wrap.scrollTop;
+    wrap.classList.add("is-grabbing");
+  });
+  wrap.addEventListener("pointermove", (ev) => {
+    if (!panning) return;
+    wrap.scrollLeft = sl - (ev.clientX - sx);
+    wrap.scrollTop = st - (ev.clientY - sy);
+    ev.preventDefault();
+  });
+  const end = () => { panning = false; wrap.classList.remove("is-grabbing"); };
+  wrap.addEventListener("pointerup", end);
+  wrap.addEventListener("pointerleave", end);
 }
 
 function relationshipMap() {
-  const W = 970, NODE_W = 200, NODE_H = 92, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
-  const { nodes, edges, H } = relLayout();
+  const NODE_W = REL_NODE_W, NODE_H = REL_NODE_H, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
+  const { nodes, edges, W, H } = relLayout();
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const caps = capTablesByEntity(edges);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   // Restore a saved layout only if it belongs to this exact graph; if the entities
   // or links changed, `saved` is empty and the fresh auto-layout is used, so the
@@ -1021,31 +1077,35 @@ function relationshipMap() {
   nodes.forEach((n) => { state[n.id] = { x: n.x, cy: n.cy }; });
   const center = (id) => ({ x: state[id].x + NODE_W / 2, y: state[id].cy });
 
-  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Relationship map of your entities", class: "k-relsvg" });
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
       s("stop", { offset: "0", "stop-color": "#6F9BFF" }), s("stop", { offset: "1", "stop-color": "#2F6AF6" }),
     ]),
     // Arrowhead pointing from an owner to the entity it owns.
     s("marker", { id: "rel-arrow", viewBox: "0 0 10 10", refX: "8.5", refY: "5", markerWidth: "9", markerHeight: "9", orient: "auto", markerUnits: "userSpaceOnUse" }, [
-      s("path", { d: "M0,0 L10,5 L0,10 L2.5,5 Z", fill: "#8f7fd6" }),
+      s("path", { d: "M0,0 L10,5 L0,10 L2.5,5 Z", fill: "#b9c4dd" }),
     ]),
   ]));
 
-  // Edge paths first (drawn under the nodes); labels are appended after the nodes
-  // so they stay readable on top. Keep refs to reposition during drag.
+  // Edges under the nodes. A stake edge is tinted with its owner's type colour
+  // (matching that owner's segment in the owned entity's cap-table bar) and carries
+  // no label — the percentage lives on the bar. A control-only link (Trustee, no
+  // stake) is a dashed grey line labelled with its role.
   const edgeRefs = edges.map((e) => {
-    // Tag the edge at the owner end with the stake percentage (e.g. "40%") — a
-    // role word ("Trustee") when there's no percentage — instead of a wordy pill
-    // stranded at the crossed-over midpoint.
-    const tag = e.stake || e.role || "";
-    const path = s("path", { fill: "none", stroke: "#c3b2f0", "stroke-width": "2.5", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)" });
+    const stake = parsePct(e.stake) != null;
+    const owner = byId.get(e.from);
+    const color = stake ? (REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#c3b2f0") : "#c7d0e4";
+    const path = s("path", { fill: "none", stroke: color, "stroke-width": stake ? "2.5" : "2", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: stake ? "0.85" : "0.7", "stroke-dasharray": stake ? "" : "1 6" });
     svg.appendChild(path);
-    const lrect = s("rect", { rx: 11, height: 22, fill: "#ffffff", stroke: "#E3EBFA" });
-    const ltext = svgText(tag, { "text-anchor": "middle", "font-size": "11.5", "font-weight": "800", fill: "#55607F", "font-family": FS });
-    return { ...e, tag, path, lrect, ltext };
+    let lrect = null, ltext = null;
+    if (!stake && e.role) {
+      lrect = s("rect", { rx: 10, height: 20, fill: "#ffffff", stroke: "#E3EBFA" });
+      ltext = svgText(e.role, { "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: "#7A85A0", "font-family": FS });
+    }
+    return { ...e, stake, path, lrect, ltext };
   });
-  const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 5;
+  const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 6;
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
       const a = center(er.from), b = center(er.to);
@@ -1054,55 +1114,77 @@ function relationshipMap() {
       const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
       const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
       er.path.setAttribute("d", `M ${s0.x} ${s0.y} L ${e0.x} ${e0.y}`);
-      // Place the tag INSIDE the owner box, near the side the arrow leaves from.
-      // Siblings (several stakes from one owner) are spread vertically by amplifying
-      // each edge's own up/down direction, then clamped to the box — so they read
-      // inside their owner instead of clumping at one exit point or crowding the
-      // congested middle.
-      const bp = nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y);
-      const side = Math.sign(bp.x - a.x) || 1;
-      const lx = a.x + side * (HW - 26);
-      const ly = Math.max(a.y - (HH - 15), Math.min(a.y + (HH - 15), a.y + (bp.y - a.y) * 2.6));
-      const lp = { x: lx, y: ly };
-      const lw = (er.tag.length * 6.6) + 16;
-      er.lrect.setAttribute("x", lp.x - lw / 2); er.lrect.setAttribute("y", lp.y - 11); er.lrect.setAttribute("width", lw);
-      er.ltext.setAttribute("x", lp.x); er.ltext.setAttribute("y", lp.y + 4);
+      if (er.lrect) {                          // centre the role label on the line
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const lw = (er.role.length * 6.1) + 16;
+        er.lrect.setAttribute("x", mx - lw / 2); er.lrect.setAttribute("y", my - 10); er.lrect.setAttribute("width", lw);
+        er.ltext.setAttribute("x", mx); er.ltext.setAttribute("y", my + 4);
+      }
     });
   };
 
   nodes.forEach((n) => {
     const o = REL_STYLE[n.sk];
+    const top = n.cy - NODE_H / 2;
     const interactive = Boolean(n.href);
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}` }
       : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample)` });
-    g.appendChild(s("rect", { x: n.x, y: n.cy - NODE_H / 2, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
-    const ax = n.x + 34, avy = n.cy - 12;
-    g.appendChild(s("circle", { cx: ax, cy: avy, r: 18, fill: o.avFill }));
+    g.appendChild(s("rect", { x: n.x, y: top, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
+    const ax = n.x + 34, avy = top + 30;
+    g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
     g.appendChild(svgText(n.initials, { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD }));
-    g.appendChild(svgText(n.name, { x: ax + 28, y: n.cy - 16, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
-    g.appendChild(svgText(n.sub, { x: ax + 28, y: n.cy - 1, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
+    g.appendChild(svgText(n.sub, { x: ax + 28, y: top + 41, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
-    // Little circles for the assets this entity owns — initials inside, full name
-    // on hover. Overflow collapses to a "+N" chip.
+    // Asset chips: little circles for what this entity holds — initials inside,
+    // full name on hover. Overflow collapses to a "+N" chip.
     const owned = n.assetNames || [];
     if (owned.length) {
       const dark = n.sk === "me";
       const cFill = dark ? "rgba(255,255,255,.22)" : "#EEF2FB";
       const cText = dark ? "#ffffff" : "#3A4A6B";
       const cStroke = dark ? "rgba(255,255,255,.4)" : "#DCE4F4";
-      const MAX = 5, shown = owned.length > MAX ? 4 : owned.length;
-      let cx = n.x + 22;
+      const MAX = 6, shown = owned.length > MAX ? 5 : owned.length;
+      let cx = n.x + 24;
       const chip = (label, tip) => {
         const grp = s("g", {});
-        grp.appendChild(s("circle", { cx, cy: n.cy + 22, r: 10, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
-        grp.appendChild(svgText(label, { x: cx, y: n.cy + 25, "text-anchor": "middle", "font-size": "8.5", "font-weight": "800", fill: cText, "font-family": FS }));
+        grp.appendChild(s("circle", { cx, cy: top + 66, r: 9, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
+        grp.appendChild(svgText(label, { x: cx, y: top + 69, "text-anchor": "middle", "font-size": "8", "font-weight": "800", fill: cText, "font-family": FS }));
         if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
         g.appendChild(grp);
-        cx += 22;
+        cx += 21;
       };
       for (let i = 0; i < shown; i++) chip(assetInitials(owned[i]), owned[i]);
-      if (owned.length > MAX) chip("+" + (owned.length - 4), owned.slice(4).join(", "));
+      if (owned.length > MAX) chip("+" + (owned.length - 5), owned.slice(5).join(", "));
+    }
+
+    // Cap-table bar: the entity's ownership split as one bar summing to 100%, each
+    // segment coloured by its owner's type and labelled with the owner's initials.
+    // Hairline separators keep same-colour neighbours distinct; a shortfall shows
+    // as the faint unfilled remainder.
+    const cap = caps[n.id];
+    if (cap && cap.length) {
+      const total = cap.reduce((t, c) => t + c.pct, 0);
+      const barX = n.x + 16, barW = NODE_W - 32, barY = top + NODE_H - 26, barH = 16;
+      const clipId = "relcap-" + n.id.replace(/[^a-z0-9]/gi, "");
+      g.appendChild(s("defs", {}, [s("clipPath", { id: clipId }, [s("rect", { x: barX, y: barY, width: barW, height: barH, rx: 8 })])]));
+      const barG = s("g", { "clip-path": `url(#${clipId})` });
+      barG.appendChild(s("rect", { x: barX, y: barY, width: barW, height: barH, fill: "#EEF2FB" }));
+      let cx = barX;
+      [...cap].sort((a, b) => b.pct - a.pct).forEach((c, i) => {
+        const w = barW * (c.pct / Math.max(total, 100));
+        const owner = byId.get(c.ownerId);
+        if (i > 0) barG.appendChild(s("rect", { x: cx - 0.75, y: barY, width: 1.5, height: barH, fill: "#ffffff" }));
+        const seg = s("rect", { x: cx, y: barY, width: w, height: barH, fill: REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#9aa5bd" });
+        const ti = s("title", {}); ti.textContent = `${owner ? owner.name : "Owner"} — ${c.pct}%`; seg.appendChild(ti);
+        barG.appendChild(seg);
+        const lbl = `${owner ? owner.initials : "?"} ${c.pct}%`;
+        if (w > 46) barG.appendChild(svgText(lbl, { x: cx + w / 2, y: barY + 11, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        else if (w > 15) barG.appendChild(svgText(`${c.pct}`, { x: cx + w / 2, y: barY + 11, "text-anchor": "middle", "font-size": "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        cx += w;
+      });
+      g.appendChild(barG);
     }
 
     // Pointer-drag (mouse + touch): move the node, edges follow. A press with no
@@ -1112,6 +1194,7 @@ function relationshipMap() {
       dragging = true; moved = false; pid = ev.pointerId;
       sx = ev.clientX; sy = ev.clientY; bx = state[n.id].x; by = state[n.id].cy;
       try { g.setPointerCapture(pid); } catch (e) { /* ignore */ }
+      ev.stopPropagation();                    // don't also start a background pan
       ev.preventDefault();
     });
     g.addEventListener("pointermove", (ev) => {
@@ -1140,11 +1223,14 @@ function relationshipMap() {
     svg.appendChild(g);
   });
 
-  // Labels on top of the nodes, then set initial geometry.
-  edgeRefs.forEach((er) => { svg.appendChild(er.lrect); svg.appendChild(er.ltext); });
+  // Role labels on top of the nodes, then set initial geometry.
+  edgeRefs.forEach((er) => { if (er.lrect) { svg.appendChild(er.lrect); svg.appendChild(er.ltext); } });
   updateEdges();
 
-  return el("div", { class: "k-relmap" }, [svg]);
+  const wrap = el("div", { class: "k-relmap" }, [svg]);
+  enableRelPan(wrap);
+  fitRelMap(wrap, svg, W);
+  return wrap;
 }
 
 // Total insured/estimated value across an entity's assets.
@@ -1369,7 +1455,7 @@ export function renderKeepEntities() {
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns. Drag nodes to rearrange; tap an entity you manage to open it." }),
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split. Drag a node to rearrange, or drag the background to pan; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }
