@@ -62,12 +62,11 @@ body.in-keep { background: var(--color-bg); }
 .k-btn-row { margin-top: var(--space-6); }
 
 /* ── Entities relationship map ──────────────────────────────────────────────── */
-.k-relmap { background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-5); margin: 10px 0 var(--space-6); overflow-x: auto; overscroll-behavior-x: contain; }
-/* Fit-to-width by default; JS holds the box size and pans once the graph is wider
-   than the screen (see fitRelMap / enableRelPan in js/views/keep.js). */
-.k-relsvg { width: 100%; height: auto; display: block; }
-.k-relmap--pan { cursor: grab; }
-.k-relmap--pan.is-grabbing { cursor: grabbing; }
+/* The chart is a fixed viewport you pan in 2D: the SVG is translated + scaled by
+   JS (setupRelViewport in js/views/keep.js), so grab-and-drag moves the whole map. */
+.k-relmap { position: relative; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); margin: 10px 0 var(--space-6); overflow: hidden; height: clamp(420px, 70vh, 680px); cursor: grab; touch-action: none; }
+.k-relmap.is-grabbing { cursor: grabbing; }
+.k-relsvg { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; }
 .k-relnode--link { cursor: pointer; }
 .k-relnode--link:hover > rect, .k-relnode--link:focus-visible > rect { stroke: var(--color-accent); stroke-width: 2.5; }
 .k-relnode--link:focus { outline: none; }
