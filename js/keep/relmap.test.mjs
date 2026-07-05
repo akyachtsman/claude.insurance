@@ -83,3 +83,25 @@ test("fitPlan is safe with no container width", () => {
   assert.equal(plan.mode, "fit");
   assert.equal(plan.renderW, 700);
 });
+
+test("fitPlan is safe with zero content width", () => {
+  const plan = fitPlan({ contentW: 0, containerW: 900, nodeW: 200, minNodePx: 150 });
+  assert.equal(plan.mode, "fit");
+});
+
+test("layeredLayout handles an empty graph", () => {
+  const { order, rows } = layeredLayout([], []);
+  assert.deepEqual(order, []);
+  assert.deepEqual(rows, {});
+});
+
+test("layeredLayout handles a single unlinked node", () => {
+  const { order, rows, layerOf } = layeredLayout([{ id: "me" }], []);
+  assert.deepEqual(order, [0]);
+  assert.deepEqual(rows, { 0: ["me"] });
+  assert.equal(layerOf.me, 0);
+});
+
+test("capTablesByEntity returns an empty object for no edges", () => {
+  assert.deepEqual(capTablesByEntity([]), {});
+});

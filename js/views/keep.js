@@ -963,9 +963,10 @@ function movePointToward(p, q, d) {
 }
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
-// People (you + related individuals) sit on the left, trusts in the middle,
-// businesses on the right; each edge is labeled with the role (and stake). Nodes
-// for entities you manage are keyboard-focusable and open their detail.
+// Owners sit above what they own (top-down layered layout — see keep/relmap.js
+// layeredLayout); each owned entity shows its ownership split as a cap-table bar,
+// and control-only links (a trustee with no stake) are dashed and role-labelled.
+// Nodes for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
   person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
@@ -1018,7 +1019,9 @@ function relLayout() {
 // below REL_MIN_NODE_PX; past that it holds size and the map pans (drag on
 // desktop; native touch-scroll on iPad). Re-runs on container resize.
 function fitRelMap(wrap, svg, W) {
+  let ro = null;
   const apply = () => {
+    if (ro && !wrap.isConnected) { ro.disconnect(); return; }   // stop observing a torn-down map
     const plan = fitPlan({ contentW: W, containerW: wrap.clientWidth || 0, nodeW: REL_NODE_W, minNodePx: REL_MIN_NODE_PX });
     if (plan.mode === "pan") {
       svg.style.width = `${plan.renderW}px`;
@@ -1030,7 +1033,7 @@ function fitRelMap(wrap, svg, W) {
       wrap.classList.remove("k-relmap--pan");
     }
   };
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(apply).observe(wrap);
+  if (typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(apply); ro.observe(wrap); }
   apply();
 }
 
@@ -1053,6 +1056,7 @@ function enableRelPan(wrap) {
   });
   const end = () => { panning = false; wrap.classList.remove("is-grabbing"); };
   wrap.addEventListener("pointerup", end);
+  wrap.addEventListener("pointercancel", end);
   wrap.addEventListener("pointerleave", end);
 }
 
@@ -1127,9 +1131,15 @@ function relationshipMap() {
     const o = REL_STYLE[n.sk];
     const top = n.cy - NODE_H / 2;
     const interactive = Boolean(n.href);
+    const cap = caps[n.id];
+    // Speak the ownership split to assistive tech — the bar's percentages are
+    // otherwise only in hover <title>s, which never fire on touch (iPad Safari).
+    const ownDesc = cap && cap.length
+      ? " Owned by " + cap.map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "an owner"} ${c.pct}%`; }).join(", ") + "."
+      : "";
     const g = s("g", interactive
-      ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}` }
-      : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample)` });
+      ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}.${ownDesc}` }
+      : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample).${ownDesc}` });
     g.appendChild(s("rect", { x: n.x, y: top, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
     const ax = n.x + 34, avy = top + 30;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
@@ -1163,7 +1173,6 @@ function relationshipMap() {
     // segment coloured by its owner's type and labelled with the owner's initials.
     // Hairline separators keep same-colour neighbours distinct; a shortfall shows
     // as the faint unfilled remainder.
-    const cap = caps[n.id];
     if (cap && cap.length) {
       const total = cap.reduce((t, c) => t + c.pct, 0);
       const barX = n.x + 16, barW = NODE_W - 32, barY = top + NODE_H - 26, barH = 16;
@@ -1455,7 +1464,7 @@ export function renderKeepEntities() {
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split. Drag a node to rearrange, or drag the background to pan; tap an entity you manage to open it." }),
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag a node to rearrange, or drag the background to pan; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }
