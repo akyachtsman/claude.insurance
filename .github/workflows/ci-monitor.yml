@@ -8,8 +8,10 @@ name: CI Monitor
 #
 # Drop-in: the watched names below match the QA workflows shipped in the same
 # template set (qa.yml -> 'QA — Static + UI Tests'; qa-live.yml -> 'QA — UI
-# Tests (live)', the authoritative live gate), so copying them verbatim needs
-# no edits. Only change this list if you rename those workflows' `name:`.
+# Tests (live)', the authoritative live gate; qa-response.yml -> 'QA —
+# Event-Driven Response', optional — the entry is inert if you didn't copy it),
+# so copying them verbatim needs no edits. Only change this list if you rename
+# those workflows' `name:`.
 # Listing watched workflows by name also prevents self-recursion (CI Monitor /
 # Codex Monitor are not in the list).
 on:
@@ -17,6 +19,7 @@ on:
     workflows:
       - 'QA — Static + UI Tests'
       - 'QA — UI Tests (live)'
+      - 'QA — Event-Driven Response'
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -65,7 +68,7 @@ jobs:
             runs=$(gh api "repos/$REPO/actions/runs?per_page=50&status=completed" \
               --jq "[.workflow_runs[]
                      | select(.conclusion==\"failure\" or .conclusion==\"timed_out\" or .conclusion==\"startup_failure\")
-                     | select(.name != \"CI Monitor\" and .name != \"Codex Monitor\")
+                     | select(.name != \"CI Monitor\" and .name != \"Codex Monitor\" and .name != \"Pages Monitor\")
                      | select(.updated_at >= \"$since\")
                      | {name, id, sha: .head_sha[0:7], branch: .head_branch, url: .html_url}]")
             count=$(echo "$runs" | jq 'length')
