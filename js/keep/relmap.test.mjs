@@ -1,7 +1,7 @@
 // Tests for keep/relmap.js — run: node --test js/keep/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, layeredLayout, fitPlan, typeBands } from "./relmap.js";
+import { capTablesByEntity, layeredLayout, fitPlan, typeBands, orchestrate } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -62,6 +62,36 @@ test("layeredLayout tolerates a cycle without infinite recursion", () => {
     [{ from: "a", to: "b", stake: "50%" }, { from: "b", to: "a", stake: "50%" }],
   );
   assert.equal(cyc.order.length >= 1, true);
+});
+
+test("orchestrate inserts a dummy waypoint for an edge that spans a layer", () => {
+  // u(0) -> v(1) -> w(2), plus a long edge u -> w that skips layer 1
+  const ns = [{ id: "u" }, { id: "v" }, { id: "w" }];
+  const es = [
+    { from: "u", to: "v", stake: "100%" },
+    { from: "v", to: "w", stake: "100%" },
+    { from: "u", to: "w", stake: "50%" },
+  ];
+  const { edgePath, dummy, layerOf } = orchestrate(ns, es);
+  assert.equal(layerOf.w, 2);
+  const path = edgePath["u>w"];
+  assert.equal(Array.isArray(path) && path.length, 1);         // one dummy in the middle layer
+  assert.equal(dummy[path[0]], 1);                             // sits in layer 1
+});
+
+test("orchestrate leaves adjacent-layer edges without dummies", () => {
+  const { edgePath, dummy } = orchestrate(
+    [{ id: "a" }, { id: "b" }],
+    [{ from: "a", to: "b", stake: "100%" }],
+  );
+  assert.deepEqual(edgePath, {});
+  assert.deepEqual(dummy, {});
+});
+
+test("orchestrate is deterministic", () => {
+  const ns = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  const es = [{ from: "a", to: "c", stake: "50%" }, { from: "b", to: "c", stake: "50%" }, { from: "c", to: "d", stake: "100%" }];
+  assert.deepEqual(orchestrate(ns, es).rows, orchestrate(ns, es).rows);
 });
 
 test("fitPlan fits when boxes stay above the minimum", () => {

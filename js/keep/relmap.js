@@ -73,6 +73,92 @@ export function typeBands(nodes, bandOf) {
   return { order, rows };
 }
 
+// Orchestrated layered layout (Sugiyama-style) — the antidote to a crossing
+// "spaghetti" graph. On top of longest-path layering it (1) inserts dummy routing
+// nodes for every edge that spans more than one layer, so long edges bend through
+// the layers instead of cutting straight across; (2) minimizes crossings with
+// median-heuristic sweeps, keeping the best ordering seen; and (3) returns the
+// per-edge dummy chain so the renderer can route each long edge through its
+// waypoints. Cross-axis (x) placement is left to the caller, which owns pixels.
+// Returns { order, rows (real + dummy ids per layer, ordered), layerOf, dummy
+// (id -> layer), edgePath (from>to -> [dummyId...] ordered), up, down }.
+export function orchestrate(nodes, edges) {
+  const ids = new Set(nodes.map((n) => n.id));
+  const E = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+  const incoming = {};
+  nodes.forEach((n) => { incoming[n.id] = []; });
+  E.forEach((e) => incoming[e.to].push(e.from));
+  const layer = {};
+  const visit = (id, seen) => {
+    if (layer[id] != null) return layer[id];
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    let m = 0;
+    for (const p of incoming[id]) m = Math.max(m, visit(p, seen) + 1);
+    return (layer[id] = m);
+  };
+  nodes.forEach((n) => visit(n.id, new Set()));
+
+  // Split long edges into unit-length segments through fresh dummy nodes.
+  const dummy = {}; let dc = 0;
+  const seg = []; const edgePath = {};
+  for (const e of E) {
+    let a = e.from, b = e.to, la = layer[a], lb = layer[b];
+    if (la === lb) { seg.push([a, b]); continue; }           // same layer (unusual)
+    if (la > lb) { const t = a; a = b; b = t; const tl = la; la = lb; lb = tl; }
+    if (lb - la === 1) { seg.push([a, b]); continue; }
+    let prev = a; const chain = [];
+    for (let L = la + 1; L < lb; L++) { const d = "Δ" + (dc++); dummy[d] = L; chain.push(d); seg.push([prev, d]); prev = d; }
+    seg.push([prev, b]);
+    edgePath[e.from + ">" + e.to] = layer[e.from] < layer[e.to] ? chain : chain.slice().reverse();
+  }
+
+  const rows = {};
+  nodes.forEach((n) => { (rows[layer[n.id]] = rows[layer[n.id]] || []).push(n.id); });
+  for (const d in dummy) (rows[dummy[d]] = rows[dummy[d]] || []).push(d);
+  const order = Object.keys(rows).map(Number).sort((a, b) => a - b);
+  const lyr = (id) => (dummy[id] != null ? dummy[id] : layer[id]);
+  const up = {}, down = {};
+  order.forEach((r) => rows[r].forEach((id) => { up[id] = []; down[id] = []; }));
+  seg.forEach(([a, b]) => { const t = lyr(a) < lyr(b) ? a : b, u = t === a ? b : a; down[t].push(u); up[u].push(t); });
+
+  const pos = {};
+  order.forEach((r) => rows[r].forEach((id, i) => { pos[id] = i; }));
+  const median = (arr) => {
+    if (!arr.length) return -1;
+    const q = arr.map((x) => pos[x]).sort((a, b) => a - b);
+    const m = q.length >> 1;
+    return q.length % 2 ? q[m] : (q[m - 1] + q[m]) / 2;
+  };
+  const crossings = () => {
+    let c = 0;
+    for (let r = 0; r < order.length - 1; r++) {
+      const es = [];
+      rows[order[r]].forEach((t) => down[t].forEach((b) => es.push([pos[t], pos[b]])));
+      for (let i = 0; i < es.length; i++) for (let j = i + 1; j < es.length; j++)
+        if ((es[i][0] - es[j][0]) * (es[i][1] - es[j][1]) < 0) c++;
+    }
+    return c;
+  };
+  const snapshot = () => order.reduce((o, r) => { o[r] = rows[r].slice(); return o; }, {});
+  let best = snapshot(), bestC = crossings();
+  for (let it = 0; it < 16; it++) {
+    const dn = it % 2 === 0;
+    const seq = dn ? order.slice(1) : order.slice(0, -1).reverse();
+    for (const r of seq) {
+      const key = dn ? up : down;
+      rows[r] = rows[r]
+        .map((id) => ({ id, m: median(key[id]) }))
+        .sort((x, y) => (x.m < 0 || y.m < 0 ? 0 : x.m - y.m) || (x.id < y.id ? -1 : 1))
+        .map((o) => o.id);
+      rows[r].forEach((id, i) => { pos[id] = i; });
+    }
+    const c = crossings();
+    if (c < bestC) { bestC = c; best = snapshot(); }
+  }
+  return { order, rows: best, layerOf: layer, dummy, edgePath, up, down };
+}
+
 // Fit-to-width vs. pan decision. If scaling the content to the container would
 // shrink a node below `minNodePx`, we stop shrinking: render at that floor (wider
 // than the container) and let the map pan. Otherwise it fits and scales to width.

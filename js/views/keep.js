@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, layeredLayout, typeBands } from "../keep/relmap.js";
+import { capTablesByEntity, typeBands, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -34,7 +34,7 @@ function sep() { return el("span", { text: "  ·  " }); }
 
 // The Relationships map is fully auto-laid-out — the user never drags boxes, so
 // there are no per-browser saved positions to persist. Every render places nodes
-// purely from the layered layout (see keep/relmap.js layeredLayout).
+// purely from the orchestrated layout (see keep/relmap.js orchestrate).
 
 // Persist the drag-reordered order of the entity Cards grid (per browser), as an
 // array of entity ids. Empty/absent → fall back to the default (name) order.
@@ -942,7 +942,7 @@ function movePointToward(p, q, d) {
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
 // Owners sit above what they own (top-down layered layout — see keep/relmap.js
-// layeredLayout); each owned entity shows its ownership split as a cap-table bar,
+// orchestrate); each owned entity shows its ownership split as a cap-table bar,
 // and control-only links (a trustee with no stake) are dashed and role-labelled.
 // Nodes for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
@@ -973,10 +973,11 @@ function relStyleKey(node) {
   return "person";
 }
 // Node geometry and layout spacing. The map lays out top-down by ownership depth
-// (owners above what they own) — see keep/relmap.js layeredLayout — and sizes the
+// (owners above what they own) — see keep/relmap.js orchestrate — and sizes the
 // canvas to the busiest row and the depth of the deepest chain, so boxes never
 // pack tighter than one node + gap.
 const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 46, REL_PAD = 34;
+const REL_DUMMY_W = 16;   // routing-waypoint slot width on the cross axis
 // Below this on-screen box width the map stops shrinking and pans instead.
 const REL_MIN_NODE_PX = 150;
 // Manual zoom bounds and per-click step (relative to the fit scale's natural 1×).
@@ -986,40 +987,80 @@ const REL_ZOOM_MIN = 0.3, REL_ZOOM_MAX = 2.4, REL_ZOOM_STEP = 1.25;
 // which axis is which — vertical stacks bands top-down, horizontal stacks them
 // left-to-right (spreading deep chains across the width). Trustee links are
 // dropped from the graph when that declutter toggle is off.
+// Cross-axis placement: start each row left-packed, then iterate every node toward
+// the average position of its neighbours while preserving row order and a minimum
+// separation — so nodes line up under their owners without overlapping.
+function alignCross(order, rows, up, down, sepOf) {
+  const c = {};
+  order.forEach((r) => { let acc = 0; rows[r].forEach((id, i) => { if (i > 0) acc += sepOf(rows[r][i - 1], id); c[id] = acc; }); });
+  const place = (ids) => {
+    const d = ids.map((id) => { const nb = [...(up[id] || []), ...(down[id] || [])]; return nb.length ? nb.reduce((s, q) => s + c[q], 0) / nb.length : c[id]; });
+    for (let i = 1; i < ids.length; i++) d[i] = Math.max(d[i], d[i - 1] + sepOf(ids[i - 1], ids[i]));       // no overlap
+    for (let i = ids.length - 2; i >= 0; i--) d[i] = Math.min(d[i], d[i + 1] - sepOf(ids[i], ids[i + 1]));  // pull toward centre
+    for (let i = 1; i < ids.length; i++) d[i] = Math.max(d[i], d[i - 1] + sepOf(ids[i - 1], ids[i]));       // re-assert feasibility
+    ids.forEach((id, i) => { c[id] = d[i]; });
+  };
+  for (let p = 0; p < 10; p++) { const seq = p % 2 ? order.slice().reverse() : order; seq.forEach((r) => place(rows[r])); }
+  return c;
+}
+// A smooth path through a list of points, curving along the band axis (down for
+// vertical, across for horizontal) so routed edges bow instead of zig-zagging.
+function relSpline(pts, horiz) {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i], q = pts[i + 1];
+    if (horiz) { const mx = (p.x + q.x) / 2; d += ` C ${mx} ${p.y}, ${mx} ${q.y}, ${q.x} ${q.y}`; }
+    else { const my = (p.y + q.y) / 2; d += ` C ${p.x} ${my}, ${q.x} ${my}, ${q.x} ${q.y}`; }
+  }
+  return d;
+}
+
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
   const edges = relView.trustees ? data.edges : data.edges.filter((e) => parsePct(e.stake) != null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const { order, rows } = relView.mode === "type"
-    ? typeBands(nodes, (n) => REL_BAND[n.sk] ?? 2)
-    : layeredLayout(nodes, edges);
-  const bands = order.length || 1;
-  const maxSlots = Math.max(1, ...order.map((b) => rows[b].length));
   const horiz = relView.orient === "horizontal";
-  const spanW = (k) => k * REL_NODE_W + (k - 1) * REL_HGAP;
-  const spanH = (k) => k * REL_NODE_H + (k - 1) * REL_VGAP;
-  const W = REL_PAD * 2 + (horiz ? spanW(bands) : spanW(maxSlots));
-  const H = REL_PAD * 2 + (horiz ? spanH(maxSlots) : spanH(bands));
-  order.forEach((b, bi) => {
-    const ids = rows[b];
-    if (horiz) {
-      const y0 = (H - spanH(ids.length)) / 2;
-      ids.forEach((id, i) => {
-        const n = byId.get(id);
-        n.x = Math.round(REL_PAD + bi * (REL_NODE_W + REL_HGAP));
-        n.cy = Math.round(y0 + i * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
-      });
-    } else {
-      const x0 = (W - spanW(ids.length)) / 2;
-      ids.forEach((id, i) => {
-        const n = byId.get(id);
-        n.x = Math.round(x0 + i * (REL_NODE_W + REL_HGAP));
-        n.cy = Math.round(REL_PAD + bi * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
-      });
-    }
-  });
-  return { nodes, edges, W, H };
+
+  // Ownership uses the orchestrated (crossing-minimized, waypoint-routed) layout;
+  // "by type" uses the simple categorical bands.
+  let order, rows, dummy = {}, edgePath = {}, up = {}, down = {};
+  if (relView.mode === "type") {
+    ({ order, rows } = typeBands(nodes, (n) => REL_BAND[n.sk] ?? 2));
+    order.forEach((b) => rows[b].forEach((id) => { up[id] = []; down[id] = []; }));
+  } else {
+    ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges));
+  }
+  const bandIndex = {};
+  order.forEach((b, bi) => rows[b].forEach((id) => { bandIndex[id] = bi; }));
+  const bands = order.length || 1;
+
+  const isDummy = (id) => dummy[id] != null;
+  const wOf = (id) => (isDummy(id) ? REL_DUMMY_W : (horiz ? REL_NODE_H : REL_NODE_W));
+  const sepOf = (a, b) => wOf(a) / 2 + wOf(b) / 2 + ((isDummy(a) || isDummy(b)) ? 16 : (horiz ? REL_VGAP : REL_HGAP));
+  const cross = alignCross(order, rows, up, down, sepOf);
+  const cvals = Object.values(cross);
+  const halfBand = (horiz ? REL_NODE_H : REL_NODE_W) / 2;
+  const off = REL_PAD + halfBand - (cvals.length ? Math.min(...cvals) : 0);   // left/top margin = PAD
+  const crossPx = (id) => cross[id] + off;
+  const crossMax = (cvals.length ? Math.max(...cvals) : 0) + off + halfBand + REL_PAD;
+
+  const bandSize = horiz ? REL_NODE_W : REL_NODE_H;
+  const bandGap = horiz ? REL_HGAP : REL_VGAP;
+  const bandCenter = (bi) => REL_PAD + bi * (bandSize + bandGap) + bandSize / 2;
+  const bandSpan = REL_PAD * 2 + bands * bandSize + (bands - 1) * bandGap;
+  const W = horiz ? bandSpan : crossMax;
+  const H = horiz ? crossMax : bandSpan;
+
+  const centerOf = (id) => horiz
+    ? { x: bandCenter(bandIndex[id]), y: crossPx(id) }
+    : { x: crossPx(id), y: bandCenter(bandIndex[id]) };
+  nodes.forEach((n) => { const c = centerOf(n.id); n.x = Math.round(c.x - REL_NODE_W / 2); n.cy = Math.round(c.y); });
+
+  const waypoints = {};
+  for (const key in edgePath) waypoints[key] = edgePath[key].map((d) => { const c = centerOf(d); return { x: Math.round(c.x), y: Math.round(c.y) }; });
+  return { nodes, edges, W, H, waypoints, horiz };
 }
 
 // The map is a fixed-size viewport you pan in 2D: the whole chart translates under
@@ -1101,7 +1142,7 @@ function setupRelViewport(wrap, svg, W, H) {
 
 function relationshipMap() {
   const NODE_W = REL_NODE_W, NODE_H = REL_NODE_H, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
-  const { nodes, edges, W, H } = relLayout();
+  const { nodes, edges, W, H, waypoints, horiz } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
   // Focus perspective: when an entity is chosen, highlight it plus its direct
@@ -1148,26 +1189,27 @@ function relationshipMap() {
       lrect = s("rect", Object.assign({ rx: 10, height: 20, fill: "#ffffff", stroke: "#E3EBFA" }, lop ? { opacity: lop } : {}));
       ltext = svgText(e.role, Object.assign({ "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: "#7A85A0", "font-family": FS }, lop ? { opacity: lop } : {}));
     }
-    return { ...e, stake, path, lrect, ltext };
+    return { ...e, stake, path, lrect, ltext, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
   const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 6;
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
       const a = center(er.from), b = center(er.to);
-      // Trim the line to each card's border, leaving a small gap — the edge runs
-      // from the owner (er.from) and the arrowhead lands on what it owns (er.to).
-      const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, b.x, b.y), b, GAP);
-      const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, a.x, a.y), a, GAP);
-      // Vertical S-curve between the two trimmed border points: control points sit
-      // at the midpoint height, so a top-down ownership edge bows smoothly (and the
-      // arrowhead meets the owned box vertically). Adapts to any dragged position.
-      const my0 = (s0.y + e0.y) / 2;
-      er.path.setAttribute("d", `M ${s0.x} ${s0.y} C ${s0.x} ${my0}, ${e0.x} ${my0}, ${e0.x} ${e0.y}`);
-      if (er.lrect) {                          // centre the role label on the line
-        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      // Route the edge from the owner (er.from), through any dummy waypoints, to the
+      // arrowhead on what it owns (er.to). Trim the first/last segment to the card
+      // borders and draw a smooth spline through the whole run so long edges bend
+      // through the layers instead of cutting across.
+      const first = er.wp.length ? er.wp[0] : b;
+      const last = er.wp.length ? er.wp[er.wp.length - 1] : a;
+      const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, first.x, first.y), first, GAP);
+      const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, last.x, last.y), last, GAP);
+      const pts = [s0, ...er.wp, e0];
+      er.path.setAttribute("d", relSpline(pts, horiz));
+      if (er.lrect) {                          // centre the role label on the run's midpoint
+        const mid = pts[Math.floor(pts.length / 2)] || { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const lw = (er.role.length * 6.1) + 16;
-        er.lrect.setAttribute("x", mx - lw / 2); er.lrect.setAttribute("y", my - 10); er.lrect.setAttribute("width", lw);
-        er.ltext.setAttribute("x", mx); er.ltext.setAttribute("y", my + 4);
+        er.lrect.setAttribute("x", mid.x - lw / 2); er.lrect.setAttribute("y", mid.y - 10); er.lrect.setAttribute("width", lw);
+        er.ltext.setAttribute("x", mid.x); er.ltext.setAttribute("y", mid.y + 4);
       }
     });
   };
