@@ -17,6 +17,18 @@ export function capTablesByEntity(edges) {
   return out;
 }
 
+// Control-only relationships per CONTROLLED entity: { entityId: [{ ownerId, role }] }
+// — one entry per link that carries a role but no numeric stake (a trustee, a
+// manager with no equity). These are the counterpart to capTablesByEntity: the role
+// is shown inside the controlled entity's box rather than as a label on the line.
+export function controlsByEntity(edges) {
+  const out = {};
+  for (const e of edges) {
+    if (parsePct(e.stake) == null && e.role) (out[e.to] = out[e.to] || []).push({ ownerId: e.from, role: e.role });
+  }
+  return out;
+}
+
 // Top-down layered layout. A node's layer is the longest ownership path from a
 // root (a node nothing points to) — so owners always sit above what they own and
 // chains read in order. Within each layer, a barycenter sweep orders nodes near
