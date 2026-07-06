@@ -1342,7 +1342,10 @@ function relationshipMap() {
     // as the faint unfilled remainder. Sits in the header, just under the arrow.
     if (cap && cap.length) {
       const total = cap.reduce((t, c) => t + c.pct, 0);
-      const barX = n.x + 16, barW = NODE_W - 32, barY = top + 10, barH = 16;
+      // Width fits the content — a lone "XX 100%" is narrow, more owners widen it up
+      // to the full box — and the bar is centred under the incoming arrow.
+      const barW = Math.min(NODE_W - 32, Math.max(80, cap.length * 64));
+      const barX = n.x + (NODE_W - barW) / 2, barY = top + 10, barH = 16;
       const clipId = "relcap-" + n.id.replace(/[^a-z0-9]/gi, "");
       g.appendChild(s("defs", {}, [s("clipPath", { id: clipId }, [s("rect", { x: barX, y: barY, width: barW, height: barH, rx: 8 })])]));
       const barG = s("g", { "clip-path": `url(#${clipId})` });
@@ -1369,24 +1372,27 @@ function relationshipMap() {
     // bar in the rare case an entity has both a stake and a control link).
     if (ctrl && ctrl.length) {
       const py = (cap && cap.length) ? top + 30 : top + 9;
-      let px = n.x + 16;
       const shownC = ctrl.length > 2 ? 1 : ctrl.length;
-      const pill = (label, fill, tip) => {
-        const w = Math.min(label.length * 5.7 + 16, NODE_W - 32);
-        const grp = s("g", {});
-        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill }));
-        grp.appendChild(svgText(label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
-        if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
-        g.appendChild(grp);
-        px += w + 6;
-      };
+      const items = [];
       for (let i = 0; i < shownC; i++) {
         const c = ctrl[i], ow = byId.get(c.ownerId);
-        pill(`${ow ? ow.initials : "?"} ${c.role}`, REL_TYPE_COLOR[ow ? ow.sk : "person"] || "#9aa5bd", `${ow ? ow.name : "Someone"} — ${c.role}`);
+        items.push({ label: `${ow ? ow.initials : "?"} ${c.role}`, fill: REL_TYPE_COLOR[ow ? ow.sk : "person"] || "#9aa5bd", tip: `${ow ? ow.name : "Someone"} — ${c.role}` });
       }
       if (ctrl.length > shownC) {
-        pill(`+${ctrl.length - shownC}`, "#9aa5bd", ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", "));
+        items.push({ label: `+${ctrl.length - shownC}`, fill: "#9aa5bd", tip: ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", ") });
       }
+      const ws = items.map((it) => Math.min(it.label.length * 5.7 + 16, NODE_W - 32));
+      const totalW = ws.reduce((a, b) => a + b, 0) + (items.length - 1) * 6;
+      let px = n.x + (NODE_W - totalW) / 2;                 // centre the group under the arrow
+      items.forEach((it, i) => {
+        const w = ws[i];
+        const grp = s("g", {});
+        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill: it.fill }));
+        grp.appendChild(svgText(it.label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        if (it.tip) { const ti = s("title", {}); ti.textContent = it.tip; grp.appendChild(ti); }
+        g.appendChild(grp);
+        px += w + 6;
+      });
     }
 
     // Opening: a tap/click is resolved by the viewport pan controller via data-href
