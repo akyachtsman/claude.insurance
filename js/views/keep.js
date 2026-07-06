@@ -925,20 +925,6 @@ function assetInitials(name) {
   return (String(name || "").replace(/\s/g, "").slice(0, 2) || "?").toUpperCase();
 }
 
-// Where the ray from a node centre (cx,cy, half-size hw/hh) toward (tx,ty)
-// crosses the node's rectangle border — used to trim edges to the card edge so
-// the ownership arrowhead sits in the gap, not hidden under a card.
-function nodeBorderPoint(cx, cy, hw, hh, tx, ty) {
-  const dx = tx - cx, dy = ty - cy;
-  if (!dx && !dy) return { x: cx, y: cy };
-  const t = Math.min(hw / Math.abs(dx || 1e-6), hh / Math.abs(dy || 1e-6));
-  return { x: cx + dx * t, y: cy + dy * t };
-}
-// Move point p a distance `d` toward q.
-function movePointToward(p, q, d) {
-  const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
-  return { x: p.x + (dx / len) * d, y: p.y + (dy / len) * d };
-}
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
 // Owners sit above what they own (top-down layered layout — see keep/relmap.js
@@ -1003,17 +989,35 @@ function alignCross(order, rows, up, down, sepOf) {
   for (let p = 0; p < 10; p++) { const seq = p % 2 ? order.slice().reverse() : order; seq.forEach((r) => place(rows[r])); }
   return c;
 }
-// A smooth path through a list of points, curving along the band axis (down for
-// vertical, across for horizontal) so routed edges bow instead of zig-zagging.
-function relSpline(pts, horiz) {
-  if (pts.length < 2) return "";
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p = pts[i], q = pts[i + 1];
-    if (horiz) { const mx = (p.x + q.x) / 2; d += ` C ${mx} ${p.y}, ${mx} ${q.y}, ${q.x} ${q.y}`; }
-    else { const my = (p.y + q.y) / 2; d += ` C ${p.x} ${my}, ${q.x} ${my}, ${q.x} ${q.y}`; }
+// Orthogonal (org-chart) edge routing through a chain of box/dummy centres.
+// Every run is axis-aligned and straight: the edge leaves the owner's facing edge,
+// drops into the empty channel that sits in the gap *between* two rows, runs across
+// that channel, then into the next row — repeating through any dummy waypoints
+// (which occupy the gap columns between boxes). Because each cross-run lives in a
+// row gap and each along-run lives in a box-centre or dummy column, the line never
+// passes behind a box. Returns the path `d` plus a `mid` anchor for the role label.
+function relOrtho(chain, horiz) {
+  const HWm = REL_NODE_W / 2, HHm = REL_NODE_H / 2;
+  const a = chain[0], b = chain[chain.length - 1];
+  if (chain.length < 2) return { d: "", mid: a || { x: 0, y: 0 } };
+  let d;
+  if (horiz) {
+    d = `M ${a.x + HWm} ${a.y}`;
+    for (let i = 0; i < chain.length - 1; i++) {
+      const p = chain[i], q = chain[i + 1], ch = (p.x + q.x) / 2;   // channel in the column gap
+      d += ` L ${ch} ${p.y} L ${ch} ${q.y}`;
+    }
+    d += ` L ${b.x - HWm} ${b.y}`;
+  } else {
+    d = `M ${a.x} ${a.y + HHm}`;
+    for (let i = 0; i < chain.length - 1; i++) {
+      const p = chain[i], q = chain[i + 1], ch = (p.y + q.y) / 2;   // channel in the row gap
+      d += ` L ${p.x} ${ch} L ${q.x} ${ch}`;
+    }
+    d += ` L ${b.x} ${b.y - HHm}`;
   }
-  return d;
+  const m = (chain.length - 1) >> 1, p = chain[m], q = chain[m + 1];
+  return { d, mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
 }
 
 function relLayout() {
@@ -1191,28 +1195,15 @@ function relationshipMap() {
     }
     return { ...e, stake, path, lrect, ltext, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
-  const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 6;
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
-      const a = center(er.from), b = center(er.to);
-      // Route the edge from the owner (er.from), through any dummy waypoints, to the
-      // arrowhead on what it owns (er.to). Trim the first/last segment to the card
-      // borders and draw a smooth spline through the whole run so long edges bend
-      // through the layers instead of cutting across.
-      const first = er.wp.length ? er.wp[0] : b;
-      const last = er.wp.length ? er.wp[er.wp.length - 1] : a;
-      const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, first.x, first.y), first, GAP);
-      const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, last.x, last.y), last, GAP);
-      const pts = [s0, ...er.wp, e0];
-      er.path.setAttribute("d", relSpline(pts, horiz));
-      if (er.lrect) {                          // centre the role label on the run's midpoint
-        // Odd runs sit on the central waypoint; even runs (incl. a direct
-        // two-point link) interpolate between the two central points so the
-        // pill lands mid-edge, not on the arrowhead endpoint.
-        const h = pts.length >> 1;
-        const mid = pts.length % 2
-          ? pts[h]
-          : { x: (pts[h - 1].x + pts[h].x) / 2, y: (pts[h - 1].y + pts[h].y) / 2 };
+      // Route the owner (er.from) → owned (er.to) edge orthogonally through the chain
+      // of box centres and any dummy waypoints, so it steps through the row gaps and
+      // never runs behind a box.
+      const chain = [center(er.from), ...er.wp, center(er.to)];
+      const { d, mid } = relOrtho(chain, horiz);
+      er.path.setAttribute("d", d);
+      if (er.lrect) {                          // centre the role label on the middle channel
         const lw = (er.role.length * 6.1) + 16;
         er.lrect.setAttribute("x", mid.x - lw / 2); er.lrect.setAttribute("y", mid.y - 10); er.lrect.setAttribute("width", lw);
         er.ltext.setAttribute("x", mid.x); er.ltext.setAttribute("y", mid.y + 4);
