@@ -1044,9 +1044,11 @@ function alignCross(order, rows, up, down, sepOf) {
 // faces follow the actual band direction (so a reverse link — owner below its target
 // — leaves the top and enters the bottom), and a same-band link dips into the
 // adjacent row gap rather than cutting through the cards. Works along either axis via
-// a main/cross split (main = the band-stacking axis). Returns the path `d` plus a
-// `mid` anchor for the role label.
-function relOrtho(chain, horiz) {
+// a main/cross split (main = the band-stacking axis). `channelOf(p, q)` optionally
+// picks the along-gap coordinate for each run (used to fan each owner's bus onto its
+// own lane so runs don't overlap); it defaults to the middle of the gap. Returns the
+// path `d` plus a `mid` anchor for the role label.
+function relOrtho(chain, horiz, channelOf) {
   const halfMain = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
   const gapHalf = (horiz ? REL_HGAP : REL_VGAP) / 2;
   const mainOf = (p) => (horiz ? p.x : p.y);
@@ -1069,7 +1071,8 @@ function relOrtho(chain, horiz) {
   const dEnd = Math.sign(mainOf(b) - mainOf(chain[n - 2])) || 1;
   const P = [pt(mainOf(a) + dStart * halfMain, crossOf(a))];
   for (let i = 0; i < n - 1; i++) {
-    const p = chain[i], q = chain[i + 1], ch = (mainOf(p) + mainOf(q)) / 2;   // channel in the row gap
+    const p = chain[i], q = chain[i + 1];
+    const ch = channelOf ? channelOf(p, q) : (mainOf(p) + mainOf(q)) / 2;   // channel (lane) in the row gap
     P.push(pt(ch, crossOf(p)), pt(ch, crossOf(q)));
   }
   P.push(pt(mainOf(b) - dEnd * halfMain, crossOf(b)));
@@ -1270,13 +1273,49 @@ function relationshipMap() {
     svg.appendChild(path);
     return { ...e, stake, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
+  // Fan each owner's downward "bus" onto its own lane within the row gap. Without
+  // this every edge crossing a gap runs along the same centre line, so different
+  // owners' runs overlap into one line and a crossing looks like a join. Group the
+  // segments by gap and by their upper endpoint (the bus source), then spread those
+  // buses across the clear space between the two rows so each is a distinct line and
+  // crossings read as crossings. Positions are static, so this is computed once.
+  const laneMain = (p) => (horiz ? p.x : p.y);
+  const laneKey = (p) => Math.round(p.x) + "," + Math.round(p.y);
+  const halfMainNode = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
+  const gapBuses = new Map();
+  edgeRefs.forEach((er) => {
+    const chain = [center(er.from), ...er.wp, center(er.to)];
+    for (let i = 0; i < chain.length - 1; i++) {
+      const a = chain[i], b = chain[i + 1];
+      if (laneMain(a) === laneMain(b)) continue;                 // same-band link routes its own way
+      const up = laneMain(a) < laneMain(b) ? a : b, dn = up === a ? b : a;
+      const gk = Math.round(laneMain(up)) + ">" + Math.round(laneMain(dn));
+      let m = gapBuses.get(gk); if (!m) { m = new Map(); gapBuses.set(gk, m); }
+      m.set(laneKey(up), up);
+    }
+  });
+  const channelY = new Map();
+  gapBuses.forEach((busMap, gk) => {
+    const [um, dm] = gk.split(">").map(Number);
+    const mid = (um + dm) / 2;
+    const room = Math.abs(dm - um) - 2 * halfMainNode;           // clear space between the two rows
+    const buses = [...busMap.values()].sort((p, q) => (horiz ? p.y - q.y : p.x - q.x));
+    const k = buses.length;
+    const step = k > 1 ? Math.min(9, Math.max(0, room - 8) / (k - 1)) : 0;
+    buses.forEach((p, i) => channelY.set(laneKey(p), mid + (i - (k - 1) / 2) * step));
+  });
+  const channelOf = (p, q) => {
+    const up = laneMain(p) < laneMain(q) ? p : q;
+    const v = channelY.get(laneKey(up));
+    return v != null ? v : (laneMain(p) + laneMain(q)) / 2;
+  };
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
       // Route the owner (er.from) → owned (er.to) edge orthogonally through the chain
       // of box centres and any dummy waypoints, so it steps through the row gaps and
-      // never runs behind a box.
+      // never runs behind a box, each owner on its own lane.
       const chain = [center(er.from), ...er.wp, center(er.to)];
-      const { d } = relOrtho(chain, horiz);
+      const { d } = relOrtho(chain, horiz, channelOf);
       er.path.setAttribute("d", d);
     });
   };
