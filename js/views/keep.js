@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, typeBands, orchestrate } from "../keep/relmap.js";
+import { capTablesByEntity, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -925,20 +925,6 @@ function assetInitials(name) {
   return (String(name || "").replace(/\s/g, "").slice(0, 2) || "?").toUpperCase();
 }
 
-// Where the ray from a node centre (cx,cy, half-size hw/hh) toward (tx,ty)
-// crosses the node's rectangle border — used to trim edges to the card edge so
-// the ownership arrowhead sits in the gap, not hidden under a card.
-function nodeBorderPoint(cx, cy, hw, hh, tx, ty) {
-  const dx = tx - cx, dy = ty - cy;
-  if (!dx && !dy) return { x: cx, y: cy };
-  const t = Math.min(hw / Math.abs(dx || 1e-6), hh / Math.abs(dy || 1e-6));
-  return { x: cx + dx * t, y: cy + dy * t };
-}
-// Move point p a distance `d` toward q.
-function movePointToward(p, q, d) {
-  const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
-  return { x: p.x + (dx / len) * d, y: p.y + (dy / len) * d };
-}
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
 // Owners sit above what they own (top-down layered layout — see keep/relmap.js
@@ -1003,17 +989,46 @@ function alignCross(order, rows, up, down, sepOf) {
   for (let p = 0; p < 10; p++) { const seq = p % 2 ? order.slice().reverse() : order; seq.forEach((r) => place(rows[r])); }
   return c;
 }
-// A smooth path through a list of points, curving along the band axis (down for
-// vertical, across for horizontal) so routed edges bow instead of zig-zagging.
-function relSpline(pts, horiz) {
-  if (pts.length < 2) return "";
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p = pts[i], q = pts[i + 1];
-    if (horiz) { const mx = (p.x + q.x) / 2; d += ` C ${mx} ${p.y}, ${mx} ${q.y}, ${q.x} ${q.y}`; }
-    else { const my = (p.y + q.y) / 2; d += ` C ${p.x} ${my}, ${q.x} ${my}, ${q.x} ${q.y}`; }
+// Orthogonal (org-chart) edge routing through a chain of box/dummy centres. Every
+// run is axis-aligned and straight: the edge leaves the owner's facing edge, drops
+// into the empty channel in the gap *between* two rows, runs across it, then into the
+// next row — repeating through any dummy waypoints (which occupy the gap columns
+// between boxes). Because each cross-run lives in a row gap and each along-run in a
+// box-centre or dummy column, the line never passes behind a box. The exit/entry
+// faces follow the actual band direction (so a reverse link — owner below its target
+// — leaves the top and enters the bottom), and a same-band link dips into the
+// adjacent row gap rather than cutting through the cards. Works along either axis via
+// a main/cross split (main = the band-stacking axis). Returns the path `d` plus a
+// `mid` anchor for the role label.
+function relOrtho(chain, horiz) {
+  const halfMain = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
+  const gapHalf = (horiz ? REL_HGAP : REL_VGAP) / 2;
+  const mainOf = (p) => (horiz ? p.x : p.y);
+  const crossOf = (p) => (horiz ? p.y : p.x);
+  const pt = (main, cross) => (horiz ? { x: main, y: cross } : { x: cross, y: main });
+  const pathOf = (P) => P.reduce((s, p, i) => s + (i ? " L " : "M ") + p.x + " " + p.y, "");
+  const n = chain.length;
+  const a = chain[0], b = chain[n - 1];
+  if (n < 2) return { d: "", mid: a || { x: 0, y: 0 } };
+
+  // Same-band link (no rows between the two cards): dip into the gap just past the
+  // band and back, so the run stays out of every card in that band.
+  if (n === 2 && mainOf(a) === mainOf(b)) {
+    const ch = mainOf(a) + halfMain + gapHalf, ac = crossOf(a), bc = crossOf(b);
+    const P = [pt(mainOf(a) + halfMain, ac), pt(ch, ac), pt(ch, bc), pt(mainOf(b) + halfMain, bc)];
+    return { d: pathOf(P), mid: pt(ch, (ac + bc) / 2) };
   }
-  return d;
+
+  const dStart = Math.sign(mainOf(chain[1]) - mainOf(a)) || 1;
+  const dEnd = Math.sign(mainOf(b) - mainOf(chain[n - 2])) || 1;
+  const P = [pt(mainOf(a) + dStart * halfMain, crossOf(a))];
+  for (let i = 0; i < n - 1; i++) {
+    const p = chain[i], q = chain[i + 1], ch = (mainOf(p) + mainOf(q)) / 2;   // channel in the row gap
+    P.push(pt(ch, crossOf(p)), pt(ch, crossOf(q)));
+  }
+  P.push(pt(mainOf(b) - dEnd * halfMain, crossOf(b)));
+  const m = (n - 1) >> 1, p = chain[m], q = chain[m + 1];
+  return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
 }
 
 function relLayout() {
@@ -1023,12 +1038,17 @@ function relLayout() {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
-  // Ownership uses the orchestrated (crossing-minimized, waypoint-routed) layout;
-  // "by type" uses the simple categorical bands.
-  let order, rows, dummy = {}, edgePath = {}, up = {}, down = {};
+  // Both modes use the same orchestration (crossing-minimized, waypoint-routed) so
+  // every edge is routed through the row gaps and never runs behind a card. Ownership
+  // layers by depth; "by type" layers by category (people / trusts / businesses),
+  // compacting the present bands to dense indices so an absent category leaves no
+  // empty row.
+  let order, rows, dummy, edgePath, up, down;
   if (relView.mode === "type") {
-    ({ order, rows } = typeBands(nodes, (n) => REL_BAND[n.sk] ?? 2));
-    order.forEach((b) => rows[b].forEach((id) => { up[id] = []; down[id] = []; }));
+    const bandVal = (n) => REL_BAND[n.sk] ?? 2;
+    const present = [...new Set(nodes.map(bandVal))].sort((a, b) => a - b);
+    const dense = new Map(present.map((v, i) => [v, i]));
+    ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, (n) => dense.get(bandVal(n))));
   } else {
     ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges));
   }
@@ -1191,28 +1211,15 @@ function relationshipMap() {
     }
     return { ...e, stake, path, lrect, ltext, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
-  const HW = NODE_W / 2, HH = NODE_H / 2, GAP = 6;
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
-      const a = center(er.from), b = center(er.to);
-      // Route the edge from the owner (er.from), through any dummy waypoints, to the
-      // arrowhead on what it owns (er.to). Trim the first/last segment to the card
-      // borders and draw a smooth spline through the whole run so long edges bend
-      // through the layers instead of cutting across.
-      const first = er.wp.length ? er.wp[0] : b;
-      const last = er.wp.length ? er.wp[er.wp.length - 1] : a;
-      const s0 = movePointToward(nodeBorderPoint(a.x, a.y, HW, HH, first.x, first.y), first, GAP);
-      const e0 = movePointToward(nodeBorderPoint(b.x, b.y, HW, HH, last.x, last.y), last, GAP);
-      const pts = [s0, ...er.wp, e0];
-      er.path.setAttribute("d", relSpline(pts, horiz));
-      if (er.lrect) {                          // centre the role label on the run's midpoint
-        // Odd runs sit on the central waypoint; even runs (incl. a direct
-        // two-point link) interpolate between the two central points so the
-        // pill lands mid-edge, not on the arrowhead endpoint.
-        const h = pts.length >> 1;
-        const mid = pts.length % 2
-          ? pts[h]
-          : { x: (pts[h - 1].x + pts[h].x) / 2, y: (pts[h - 1].y + pts[h].y) / 2 };
+      // Route the owner (er.from) → owned (er.to) edge orthogonally through the chain
+      // of box centres and any dummy waypoints, so it steps through the row gaps and
+      // never runs behind a box.
+      const chain = [center(er.from), ...er.wp, center(er.to)];
+      const { d, mid } = relOrtho(chain, horiz);
+      er.path.setAttribute("d", d);
+      if (er.lrect) {                          // centre the role label on the middle channel
         const lw = (er.role.length * 6.1) + 16;
         er.lrect.setAttribute("x", mid.x - lw / 2); er.lrect.setAttribute("y", mid.y - 10); er.lrect.setAttribute("width", lw);
         er.ltext.setAttribute("x", mid.x); er.ltext.setAttribute("y", mid.y + 4);

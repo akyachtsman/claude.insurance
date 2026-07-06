@@ -88,6 +88,46 @@ test("orchestrate leaves adjacent-layer edges without dummies", () => {
   assert.deepEqual(dummy, {});
 });
 
+test("orchestrate accepts a band override and routes across the given bands", () => {
+  // p(band 0) owns c(band 2); band 1 sits between them → one dummy in band 1,
+  // even though no edge touches band 1 (mirrors a person→business link with a
+  // trust band between them in the by-type view).
+  const ns = [{ id: "p" }, { id: "t" }, { id: "c" }];
+  const es = [{ from: "p", to: "c", stake: "100%" }];
+  const band = { p: 0, t: 1, c: 2 };
+  const { edgePath, dummy, layerOf } = orchestrate(ns, es, (n) => band[n.id]);
+  assert.equal(layerOf.p, 0);
+  assert.equal(layerOf.c, 2);
+  const path = edgePath["p>c"];
+  assert.equal(Array.isArray(path) && path.length, 1);
+  assert.equal(dummy[path[0]], 1);
+});
+
+test("orchestrate with a band override handles a reverse-direction edge", () => {
+  // owner in a LATER band than the target (a business owning a trust): still gets
+  // a dummy through the intervening band, with the chain kept in from→to order.
+  const band = { biz: 2, mid: 1, tr: 0 };
+  const { edgePath, dummy } = orchestrate(
+    [{ id: "biz" }, { id: "mid" }, { id: "tr" }],
+    [{ from: "biz", to: "tr", stake: "100%" }],
+    (n) => band[n.id],
+  );
+  const path = edgePath["biz>tr"];
+  assert.equal(Array.isArray(path) && path.length, 1);
+  assert.equal(dummy[path[0]], 1);
+});
+
+test("orchestrate with a band override leaves same-band edges direct", () => {
+  const band = { a: 2, b: 2 };
+  const { edgePath, dummy } = orchestrate(
+    [{ id: "a" }, { id: "b" }],
+    [{ from: "a", to: "b", stake: "100%" }],
+    (n) => band[n.id],
+  );
+  assert.deepEqual(edgePath, {});
+  assert.deepEqual(dummy, {});
+});
+
 test("orchestrate is deterministic", () => {
   const ns = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
   const es = [{ from: "a", to: "c", stake: "50%" }, { from: "b", to: "c", stake: "50%" }, { from: "c", to: "d", stake: "100%" }];
