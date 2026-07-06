@@ -1064,7 +1064,7 @@ function relOrtho(chain, horiz, channelOf, entryCross) {
   if (n === 2 && mainOf(a) === mainOf(b)) {
     const ch = mainOf(a) + halfMain + gapHalf, ac = crossOf(a), bc = crossOf(b);
     const P = [pt(mainOf(a) + halfMain, ac), pt(ch, ac), pt(ch, bc), pt(mainOf(b) + halfMain, bc)];
-    return { d: pathOf(P), mid: pt(ch, (ac + bc) / 2) };
+    return { d: pathOf(P), mid: pt(ch, (ac + bc) / 2), pts: P };
   }
 
   const dStart = Math.sign(mainOf(chain[1]) - mainOf(a)) || 1;
@@ -1080,7 +1080,40 @@ function relOrtho(chain, horiz, channelOf, entryCross) {
   }
   P.push(pt(mainOf(b) - dEnd * halfMain, crossAt(n - 1)));
   const m = (n - 1) >> 1, p = chain[m], q = chain[m + 1];
-  return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
+  return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, pts: P };
+}
+
+// Build an edge's path string, hopping each of its gap-spanning runs over the
+// perpendicular runs of OTHER edges with a small arc "bridge" — so where an edge
+// merely passes across another (e.g. a holding company's connector crossing the
+// arrows into an unrelated box) it reads as a crossing, not a join. `crossers` are
+// the perpendicular segments of every other edge: `c` is their constant coordinate
+// and `[s0,s1]` their span. In vertical layout the gap-spanning run is horizontal;
+// in horizontal layout it is vertical. Only interior crossings hop.
+function relHopPath(pts, crossers, horiz) {
+  const R = 4.5;
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    // The gap-spanning run hops: horizontal in a vertical layout, vertical otherwise.
+    const hoppable = horiz ? (Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) > 1)
+                           : (Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) > 1);
+    if (!hoppable) { d += ` L ${b.x} ${b.y}`; continue; }
+    const fixed = horiz ? a.x : a.y;                     // constant coordinate of the run
+    const t0 = horiz ? a.y : a.x, t1 = horiz ? b.y : b.x;   // the run travels t0 → t1
+    const dir = Math.sign(t1 - t0) || 1;
+    const cuts = crossers
+      .filter((v) => v.c > Math.min(t0, t1) + 2 && v.c < Math.max(t0, t1) - 2 && fixed > v.s0 + 1 && fixed < v.s1 - 1)
+      .map((v) => v.c)
+      .sort((x, y) => dir * (x - y));
+    for (const c of cuts) {
+      const sweep = dir > 0 ? 0 : 1;                     // arc bulges toward the gap start (up / left)
+      if (horiz) d += ` L ${a.x} ${c - dir * R} A ${R} ${R} 0 0 ${sweep} ${a.x} ${c + dir * R}`;
+      else d += ` L ${c - dir * R} ${a.y} A ${R} ${R} 0 0 ${sweep} ${c + dir * R} ${a.y}`;
+    }
+    d += ` L ${b.x} ${b.y}`;
+  }
+  return d;
 }
 
 function relLayout() {
@@ -1363,13 +1396,27 @@ function relationshipMap() {
     return v != null ? v : (laneMain(p) + laneMain(q)) / 2;
   };
   const updateEdges = () => {
+    // Pass 1: route every edge orthogonally (owner → owned through box centres and any
+    // dummy waypoints, each owner on its own lane) and keep its point list.
     edgeRefs.forEach((er) => {
-      // Route the owner (er.from) → owned (er.to) edge orthogonally through the chain
-      // of box centres and any dummy waypoints, so it steps through the row gaps and
-      // never runs behind a box, each owner on its own lane.
       const chain = [center(er.from), ...er.wp, center(er.to)];
-      const { d } = relOrtho(chain, horiz, channelOf, entryCrossFor(er));
-      er.path.setAttribute("d", d);
+      er.pts = relOrtho(chain, horiz, channelOf, entryCrossFor(er)).pts || [];
+    });
+    // Collect the perpendicular runs (verticals in a vertical layout) each edge could
+    // be hopped over: constant coordinate `c`, span `[s0,s1]`, tagged by edge index.
+    const crossers = [];
+    edgeRefs.forEach((er, ei) => {
+      for (let i = 0; i < er.pts.length - 1; i++) {
+        const a = er.pts[i], b = er.pts[i + 1];
+        const perp = horiz ? Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) > 1
+                           : Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) > 1;
+        if (perp) crossers.push({ ei, c: horiz ? a.y : a.x, s0: Math.min(horiz ? a.x : a.y, horiz ? b.x : b.y), s1: Math.max(horiz ? a.x : a.y, horiz ? b.x : b.y) });
+      }
+    });
+    // Pass 2: draw each edge, bridging its gap-spanning runs over other edges' runs.
+    edgeRefs.forEach((er, ei) => {
+      if (!er.pts.length) { er.path.setAttribute("d", ""); return; }
+      er.path.setAttribute("d", relHopPath(er.pts, crossers.filter((v) => v.ei !== ei), horiz));
     });
   };
 
