@@ -66,7 +66,8 @@ body.in-keep { background: var(--color-bg); }
    JS (setupRelViewport in js/views/keep.js), so grab-and-drag moves the whole map. */
 .k-relmap { position: relative; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); margin: 10px 0 var(--space-6); overflow: hidden; height: clamp(420px, 70vh, 680px); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
 .k-relmap.is-grabbing { cursor: grabbing; }
-.k-relsvg { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; }
+.k-relsvg { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; -webkit-user-select: none; user-select: none; }
+.k-relsvg text { -webkit-user-select: none; user-select: none; }
 .k-relnode--link { cursor: pointer; }
 /* On-map zoom control (bottom-right of the viewport). */
 .k-relzoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); overflow: hidden; }
