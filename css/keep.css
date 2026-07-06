@@ -64,7 +64,7 @@ body.in-keep { background: var(--color-bg); }
 /* ── Entities relationship map ──────────────────────────────────────────────── */
 /* The chart is a fixed viewport you pan in 2D: the SVG is translated + scaled by
    JS (setupRelViewport in js/views/keep.js), so grab-and-drag moves the whole map. */
-.k-relmap { position: relative; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); margin: 10px 0 var(--space-6); overflow: hidden; height: clamp(420px, 70vh, 680px); cursor: grab; touch-action: none; }
+.k-relmap { position: relative; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); margin: 10px 0 var(--space-6); overflow: hidden; height: clamp(420px, 70vh, 680px); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
 .k-relmap.is-grabbing { cursor: grabbing; }
 .k-relsvg { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; }
 .k-relnode--link { cursor: pointer; }
