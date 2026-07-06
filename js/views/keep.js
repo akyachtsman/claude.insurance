@@ -979,6 +979,8 @@ function relStyleKey(node) {
 const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 46, REL_PAD = 34;
 // Below this on-screen box width the map stops shrinking and pans instead.
 const REL_MIN_NODE_PX = 150;
+// Manual zoom bounds and per-click step (relative to the fit scale's natural 1×).
+const REL_ZOOM_MIN = 0.3, REL_ZOOM_MAX = 2.4, REL_ZOOM_STEP = 1.25;
 // Lay the graph out per the current relView. Bands (ownership layers, or type
 // groups) stack along one axis; members spread along the other. Orientation swaps
 // which axis is which — vertical stacks bands top-down, horizontal stacks them
@@ -1049,7 +1051,19 @@ function setupRelViewport(wrap, svg, W, H) {
     });
     ro.observe(wrap);
   }
+  // Manual zoom: scale around the viewport centre so the focal point stays put,
+  // then re-clamp the pan. Exposed for the on-map +/- buttons.
+  const zoom = (dir) => {
+    const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
+    if (!vw || !vh) return;
+    const nk = Math.max(REL_ZOOM_MIN, Math.min(REL_ZOOM_MAX, dir > 0 ? k * REL_ZOOM_STEP : k / REL_ZOOM_STEP));
+    if (nk === k) return;
+    const cx = (vw / 2 - tx) / k, cy = (vh / 2 - ty) / k;   // content point under the viewport centre
+    k = nk; tx = vw / 2 - cx * k; ty = vh / 2 - cy * k;
+    clampPan(vw, vh); applyT();
+  };
   wrap.__relfit = fit;     // exposed so the toolbar's "Fit to screen" can recentre
+  wrap.__relzoom = zoom;   // exposed for the on-map zoom buttons
   fit();
 
   // Drag-to-pan (mouse + touch). Opening a node is a genuine `click` (below), so it
@@ -1244,6 +1258,15 @@ function relationshipMap() {
   updateEdges();
 
   const wrap = el("div", { class: "k-relmap" }, [svg]);
+  // On-map zoom control (bottom-right). stopPropagation on the group's pointerdown
+  // keeps a button press from also starting a background pan.
+  const zoomOut = el("button", { class: "k-relzoom__b", attrs: { type: "button", "aria-label": "Zoom out" }, text: "−" });
+  const zoomIn = el("button", { class: "k-relzoom__b", attrs: { type: "button", "aria-label": "Zoom in" }, text: "+" });
+  zoomOut.addEventListener("click", () => { if (wrap.__relzoom) wrap.__relzoom(-1); });
+  zoomIn.addEventListener("click", () => { if (wrap.__relzoom) wrap.__relzoom(1); });
+  const zoomCtl = el("div", { class: "k-relzoom", attrs: { role: "group", "aria-label": "Zoom" } }, [zoomIn, zoomOut]);
+  zoomCtl.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  wrap.appendChild(zoomCtl);
   setupRelViewport(wrap, svg, W, H);
   return wrap;
 }

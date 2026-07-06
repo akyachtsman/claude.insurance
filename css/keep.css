@@ -68,6 +68,11 @@ body.in-keep { background: var(--color-bg); }
 .k-relmap.is-grabbing { cursor: grabbing; }
 .k-relsvg { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; }
 .k-relnode--link { cursor: pointer; }
+/* On-map zoom control (bottom-right of the viewport). */
+.k-relzoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); overflow: hidden; }
+.k-relzoom__b { width: 44px; height: 44px; font: 700 22px var(--font-display); line-height: 1; color: var(--color-text-primary); background: var(--color-surface); border: 0; cursor: pointer; }
+.k-relzoom__b + .k-relzoom__b { border-top: 1px solid var(--color-border); }
+.k-relzoom__b:hover, .k-relzoom__b:focus-visible { background: var(--color-accent-light); color: var(--color-accent); outline: none; }
 .k-relnode--link:hover > rect, .k-relnode--link:focus-visible > rect { stroke: var(--color-accent); stroke-width: 2.5; }
 .k-relnode--link:focus { outline: none; }
 .k-relcaption { text-align: center; font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 6px; }
