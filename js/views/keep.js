@@ -1109,6 +1109,29 @@ function relLayout() {
   const wOf = (id) => (isDummy(id) ? REL_DUMMY_W : (horiz ? REL_NODE_H : REL_NODE_W));
   const sepOf = (a, b) => wOf(a) / 2 + wOf(b) / 2 + ((isDummy(a) || isDummy(b)) ? 16 : (horiz ? REL_VGAP : REL_HGAP));
   const cross = alignCross(order, rows, up, down, sepOf);
+  // Pull each long-edge routing dummy toward its edge's target column, within the
+  // slack its row neighbours allow. A long edge (owner two+ layers above what it
+  // owns) otherwise drops through a dummy parked at the midpoint — often right beside
+  // an unrelated box in between — which reads as a connection to that box. Snapping
+  // the dummy to the target's column makes the edge run straight down its own column,
+  // clear of the boxes it passes. Real nodes stay put, so the layout doesn't shift.
+  const dummyTarget = {};
+  for (const key in edgePath) { const to = key.slice(key.indexOf(">") + 1); edgePath[key].forEach((d) => { dummyTarget[d] = to; }); }
+  if (Object.keys(dummyTarget).length) {
+    for (let pass = 0; pass < 4; pass++) {
+      for (const r of order) {
+        const ids = rows[r];
+        const idx = pass % 2 ? [...ids.keys()].reverse() : [...ids.keys()];
+        for (const i of idx) {
+          const id = ids[i];
+          if (dummyTarget[id] == null) continue;               // only nudge routing dummies
+          const lo = i > 0 ? cross[ids[i - 1]] + sepOf(ids[i - 1], id) : -Infinity;
+          const hi = i < ids.length - 1 ? cross[ids[i + 1]] - sepOf(id, ids[i + 1]) : Infinity;
+          cross[id] = Math.max(lo, Math.min(hi, cross[dummyTarget[id]]));
+        }
+      }
+    }
+  }
   const cvals = Object.values(cross);
   const halfBand = (horiz ? REL_NODE_H : REL_NODE_W) / 2;
   const off = REL_PAD + halfBand - (cvals.length ? Math.min(...cvals) : 0);   // left/top margin = PAD
