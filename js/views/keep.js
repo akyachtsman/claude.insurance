@@ -1301,11 +1301,18 @@ function relationshipMap() {
     const dim = nodeDim(n.id);
     if (dim) g.setAttribute("opacity", dim);
     g.appendChild(s("rect", { x: n.x, y: top, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
-    const ax = n.x + 34, avy = top + 30;
+    // Owners/controllers show as a header at the TOP of the box — right under the
+    // incoming arrow — so what it says about is unmistakable. That pushes the entity's
+    // own identity down. A root (nothing points at it) has no header, so it keeps its
+    // identity at the top; layer 0 is all roots and every deeper layer is owned, so a
+    // row stays vertically consistent.
+    const hasOwn = Boolean((cap && cap.length) || (ctrl && ctrl.length));
+    const yoff = hasOwn ? 26 : 0;
+    const ax = n.x + 34, avy = top + 30 + yoff;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
     g.appendChild(svgText(n.initials, { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD }));
-    g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
-    g.appendChild(svgText(n.sub, { x: ax + 28, y: top + 41, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
+    g.appendChild(svgText(n.sub, { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
     // Asset chips: little circles for what this entity holds — initials inside,
     // full name on hover. Overflow collapses to a "+N" chip.
@@ -1319,8 +1326,8 @@ function relationshipMap() {
       let cx = n.x + 24;
       const chip = (label, tip) => {
         const grp = s("g", {});
-        grp.appendChild(s("circle", { cx, cy: top + 66, r: 9, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
-        grp.appendChild(svgText(label, { x: cx, y: top + 69, "text-anchor": "middle", "font-size": "8", "font-weight": "800", fill: cText, "font-family": FS }));
+        grp.appendChild(s("circle", { cx, cy: top + 66 + yoff, r: 9, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
+        grp.appendChild(svgText(label, { x: cx, y: top + 69 + yoff, "text-anchor": "middle", "font-size": "8", "font-weight": "800", fill: cText, "font-family": FS }));
         if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
         g.appendChild(grp);
         cx += 21;
@@ -1332,10 +1339,10 @@ function relationshipMap() {
     // Cap-table bar: the entity's ownership split as one bar summing to 100%, each
     // segment coloured by its owner's type and labelled with the owner's initials.
     // Hairline separators keep same-colour neighbours distinct; a shortfall shows
-    // as the faint unfilled remainder.
+    // as the faint unfilled remainder. Sits in the header, just under the arrow.
     if (cap && cap.length) {
       const total = cap.reduce((t, c) => t + c.pct, 0);
-      const barX = n.x + 16, barW = NODE_W - 32, barY = top + NODE_H - 26, barH = 16;
+      const barX = n.x + 16, barW = NODE_W - 32, barY = top + 10, barH = 16;
       const clipId = "relcap-" + n.id.replace(/[^a-z0-9]/gi, "");
       g.appendChild(s("defs", {}, [s("clipPath", { id: clipId }, [s("rect", { x: barX, y: barY, width: barW, height: barH, rx: 8 })])]));
       const barG = s("g", { "clip-path": `url(#${clipId})` });
@@ -1358,9 +1365,10 @@ function relationshipMap() {
 
     // Control-only relationships (a trustee, a manager with no equity) show as a
     // pill inside the controlled entity's box — "<initials> <role>", coloured by the
-    // controller's type. The role lives here now, not as a label on the connector.
+    // controller's type. It sits in the header just under the arrow (below the cap
+    // bar in the rare case an entity has both a stake and a control link).
     if (ctrl && ctrl.length) {
-      const py = (cap && cap.length) ? top + NODE_H - 48 : top + NODE_H - 26;   // above the cap bar if one exists
+      const py = (cap && cap.length) ? top + 30 : top + 9;
       let px = n.x + 16;
       const shownC = ctrl.length > 2 ? 1 : ctrl.length;
       const pill = (label, fill, tip) => {
