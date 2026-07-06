@@ -1464,15 +1464,28 @@ async function renderEntityCollection(layout) {
 export function renderKeepEntityList() { return renderEntityCollection("rows"); }
 export function renderKeepEntityGrid() { return renderEntityCollection("cards"); }
 
-// A segmented toggle: one button per option, the active one pressed. Verb-free.
+// A segmented toggle: one button per option, the active one pressed. The active
+// value is tracked here and every button's is-on/aria-pressed is refreshed on each
+// pick, so the control stays reversible even though only the chart (not the
+// toolbar) redraws on a change.
 function relSeg(current, opts, onPick) {
   const seg = el("div", { class: "k-seg", attrs: { role: "group" } });
-  opts.forEach((o) => {
-    const on = o.val === current;
-    const b = el("button", { class: "k-seg__b" + (on ? " is-on" : ""), attrs: { type: "button", "aria-pressed": String(on) } }, [el("span", { text: o.label })]);
-    b.addEventListener("click", () => { if (!on) onPick(o.val); });
-    seg.appendChild(b);
+  let active = current;
+  const btns = opts.map((o) => {
+    const b = el("button", { class: "k-seg__b", attrs: { type: "button" } }, [el("span", { text: o.label })]);
+    b.addEventListener("click", () => {
+      if (o.val === active) return;
+      active = o.val; sync(); onPick(o.val);
+    });
+    return { b, val: o.val };
   });
+  const sync = () => btns.forEach(({ b, val }) => {
+    const on = val === active;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  btns.forEach(({ b }) => seg.appendChild(b));
+  sync();
   return seg;
 }
 // A labelled checkbox declutter toggle.
