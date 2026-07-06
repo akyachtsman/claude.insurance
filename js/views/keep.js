@@ -1206,7 +1206,13 @@ function relationshipMap() {
       const pts = [s0, ...er.wp, e0];
       er.path.setAttribute("d", relSpline(pts, horiz));
       if (er.lrect) {                          // centre the role label on the run's midpoint
-        const mid = pts[Math.floor(pts.length / 2)] || { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // Odd runs sit on the central waypoint; even runs (incl. a direct
+        // two-point link) interpolate between the two central points so the
+        // pill lands mid-edge, not on the arrowhead endpoint.
+        const h = pts.length >> 1;
+        const mid = pts.length % 2
+          ? pts[h]
+          : { x: (pts[h - 1].x + pts[h].x) / 2, y: (pts[h - 1].y + pts[h].y) / 2 };
         const lw = (er.role.length * 6.1) + 16;
         er.lrect.setAttribute("x", mid.x - lw / 2); er.lrect.setAttribute("y", mid.y - 10); er.lrect.setAttribute("width", lw);
         er.ltext.setAttribute("x", mid.x); er.ltext.setAttribute("y", mid.y + 4);
@@ -1301,13 +1307,16 @@ function relationshipMap() {
 
   const wrap = el("div", { class: "k-relmap" }, [svg]);
   // On-map zoom control (bottom-right). stopPropagation on the group's pointerdown
-  // keeps a button press from also starting a background pan.
+  // keeps a button press from also starting a background pan; stopping the click
+  // too keeps it from reaching the wrapper's delegated handler, which would
+  // otherwise navigate to the last-pressed entity (a stale pressNode) on +/−.
   const zoomOut = el("button", { class: "k-relzoom__b", attrs: { type: "button", "aria-label": "Zoom out" }, text: "−" });
   const zoomIn = el("button", { class: "k-relzoom__b", attrs: { type: "button", "aria-label": "Zoom in" }, text: "+" });
   zoomOut.addEventListener("click", () => { if (wrap.__relzoom) wrap.__relzoom(-1); });
   zoomIn.addEventListener("click", () => { if (wrap.__relzoom) wrap.__relzoom(1); });
   const zoomCtl = el("div", { class: "k-relzoom", attrs: { role: "group", "aria-label": "Zoom" } }, [zoomIn, zoomOut]);
   zoomCtl.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  zoomCtl.addEventListener("click", (ev) => ev.stopPropagation());
   wrap.appendChild(zoomCtl);
   setupRelViewport(wrap, svg, W, H);
   return wrap;
