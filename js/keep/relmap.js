@@ -80,24 +80,32 @@ export function typeBands(nodes, bandOf) {
 // median-heuristic sweeps, keeping the best ordering seen; and (3) returns the
 // per-edge dummy chain so the renderer can route each long edge through its
 // waypoints. Cross-axis (x) placement is left to the caller, which owns pixels.
-// Returns { order, rows (real + dummy ids per layer, ordered), layerOf, dummy
+// `bandOf(node)` is optional: when given, it fixes each node's layer (used by the
+// "by type" view to layer by category); when omitted, layers come from longest-path
+// ownership depth. Either way, edges that span >1 layer — in EITHER direction — get
+// dummies through every intervening layer, so the renderer can keep them out of the
+// cards. Returns { order, rows (real + dummy ids per layer, ordered), layerOf, dummy
 // (id -> layer), edgePath (from>to -> [dummyId...] ordered), up, down }.
-export function orchestrate(nodes, edges) {
+export function orchestrate(nodes, edges, bandOf) {
   const ids = new Set(nodes.map((n) => n.id));
   const E = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-  const incoming = {};
-  nodes.forEach((n) => { incoming[n.id] = []; });
-  E.forEach((e) => incoming[e.to].push(e.from));
   const layer = {};
-  const visit = (id, seen) => {
-    if (layer[id] != null) return layer[id];
-    if (seen.has(id)) return 0;
-    seen.add(id);
-    let m = 0;
-    for (const p of incoming[id]) m = Math.max(m, visit(p, seen) + 1);
-    return (layer[id] = m);
-  };
-  nodes.forEach((n) => visit(n.id, new Set()));
+  if (bandOf) {
+    nodes.forEach((n) => { layer[n.id] = bandOf(n); });
+  } else {
+    const incoming = {};
+    nodes.forEach((n) => { incoming[n.id] = []; });
+    E.forEach((e) => incoming[e.to].push(e.from));
+    const visit = (id, seen) => {
+      if (layer[id] != null) return layer[id];
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      let m = 0;
+      for (const p of incoming[id]) m = Math.max(m, visit(p, seen) + 1);
+      return (layer[id] = m);
+    };
+    nodes.forEach((n) => visit(n.id, new Set()));
+  }
 
   // Split long edges into unit-length segments through fresh dummy nodes.
   const dummy = {}; let dc = 0;

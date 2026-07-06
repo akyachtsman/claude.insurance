@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, typeBands, orchestrate } from "../keep/relmap.js";
+import { capTablesByEntity, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -989,35 +989,46 @@ function alignCross(order, rows, up, down, sepOf) {
   for (let p = 0; p < 10; p++) { const seq = p % 2 ? order.slice().reverse() : order; seq.forEach((r) => place(rows[r])); }
   return c;
 }
-// Orthogonal (org-chart) edge routing through a chain of box/dummy centres.
-// Every run is axis-aligned and straight: the edge leaves the owner's facing edge,
-// drops into the empty channel that sits in the gap *between* two rows, runs across
-// that channel, then into the next row — repeating through any dummy waypoints
-// (which occupy the gap columns between boxes). Because each cross-run lives in a
-// row gap and each along-run lives in a box-centre or dummy column, the line never
-// passes behind a box. Returns the path `d` plus a `mid` anchor for the role label.
+// Orthogonal (org-chart) edge routing through a chain of box/dummy centres. Every
+// run is axis-aligned and straight: the edge leaves the owner's facing edge, drops
+// into the empty channel in the gap *between* two rows, runs across it, then into the
+// next row — repeating through any dummy waypoints (which occupy the gap columns
+// between boxes). Because each cross-run lives in a row gap and each along-run in a
+// box-centre or dummy column, the line never passes behind a box. The exit/entry
+// faces follow the actual band direction (so a reverse link — owner below its target
+// — leaves the top and enters the bottom), and a same-band link dips into the
+// adjacent row gap rather than cutting through the cards. Works along either axis via
+// a main/cross split (main = the band-stacking axis). Returns the path `d` plus a
+// `mid` anchor for the role label.
 function relOrtho(chain, horiz) {
-  const HWm = REL_NODE_W / 2, HHm = REL_NODE_H / 2;
-  const a = chain[0], b = chain[chain.length - 1];
-  if (chain.length < 2) return { d: "", mid: a || { x: 0, y: 0 } };
-  let d;
-  if (horiz) {
-    d = `M ${a.x + HWm} ${a.y}`;
-    for (let i = 0; i < chain.length - 1; i++) {
-      const p = chain[i], q = chain[i + 1], ch = (p.x + q.x) / 2;   // channel in the column gap
-      d += ` L ${ch} ${p.y} L ${ch} ${q.y}`;
-    }
-    d += ` L ${b.x - HWm} ${b.y}`;
-  } else {
-    d = `M ${a.x} ${a.y + HHm}`;
-    for (let i = 0; i < chain.length - 1; i++) {
-      const p = chain[i], q = chain[i + 1], ch = (p.y + q.y) / 2;   // channel in the row gap
-      d += ` L ${p.x} ${ch} L ${q.x} ${ch}`;
-    }
-    d += ` L ${b.x} ${b.y - HHm}`;
+  const halfMain = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
+  const gapHalf = (horiz ? REL_HGAP : REL_VGAP) / 2;
+  const mainOf = (p) => (horiz ? p.x : p.y);
+  const crossOf = (p) => (horiz ? p.y : p.x);
+  const pt = (main, cross) => (horiz ? { x: main, y: cross } : { x: cross, y: main });
+  const pathOf = (P) => P.reduce((s, p, i) => s + (i ? " L " : "M ") + p.x + " " + p.y, "");
+  const n = chain.length;
+  const a = chain[0], b = chain[n - 1];
+  if (n < 2) return { d: "", mid: a || { x: 0, y: 0 } };
+
+  // Same-band link (no rows between the two cards): dip into the gap just past the
+  // band and back, so the run stays out of every card in that band.
+  if (n === 2 && mainOf(a) === mainOf(b)) {
+    const ch = mainOf(a) + halfMain + gapHalf, ac = crossOf(a), bc = crossOf(b);
+    const P = [pt(mainOf(a) + halfMain, ac), pt(ch, ac), pt(ch, bc), pt(mainOf(b) + halfMain, bc)];
+    return { d: pathOf(P), mid: pt(ch, (ac + bc) / 2) };
   }
-  const m = (chain.length - 1) >> 1, p = chain[m], q = chain[m + 1];
-  return { d, mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
+
+  const dStart = Math.sign(mainOf(chain[1]) - mainOf(a)) || 1;
+  const dEnd = Math.sign(mainOf(b) - mainOf(chain[n - 2])) || 1;
+  const P = [pt(mainOf(a) + dStart * halfMain, crossOf(a))];
+  for (let i = 0; i < n - 1; i++) {
+    const p = chain[i], q = chain[i + 1], ch = (mainOf(p) + mainOf(q)) / 2;   // channel in the row gap
+    P.push(pt(ch, crossOf(p)), pt(ch, crossOf(q)));
+  }
+  P.push(pt(mainOf(b) - dEnd * halfMain, crossOf(b)));
+  const m = (n - 1) >> 1, p = chain[m], q = chain[m + 1];
+  return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
 }
 
 function relLayout() {
@@ -1027,12 +1038,17 @@ function relLayout() {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
-  // Ownership uses the orchestrated (crossing-minimized, waypoint-routed) layout;
-  // "by type" uses the simple categorical bands.
-  let order, rows, dummy = {}, edgePath = {}, up = {}, down = {};
+  // Both modes use the same orchestration (crossing-minimized, waypoint-routed) so
+  // every edge is routed through the row gaps and never runs behind a card. Ownership
+  // layers by depth; "by type" layers by category (people / trusts / businesses),
+  // compacting the present bands to dense indices so an absent category leaves no
+  // empty row.
+  let order, rows, dummy, edgePath, up, down;
   if (relView.mode === "type") {
-    ({ order, rows } = typeBands(nodes, (n) => REL_BAND[n.sk] ?? 2));
-    order.forEach((b) => rows[b].forEach((id) => { up[id] = []; down[id] = []; }));
+    const bandVal = (n) => REL_BAND[n.sk] ?? 2;
+    const present = [...new Set(nodes.map(bandVal))].sort((a, b) => a - b);
+    const dense = new Map(present.map((v, i) => [v, i]));
+    ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, (n) => dense.get(bandVal(n))));
   } else {
     ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges));
   }
