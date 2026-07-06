@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, orchestrate } from "../keep/relmap.js";
+import { capTablesByEntity, controlsByEntity, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -1228,6 +1228,7 @@ function relationshipMap() {
   const { nodes, edges, W, H, waypoints, horiz } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
+  const ctrls = controlsByEntity(edges);
   // Focus perspective: when an entity is chosen, highlight it plus its direct
   // owners and holdings and dim the rest. focusSet holds the ids kept bright.
   const focusId = relView.focus && byId.has(relView.focus) ? relView.focus : null;
@@ -1256,9 +1257,10 @@ function relationshipMap() {
   ]));
 
   // Edges under the nodes. A stake edge is tinted with its owner's type colour
-  // (matching that owner's segment in the owned entity's cap-table bar) and carries
-  // no label — the percentage lives on the bar. A control-only link (Trustee, no
-  // stake) is a dashed grey line labelled with its role.
+  // (matching that owner's segment in the owned entity's cap-table bar); a
+  // control-only link (Trustee, no stake) is a dashed grey line. Neither carries a
+  // label — the stake lives on the owned entity's cap-table bar and the control role
+  // lives on a pill inside the controlled entity's box.
   const edgeRefs = edges.map((e) => {
     const stake = parsePct(e.stake) != null;
     const owner = byId.get(e.from);
@@ -1266,13 +1268,7 @@ function relationshipMap() {
     const op = edgeDim(e) ? "0.08" : (stake ? "0.85" : "0.7");
     const path = s("path", { fill: "none", stroke: color, "stroke-width": stake ? "2.5" : "2", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: op, "stroke-dasharray": stake ? "" : "1 6" });
     svg.appendChild(path);
-    let lrect = null, ltext = null;
-    if (!stake && e.role) {
-      const lop = edgeDim(e) ? "0.1" : null;
-      lrect = s("rect", Object.assign({ rx: 10, height: 20, fill: "#ffffff", stroke: "#E3EBFA" }, lop ? { opacity: lop } : {}));
-      ltext = svgText(e.role, Object.assign({ "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: "#7A85A0", "font-family": FS }, lop ? { opacity: lop } : {}));
-    }
-    return { ...e, stake, path, lrect, ltext, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
+    return { ...e, stake, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
   const updateEdges = () => {
     edgeRefs.forEach((er) => {
@@ -1280,13 +1276,8 @@ function relationshipMap() {
       // of box centres and any dummy waypoints, so it steps through the row gaps and
       // never runs behind a box.
       const chain = [center(er.from), ...er.wp, center(er.to)];
-      const { d, mid } = relOrtho(chain, horiz);
+      const { d } = relOrtho(chain, horiz);
       er.path.setAttribute("d", d);
-      if (er.lrect) {                          // centre the role label on the middle channel
-        const lw = (er.role.length * 6.1) + 16;
-        er.lrect.setAttribute("x", mid.x - lw / 2); er.lrect.setAttribute("y", mid.y - 10); er.lrect.setAttribute("width", lw);
-        er.ltext.setAttribute("x", mid.x); er.ltext.setAttribute("y", mid.y + 4);
-      }
     });
   };
 
@@ -1295,11 +1286,15 @@ function relationshipMap() {
     const top = n.cy - NODE_H / 2;
     const interactive = Boolean(n.href);
     const cap = caps[n.id];
-    // Speak the ownership split to assistive tech — the bar's percentages are
-    // otherwise only in hover <title>s, which never fire on touch (iPad Safari).
-    const ownDesc = cap && cap.length
+    const ctrl = ctrls[n.id];
+    // Speak the ownership split + control roles to assistive tech — otherwise only in
+    // hover <title>s, which never fire on touch (iPad Safari).
+    const ownDesc = (cap && cap.length
       ? " Owned by " + cap.map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "an owner"} ${c.pct}%`; }).join(", ") + "."
-      : "";
+      : "")
+      + (ctrl && ctrl.length
+        ? " " + ctrl.map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} ${c.role}`; }).join(", ") + "."
+        : "");
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}.${ownDesc}` }
       : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample).${ownDesc}` });
@@ -1361,6 +1356,31 @@ function relationshipMap() {
       g.appendChild(barG);
     }
 
+    // Control-only relationships (a trustee, a manager with no equity) show as a
+    // pill inside the controlled entity's box — "<initials> <role>", coloured by the
+    // controller's type. The role lives here now, not as a label on the connector.
+    if (ctrl && ctrl.length) {
+      const py = (cap && cap.length) ? top + NODE_H - 48 : top + NODE_H - 26;   // above the cap bar if one exists
+      let px = n.x + 16;
+      const shownC = ctrl.length > 2 ? 1 : ctrl.length;
+      const pill = (label, fill, tip) => {
+        const w = Math.min(label.length * 5.7 + 16, NODE_W - 32);
+        const grp = s("g", {});
+        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill }));
+        grp.appendChild(svgText(label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
+        g.appendChild(grp);
+        px += w + 6;
+      };
+      for (let i = 0; i < shownC; i++) {
+        const c = ctrl[i], ow = byId.get(c.ownerId);
+        pill(`${ow ? ow.initials : "?"} ${c.role}`, REL_TYPE_COLOR[ow ? ow.sk : "person"] || "#9aa5bd", `${ow ? ow.name : "Someone"} — ${c.role}`);
+      }
+      if (ctrl.length > shownC) {
+        pill(`+${ctrl.length - shownC}`, "#9aa5bd", ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", "));
+      }
+    }
+
     // Opening: a tap/click is resolved by the viewport pan controller via data-href
     // (so a drag never counts as a tap); Enter/Space opens via the keyboard.
     if (interactive) {
@@ -1371,8 +1391,6 @@ function relationshipMap() {
     svg.appendChild(g);
   });
 
-  // Role labels on top of the nodes, then set initial geometry.
-  edgeRefs.forEach((er) => { if (er.lrect) { svg.appendChild(er.lrect); svg.appendChild(er.ltext); } });
   updateEdges();
 
   const wrap = el("div", { class: "k-relmap" }, [svg]);

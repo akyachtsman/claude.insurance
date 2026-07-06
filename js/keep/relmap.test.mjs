@@ -1,7 +1,7 @@
 // Tests for keep/relmap.js — run: node --test js/keep/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, layeredLayout, fitPlan, typeBands, orchestrate } from "./relmap.js";
+import { capTablesByEntity, controlsByEntity, layeredLayout, fitPlan, typeBands, orchestrate } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -190,4 +190,21 @@ test("layeredLayout handles a single unlinked node", () => {
 
 test("capTablesByEntity returns an empty object for no edges", () => {
   assert.deepEqual(capTablesByEntity([]), {});
+});
+
+test("controlsByEntity groups no-stake role links on the controlled entity", () => {
+  const ctrls = controlsByEntity(EDGES);
+  // trustA is controlled by me as Trustee, with no stake
+  assert.deepEqual(ctrls.trustA, [{ ownerId: "me", role: "Trustee" }]);
+  // cafe is owned by stakes only → no control-only entry
+  assert.equal(ctrls.cafe, undefined);
+});
+
+test("controlsByEntity ignores stake links and role-less links", () => {
+  const ctrls = controlsByEntity([
+    { from: "a", to: "b", role: "Member", stake: "50%" },   // has a stake → not control-only
+    { from: "c", to: "d", role: "", stake: "" },             // no role → skipped
+    { from: "e", to: "f", role: "Manager", stake: "" },      // control-only → kept
+  ]);
+  assert.deepEqual(ctrls, { f: [{ ownerId: "e", role: "Manager" }] });
 });
