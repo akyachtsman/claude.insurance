@@ -1,7 +1,7 @@
 // Tests for keep/relmap.js — run: node --test js/keep/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, layeredLayout, fitPlan } from "./relmap.js";
+import { capTablesByEntity, layeredLayout, fitPlan, typeBands } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -76,6 +76,22 @@ test("fitPlan pans once boxes would drop below the minimum", () => {
   assert.equal(plan.mode, "pan");
   // render width holds nodes at exactly the floor: 2000 * (150/200) = 1500
   assert.equal(plan.renderW, 1500);
+});
+
+test("typeBands groups nodes into bands and preserves within-band order", () => {
+  const ns = [
+    { id: "me", band: 0 }, { id: "spouse", band: 0 },
+    { id: "trustA", band: 1 },
+    { id: "cafe", band: 2 }, { id: "holdco", band: 2 },
+  ];
+  const { order, rows } = typeBands(ns, (n) => n.band);
+  assert.deepEqual(order, [0, 1, 2]);
+  assert.deepEqual(rows, { 0: ["me", "spouse"], 1: ["trustA"], 2: ["cafe", "holdco"] });
+});
+
+test("typeBands omits empty bands from order", () => {
+  const { order } = typeBands([{ id: "a", band: 2 }, { id: "b", band: 2 }], (n) => n.band);
+  assert.deepEqual(order, [2]);
 });
 
 test("fitPlan is safe with no container width", () => {

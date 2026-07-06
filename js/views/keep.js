@@ -23,7 +23,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { capTablesByEntity, layeredLayout } from "../keep/relmap.js";
+import { capTablesByEntity, layeredLayout, typeBands } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -957,6 +957,13 @@ const REL_STYLE = {
 // nonprofit), so a colour on the map always reads as an entity type, not a
 // per-owner rainbow. Matches the accent/danger/warn/ok tokens in tokens.css.
 const REL_TYPE_COLOR = { me: "#2F6AF6", person: "#6E9BF5", biz: "#C42B30", trust: "#B5660A", np: "#0E8E66" };
+// Band order for the "by type" perspective: people, trusts, businesses.
+const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
+// View controls for the Relationships map — held across in-view re-renders so the
+// toolbar and the chart stay in sync. orient: vertical|horizontal · mode:
+// ownership (by depth) | type (by category) · focus: entity id or null · chips /
+// trustees: declutter toggles.
+const relView = { orient: "vertical", mode: "ownership", focus: null, chips: true, trustees: true };
 // DB entity node → REL_STYLE key. Personal renders as the gradient "me" node;
 // nonprofit businesses (green) split from for-profit businesses (red) by subtype.
 function relStyleKey(node) {
@@ -972,25 +979,45 @@ function relStyleKey(node) {
 const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 46, REL_PAD = 34;
 // Below this on-screen box width the map stops shrinking and pans instead.
 const REL_MIN_NODE_PX = 150;
+// Lay the graph out per the current relView. Bands (ownership layers, or type
+// groups) stack along one axis; members spread along the other. Orientation swaps
+// which axis is which — vertical stacks bands top-down, horizontal stacks them
+// left-to-right (spreading deep chains across the width). Trustee links are
+// dropped from the graph when that declutter toggle is off.
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
+  const edges = relView.trustees ? data.edges : data.edges.filter((e) => parsePct(e.stake) != null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const { order, rows } = layeredLayout(nodes, data.edges);
-  const maxCols = Math.max(1, ...order.map((r) => rows[r].length));
-  const W = REL_PAD * 2 + maxCols * REL_NODE_W + (maxCols - 1) * REL_HGAP;
-  const H = REL_PAD * 2 + order.length * REL_NODE_H + Math.max(0, order.length - 1) * REL_VGAP;
-  order.forEach((r, ri) => {
-    const ids = rows[r];
-    const rowW = ids.length * REL_NODE_W + (ids.length - 1) * REL_HGAP;
-    const x0 = (W - rowW) / 2;
-    ids.forEach((id, i) => {
-      const n = byId.get(id);
-      n.x = Math.round(x0 + i * (REL_NODE_W + REL_HGAP));
-      n.cy = Math.round(REL_PAD + ri * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
-    });
+  const { order, rows } = relView.mode === "type"
+    ? typeBands(nodes, (n) => REL_BAND[n.sk] ?? 2)
+    : layeredLayout(nodes, edges);
+  const bands = order.length || 1;
+  const maxSlots = Math.max(1, ...order.map((b) => rows[b].length));
+  const horiz = relView.orient === "horizontal";
+  const spanW = (k) => k * REL_NODE_W + (k - 1) * REL_HGAP;
+  const spanH = (k) => k * REL_NODE_H + (k - 1) * REL_VGAP;
+  const W = REL_PAD * 2 + (horiz ? spanW(bands) : spanW(maxSlots));
+  const H = REL_PAD * 2 + (horiz ? spanH(maxSlots) : spanH(bands));
+  order.forEach((b, bi) => {
+    const ids = rows[b];
+    if (horiz) {
+      const y0 = (H - spanH(ids.length)) / 2;
+      ids.forEach((id, i) => {
+        const n = byId.get(id);
+        n.x = Math.round(REL_PAD + bi * (REL_NODE_W + REL_HGAP));
+        n.cy = Math.round(y0 + i * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
+      });
+    } else {
+      const x0 = (W - spanW(ids.length)) / 2;
+      ids.forEach((id, i) => {
+        const n = byId.get(id);
+        n.x = Math.round(x0 + i * (REL_NODE_W + REL_HGAP));
+        n.cy = Math.round(REL_PAD + bi * (REL_NODE_H + REL_VGAP) + REL_NODE_H / 2);
+      });
+    }
   });
-  return { nodes, edges: data.edges, W, H };
+  return { nodes, edges, W, H };
 }
 
 // The map is a fixed-size viewport you pan in 2D: the whole chart translates under
@@ -1022,6 +1049,7 @@ function setupRelViewport(wrap, svg, W, H) {
     });
     ro.observe(wrap);
   }
+  wrap.__relfit = fit;     // exposed so the toolbar's "Fit to screen" can recentre
   fit();
 
   // Drag-to-pan (mouse + touch). Opening a node is a genuine `click` (below), so it
@@ -1062,8 +1090,18 @@ function relationshipMap() {
   const { nodes, edges, W, H } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
-  // Every node sits at its computed layered-layout position — no dragging, no
-  // persistence, so the map is always the clean auto-layout.
+  // Focus perspective: when an entity is chosen, highlight it plus its direct
+  // owners and holdings and dim the rest. focusSet holds the ids kept bright.
+  const focusId = relView.focus && byId.has(relView.focus) ? relView.focus : null;
+  let focusSet = null;
+  if (focusId) {
+    focusSet = new Set([focusId]);
+    edges.forEach((e) => { if (e.from === focusId) focusSet.add(e.to); else if (e.to === focusId) focusSet.add(e.from); });
+  }
+  const nodeDim = (id) => focusSet && !focusSet.has(id) ? "0.14" : null;
+  const edgeDim = (e) => focusSet && e.from !== focusId && e.to !== focusId;
+  // Every node sits at its computed layout position — no dragging, no persistence,
+  // so the map is always the clean auto-layout.
   const pos = {};
   nodes.forEach((n) => { pos[n.id] = { x: n.x, cy: n.cy }; });
   const center = (id) => ({ x: pos[id].x + NODE_W / 2, y: pos[id].cy });
@@ -1087,12 +1125,14 @@ function relationshipMap() {
     const stake = parsePct(e.stake) != null;
     const owner = byId.get(e.from);
     const color = stake ? (REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#c3b2f0") : "#c7d0e4";
-    const path = s("path", { fill: "none", stroke: color, "stroke-width": stake ? "2.5" : "2", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: stake ? "0.85" : "0.7", "stroke-dasharray": stake ? "" : "1 6" });
+    const op = edgeDim(e) ? "0.08" : (stake ? "0.85" : "0.7");
+    const path = s("path", { fill: "none", stroke: color, "stroke-width": stake ? "2.5" : "2", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: op, "stroke-dasharray": stake ? "" : "1 6" });
     svg.appendChild(path);
     let lrect = null, ltext = null;
     if (!stake && e.role) {
-      lrect = s("rect", { rx: 10, height: 20, fill: "#ffffff", stroke: "#E3EBFA" });
-      ltext = svgText(e.role, { "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: "#7A85A0", "font-family": FS });
+      const lop = edgeDim(e) ? "0.1" : null;
+      lrect = s("rect", Object.assign({ rx: 10, height: 20, fill: "#ffffff", stroke: "#E3EBFA" }, lop ? { opacity: lop } : {}));
+      ltext = svgText(e.role, Object.assign({ "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: "#7A85A0", "font-family": FS }, lop ? { opacity: lop } : {}));
     }
     return { ...e, stake, path, lrect, ltext };
   });
@@ -1131,6 +1171,8 @@ function relationshipMap() {
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}.${ownDesc}` }
       : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample).${ownDesc}` });
+    const dim = nodeDim(n.id);
+    if (dim) g.setAttribute("opacity", dim);
     g.appendChild(s("rect", { x: n.x, y: top, width: NODE_W, height: NODE_H, rx: 18, fill: o.fill, stroke: o.stroke || "none", "stroke-width": o.stroke ? "1.5" : "0" }));
     const ax = n.x + 34, avy = top + 30;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
@@ -1140,7 +1182,7 @@ function relationshipMap() {
 
     // Asset chips: little circles for what this entity holds — initials inside,
     // full name on hover. Overflow collapses to a "+N" chip.
-    const owned = n.assetNames || [];
+    const owned = relView.chips ? (n.assetNames || []) : [];
     if (owned.length) {
       const dark = n.sk === "me";
       const cFill = dark ? "rgba(255,255,255,.22)" : "#EEF2FB";
@@ -1422,13 +1464,80 @@ async function renderEntityCollection(layout) {
 export function renderKeepEntityList() { return renderEntityCollection("rows"); }
 export function renderKeepEntityGrid() { return renderEntityCollection("cards"); }
 
+// A segmented toggle: one button per option, the active one pressed. The active
+// value is tracked here and every button's is-on/aria-pressed is refreshed on each
+// pick, so the control stays reversible even though only the chart (not the
+// toolbar) redraws on a change.
+function relSeg(current, opts, onPick) {
+  const seg = el("div", { class: "k-seg", attrs: { role: "group" } });
+  let active = current;
+  const btns = opts.map((o) => {
+    const b = el("button", { class: "k-seg__b", attrs: { type: "button" } }, [el("span", { text: o.label })]);
+    b.addEventListener("click", () => {
+      if (o.val === active) return;
+      active = o.val; sync(); onPick(o.val);
+    });
+    return { b, val: o.val };
+  });
+  const sync = () => btns.forEach(({ b, val }) => {
+    const on = val === active;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  btns.forEach(({ b }) => seg.appendChild(b));
+  sync();
+  return seg;
+}
+// A labelled checkbox declutter toggle.
+function relCheck(labelText, checked, onToggle) {
+  const input = el("input", { attrs: Object.assign({ type: "checkbox" }, checked ? { checked: "checked" } : {}) });
+  input.addEventListener("change", () => onToggle(input.checked));
+  return el("label", { class: "k-relchk" }, [input, el("span", { text: labelText })]);
+}
+// The perspective toolbar above the map. Each control mutates relView and redraws
+// the chart (drawMap); "Fit to screen" recentres the current chart without a redraw.
+function relToolbar(drawMap, host) {
+  const set = (patch) => { Object.assign(relView, patch); drawMap(); };
+  const group = (labelText, control) => el("div", { class: "k-reltool" }, [el("span", { class: "k-reltool__lbl", text: labelText }), control]);
+
+  const orient = relSeg(relView.orient, [{ val: "vertical", label: "Vertical" }, { val: "horizontal", label: "Horizontal" }], (v) => set({ orient: v }));
+  const mode = relSeg(relView.mode, [{ val: "ownership", label: "Ownership" }, { val: "type", label: "By type" }], (v) => set({ mode: v }));
+
+  const sel = el("select", { class: "k-relsel", attrs: { "aria-label": "Focus on one entity" } }, [
+    el("option", { attrs: { value: "" }, text: "Everyone" }),
+    ...getMapData().nodes.slice().sort((a, b) => a.name.localeCompare(b.name)).map((n) =>
+      el("option", { attrs: Object.assign({ value: n.id }, relView.focus === n.id ? { selected: "selected" } : {}), text: n.name })),
+  ]);
+  sel.addEventListener("change", () => set({ focus: sel.value || null }));
+
+  const fit = el("button", { class: "k-relbtn", attrs: { type: "button" } }, [el("span", { text: "Fit to screen" })]);
+  fit.addEventListener("click", () => { const w = host.querySelector(".k-relmap"); if (w && w.__relfit) w.__relfit(); });
+
+  return el("div", { class: "k-reltools", attrs: { role: "toolbar", "aria-label": "Chart view controls" } }, [
+    group("Layout", orient),
+    group("Arrange", mode),
+    group("Focus", sel),
+    group("Show", el("div", { class: "k-relchks" }, [
+      relCheck("Assets", relView.chips, (v) => set({ chips: v })),
+      relCheck("Control links", relView.trustees, (v) => set({ trustees: v })),
+    ])),
+    fit,
+  ]);
+}
+
 export function renderKeepEntities() {
+  // Redraw only the chart on a control change; the toolbar keeps its own state.
+  const host = el("div", { class: "k-relhost" });
+  const drawMap = () => { host.textContent = ""; host.appendChild(relationshipMap()); };
+  const tools = relToolbar(drawMap, host);
+  drawMap();
   const view = page("list", [
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle("map"),
     entitiesPrivacyRow(),
-    relationshipMap(),
-    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Drag anywhere to move the map around; tap an entity you manage to open it." }),
+    tools,
+    host,
+    el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Use the controls above to re-orient, regroup, focus on one entity, or declutter. Drag anywhere to move the map; tap an entity you manage to open it." }),
   ]);
   mount(view);
 }

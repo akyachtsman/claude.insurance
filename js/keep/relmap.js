@@ -59,6 +59,20 @@ export function layeredLayout(nodes, edges) {
   return { order, rows, layerOf: layer };
 }
 
+// Group nodes into bands for the "by type" perspective — people, trusts,
+// businesses — returning the same { order, rows } shape as layeredLayout so the
+// renderer can consume either. `bandOf(node)` maps a node to its band index;
+// input order is preserved within a band. Pure.
+export function typeBands(nodes, bandOf) {
+  const rows = {};
+  for (const n of nodes) {
+    const b = bandOf(n);
+    (rows[b] = rows[b] || []).push(n.id);
+  }
+  const order = Object.keys(rows).map(Number).sort((a, b) => a - b);
+  return { order, rows };
+}
+
 // Fit-to-width vs. pan decision. If scaling the content to the container would
 // shrink a node below `minNodePx`, we stop shrinking: render at that floor (wider
 // than the container) and let the map pan. Otherwise it fits and scales to width.
