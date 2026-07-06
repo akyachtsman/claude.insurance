@@ -1048,7 +1048,7 @@ function alignCross(order, rows, up, down, sepOf) {
 // picks the along-gap coordinate for each run (used to fan each owner's bus onto its
 // own lane so runs don't overlap); it defaults to the middle of the gap. Returns the
 // path `d` plus a `mid` anchor for the role label.
-function relOrtho(chain, horiz, channelOf) {
+function relOrtho(chain, horiz, channelOf, entryCross) {
   const halfMain = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
   const gapHalf = (horiz ? REL_HGAP : REL_VGAP) / 2;
   const mainOf = (p) => (horiz ? p.x : p.y);
@@ -1069,13 +1069,16 @@ function relOrtho(chain, horiz, channelOf) {
 
   const dStart = Math.sign(mainOf(chain[1]) - mainOf(a)) || 1;
   const dEnd = Math.sign(mainOf(b) - mainOf(chain[n - 2])) || 1;
+  // Enter the target at `entryCross` when given (its owner's slice of the cap-table
+  // bar) so several arrows into one box spread across the bar instead of stacking on
+  // the centre; the last run jogs to it.
+  const crossAt = (i) => (i === n - 1 && entryCross != null) ? entryCross : crossOf(chain[i]);
   const P = [pt(mainOf(a) + dStart * halfMain, crossOf(a))];
   for (let i = 0; i < n - 1; i++) {
-    const p = chain[i], q = chain[i + 1];
-    const ch = channelOf ? channelOf(p, q) : (mainOf(p) + mainOf(q)) / 2;   // channel (lane) in the row gap
-    P.push(pt(ch, crossOf(p)), pt(ch, crossOf(q)));
+    const ch = channelOf ? channelOf(chain[i], chain[i + 1]) : (mainOf(chain[i]) + mainOf(chain[i + 1])) / 2;   // channel (lane) in the row gap
+    P.push(pt(ch, crossAt(i)), pt(ch, crossAt(i + 1)));
   }
-  P.push(pt(mainOf(b) - dEnd * halfMain, crossOf(b)));
+  P.push(pt(mainOf(b) - dEnd * halfMain, crossAt(n - 1)));
   const m = (n - 1) >> 1, p = chain[m], q = chain[m + 1];
   return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
 }
@@ -1271,6 +1274,33 @@ function relationshipMap() {
   nodes.forEach((n) => { pos[n.id] = { x: n.x, cy: n.cy }; });
   const center = (id) => ({ x: pos[id].x + NODE_W / 2, y: pos[id].cy });
 
+  // Cap-table bar geometry per owned entity, computed once so the bar and the arrows
+  // that point at it agree. `seg.center` is the x of each owner's slice; an incoming
+  // ownership arrow enters the box there (vertical only) so several arrows fan across
+  // the bar instead of stacking on the box centre.
+  const capBars = {};
+  nodes.forEach((n) => {
+    const cap = caps[n.id];
+    if (!cap || !cap.length) return;
+    const total = cap.reduce((t, c) => t + c.pct, 0);
+    const barW = Math.min(NODE_W - 32, Math.max(80, cap.length * 64));
+    const barX = n.x + (NODE_W - barW) / 2;
+    const segs = [];
+    let cx = barX;
+    [...cap].sort((a, b) => b.pct - a.pct).forEach((c) => {
+      const w = barW * (c.pct / Math.max(total, 100));
+      segs.push({ ownerId: c.ownerId, pct: c.pct, x: cx, w, center: cx + w / 2 });
+      cx += w;
+    });
+    capBars[n.id] = { barX, barW, total, segs };
+  });
+  const entryCrossFor = (e) => {
+    if (horiz) return null;                                   // segments run along x; entry is on the side face
+    const bar = capBars[e.to];
+    const seg = bar && bar.segs.find((sg) => sg.ownerId === e.from);
+    return seg ? seg.center : null;
+  };
+
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
     s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
@@ -1338,7 +1368,7 @@ function relationshipMap() {
       // of box centres and any dummy waypoints, so it steps through the row gaps and
       // never runs behind a box, each owner on its own lane.
       const chain = [center(er.from), ...er.wp, center(er.to)];
-      const { d } = relOrtho(chain, horiz, channelOf);
+      const { d } = relOrtho(chain, horiz, channelOf, entryCrossFor(er));
       er.path.setAttribute("d", d);
     });
   };
@@ -1402,28 +1432,25 @@ function relationshipMap() {
     // segment coloured by its owner's type and labelled with the owner's initials.
     // Hairline separators keep same-colour neighbours distinct; a shortfall shows
     // as the faint unfilled remainder. Sits in the header, just under the arrow.
-    if (cap && cap.length) {
-      const total = cap.reduce((t, c) => t + c.pct, 0);
-      // Width fits the content — a lone "XX 100%" is narrow, more owners widen it up
-      // to the full box — and the bar is centred under the incoming arrow.
-      const barW = Math.min(NODE_W - 32, Math.max(80, cap.length * 64));
-      const barX = n.x + (NODE_W - barW) / 2, barY = top + 10, barH = 16;
+    if (capBars[n.id]) {
+      // One bar summing to 100%, each segment coloured by its owner's type and
+      // labelled with the owner's initials; geometry comes from capBars so the arrows
+      // land on the right slices. A shortfall shows as the faint unfilled remainder.
+      const { barX, barW, segs } = capBars[n.id];
+      const barY = top + 10, barH = 16;
       const clipId = "relcap-" + n.id.replace(/[^a-z0-9]/gi, "");
       g.appendChild(s("defs", {}, [s("clipPath", { id: clipId }, [s("rect", { x: barX, y: barY, width: barW, height: barH, rx: 8 })])]));
       const barG = s("g", { "clip-path": `url(#${clipId})` });
       barG.appendChild(s("rect", { x: barX, y: barY, width: barW, height: barH, fill: "#EEF2FB" }));
-      let cx = barX;
-      [...cap].sort((a, b) => b.pct - a.pct).forEach((c, i) => {
-        const w = barW * (c.pct / Math.max(total, 100));
-        const owner = byId.get(c.ownerId);
-        if (i > 0) barG.appendChild(s("rect", { x: cx - 0.75, y: barY, width: 1.5, height: barH, fill: "#ffffff" }));
-        const seg = s("rect", { x: cx, y: barY, width: w, height: barH, fill: REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#9aa5bd" });
-        const ti = s("title", {}); ti.textContent = `${owner ? owner.name : "Owner"} — ${c.pct}%`; seg.appendChild(ti);
-        barG.appendChild(seg);
-        const lbl = `${owner ? owner.initials : "?"} ${c.pct}%`;
-        if (w > 46) barG.appendChild(svgText(lbl, { x: cx + w / 2, y: barY + 11, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
-        else if (w > 15) barG.appendChild(svgText(`${c.pct}`, { x: cx + w / 2, y: barY + 11, "text-anchor": "middle", "font-size": "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
-        cx += w;
+      segs.forEach((sg, i) => {
+        const owner = byId.get(sg.ownerId);
+        if (i > 0) barG.appendChild(s("rect", { x: sg.x - 0.75, y: barY, width: 1.5, height: barH, fill: "#ffffff" }));
+        const rect = s("rect", { x: sg.x, y: barY, width: sg.w, height: barH, fill: REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#9aa5bd" });
+        const ti = s("title", {}); ti.textContent = `${owner ? owner.name : "Owner"} — ${sg.pct}%`; rect.appendChild(ti);
+        barG.appendChild(rect);
+        const lbl = `${owner ? owner.initials : "?"} ${sg.pct}%`;
+        if (sg.w > 46) barG.appendChild(svgText(lbl, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        else if (sg.w > 15) barG.appendChild(svgText(`${sg.pct}`, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
       });
       g.appendChild(barG);
     }
