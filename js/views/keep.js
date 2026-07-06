@@ -973,20 +973,66 @@ const REL_ZOOM_MIN = 0.3, REL_ZOOM_MAX = 2.4, REL_ZOOM_STEP = 1.25;
 // which axis is which — vertical stacks bands top-down, horizontal stacks them
 // left-to-right (spreading deep chains across the width). Trustee links are
 // dropped from the graph when that declutter toggle is off.
-// Cross-axis placement: start each row left-packed, then iterate every node toward
-// the average position of its neighbours while preserving row order and a minimum
-// separation — so nodes line up under their owners without overlapping.
+// Cross-axis placement (Brandes–Köpf). A simple barycenter relaxation drifts and
+// never straightens single-child chains (a deep A→B→C hangs out as a staircase).
+// Instead: (1) align each node under the median of its owners, chaining nodes into
+// vertical "blocks" while forbidding crossings, so an ownership chain becomes one
+// straight column; then (2) compact the blocks as far toward the start of the axis
+// as the minimum separation allows. Deterministic; owners sit directly above what
+// they own and the whole layout packs tight.
 function alignCross(order, rows, up, down, sepOf) {
-  const c = {};
-  order.forEach((r) => { let acc = 0; rows[r].forEach((id, i) => { if (i > 0) acc += sepOf(rows[r][i - 1], id); c[id] = acc; }); });
-  const place = (ids) => {
-    const d = ids.map((id) => { const nb = [...(up[id] || []), ...(down[id] || [])]; return nb.length ? nb.reduce((s, q) => s + c[q], 0) / nb.length : c[id]; });
-    for (let i = 1; i < ids.length; i++) d[i] = Math.max(d[i], d[i - 1] + sepOf(ids[i - 1], ids[i]));       // no overlap
-    for (let i = ids.length - 2; i >= 0; i--) d[i] = Math.min(d[i], d[i + 1] - sepOf(ids[i], ids[i + 1]));  // pull toward centre
-    for (let i = 1; i < ids.length; i++) d[i] = Math.max(d[i], d[i - 1] + sepOf(ids[i - 1], ids[i]));       // re-assert feasibility
-    ids.forEach((id, i) => { c[id] = d[i]; });
+  const rowOf = {}, pos = {};
+  order.forEach((r) => rows[r].forEach((id, i) => { rowOf[id] = r; pos[id] = i; }));
+
+  // (1) Vertical alignment: link each node to its median owner into a block
+  // (root = block head, alignN = next node in the block, cyclic).
+  const root = {}, alignN = {};
+  order.forEach((r) => rows[r].forEach((id) => { root[id] = id; alignN[id] = id; }));
+  for (let ri = 1; ri < order.length; ri++) {
+    const r = order[ri], prev = order[ri - 1];
+    let last = -1;                                    // owner index used so far — keep increasing (no crossing)
+    for (const v of rows[r]) {
+      const owners = (up[v] || []).map((u) => pos[u]);
+      if (!owners.length) continue;
+      owners.sort((a, b) => a - b);
+      const lo = Math.floor((owners.length - 1) / 2), hi = Math.ceil((owners.length - 1) / 2);
+      for (let m = lo; m <= hi; m++) {
+        if (alignN[v] !== v) break;                   // already placed in a block
+        const oi = owners[m];
+        if (oi > last) { const u = rows[prev][oi]; alignN[u] = v; root[v] = root[u]; alignN[v] = root[v]; last = oi; }
+      }
+    }
+  }
+
+  // (2) Horizontal compaction: shove each block toward the axis start, respecting
+  // the min separation against the block to its left in every row (BK sink/shift).
+  const sink = {}, shift = {}, x = {};
+  order.forEach((r) => rows[r].forEach((id) => { sink[id] = id; shift[id] = Infinity; }));
+  const place = (v) => {
+    if (x[v] != null) return;
+    x[v] = 0;
+    let w = v;
+    do {
+      const p = pos[w];
+      if (p > 0) {
+        const u = rows[rowOf[w]][p - 1], ru = root[u];
+        place(ru);
+        const sep = sepOf(u, w);
+        if (sink[v] === v) sink[v] = sink[ru];
+        if (sink[v] !== sink[ru]) shift[sink[ru]] = Math.min(shift[sink[ru]], x[v] - x[ru] - sep);
+        else x[v] = Math.max(x[v], x[ru] + sep);
+      }
+      w = alignN[w];
+    } while (w !== v);
   };
-  for (let p = 0; p < 10; p++) { const seq = p % 2 ? order.slice().reverse() : order; seq.forEach((r) => place(rows[r])); }
+  order.forEach((r) => rows[r].forEach((id) => { if (root[id] === id) place(id); }));
+
+  const c = {};
+  order.forEach((r) => rows[r].forEach((id) => {
+    c[id] = x[root[id]];
+    const sh = shift[sink[root[id]]];
+    if (sh < Infinity) c[id] += sh;
+  }));
   return c;
 }
 // Orthogonal (org-chart) edge routing through a chain of box/dummy centres. Every
