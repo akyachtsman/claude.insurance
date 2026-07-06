@@ -1135,6 +1135,9 @@ function setupRelViewport(wrap, svg, W, H) {
     down = true; moved = false; sx = ev.clientX; sy = ev.clientY; otx = tx; oty = ty;
     pressNode = ev.target.closest ? ev.target.closest(".k-relnode--link") : null;
     wrap.classList.add("is-grabbing");
+    // Stop the browser starting a text selection on the drag (the click that opens
+    // a node still fires, and keyboard focus is unaffected).
+    if (ev.cancelable) ev.preventDefault();
     try { wrap.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
   });
   wrap.addEventListener("pointermove", (ev) => {
