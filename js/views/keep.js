@@ -1112,17 +1112,31 @@ function setupRelViewport(wrap, svg, W, H) {
     });
     ro.observe(wrap);
   }
-  // Manual zoom: scale around the viewport centre so the focal point stays put,
-  // then re-clamp the pan. Exposed for the on-map +/- buttons.
+  // Manual zoom: scale to `nk`, keeping the content point under the focal point
+  // (fx, fy — viewport-relative) fixed, then re-clamp the pan.
+  const zoomTo = (nk, fx, fy) => {
+    nk = Math.max(REL_ZOOM_MIN, Math.min(REL_ZOOM_MAX, nk));
+    if (nk === k) return;
+    const cx = (fx - tx) / k, cy = (fy - ty) / k;   // content point under the focal point
+    k = nk; tx = fx - cx * k; ty = fy - cy * k;
+    clampPan(wrap.clientWidth || 0, wrap.clientHeight || 0); applyT();
+  };
+  // The on-map +/- buttons zoom around the viewport centre.
   const zoom = (dir) => {
     const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
     if (!vw || !vh) return;
-    const nk = Math.max(REL_ZOOM_MIN, Math.min(REL_ZOOM_MAX, dir > 0 ? k * REL_ZOOM_STEP : k / REL_ZOOM_STEP));
-    if (nk === k) return;
-    const cx = (vw / 2 - tx) / k, cy = (vh / 2 - ty) / k;   // content point under the viewport centre
-    k = nk; tx = vw / 2 - cx * k; ty = vh / 2 - cy * k;
-    clampPan(vw, vh); applyT();
+    zoomTo(dir > 0 ? k * REL_ZOOM_STEP : k / REL_ZOOM_STEP, vw / 2, vh / 2);
   };
+  // Mouse-wheel / trackpad zoom toward the cursor. deltaMode is normalised to
+  // pixels; scroll up zooms in. preventDefault (non-passive) so the page doesn't
+  // scroll while pointing at the map.
+  wrap.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    let d = ev.deltaY;
+    if (ev.deltaMode === 1) d *= 16; else if (ev.deltaMode === 2) d *= (wrap.clientHeight || 400);
+    const r = wrap.getBoundingClientRect();
+    zoomTo(k * Math.exp(-d * 0.0015), ev.clientX - r.left, ev.clientY - r.top);
+  }, { passive: false });
   wrap.__relfit = fit;     // exposed so the toolbar's "Fit to screen" can recentre
   wrap.__relzoom = zoom;   // exposed for the on-map zoom buttons
   fit();
