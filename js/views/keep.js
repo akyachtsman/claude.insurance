@@ -962,7 +962,7 @@ function relStyleKey(node) {
 // (owners above what they own) — see keep/relmap.js orchestrate — and sizes the
 // canvas to the busiest row and the depth of the deepest chain, so boxes never
 // pack tighter than one node + gap.
-const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 46, REL_PAD = 34;
+const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 78, REL_PAD = 34;
 const REL_DUMMY_W = 16;   // routing-waypoint slot width on the cross axis
 // Below this on-screen box width the map stops shrinking and pans instead.
 const REL_MIN_NODE_PX = 150;
@@ -1387,7 +1387,7 @@ function relationshipMap() {
     const room = Math.abs(dm - um) - 2 * halfMainNode;           // clear space between the two rows
     const buses = [...busMap.values()].sort((p, q) => (horiz ? p.y - q.y : p.x - q.x));
     const k = buses.length;
-    const step = k > 1 ? Math.min(9, Math.max(0, room - 8) / (k - 1)) : 0;
+    const step = k > 1 ? Math.min(18, Math.max(0, room - 10) / (k - 1)) : 0;   // clear vertical gap between lanes so converging owner lines read as separate
     buses.forEach((p, i) => channelY.set(laneKey(p), mid + (i - (k - 1) / 2) * step));
   });
   const channelOf = (p, q) => {
