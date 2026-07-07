@@ -1083,19 +1083,20 @@ function relOrtho(chain, horiz, channelOf, entryCross) {
   return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, pts: P };
 }
 
-// Build an edge's path string, hopping each of its gap-spanning runs over the
-// perpendicular runs of OTHER edges with a small arc "bridge" — so where an edge
+// Build an edge's path string, breaking each of its gap-spanning runs with a small
+// GAP where it crosses the perpendicular run of another edge — so where an edge
 // merely passes across another (e.g. a holding company's connector crossing the
-// arrows into an unrelated box) it reads as a crossing, not a join. `crossers` are
-// the perpendicular segments of every other edge: `c` is their constant coordinate
-// and `[s0,s1]` their span. In vertical layout the gap-spanning run is horizontal;
-// in horizontal layout it is vertical. Only interior crossings hop.
+// arrows into an unrelated box) the crossed line breaks and the other passes cleanly
+// through, reading as a crossing, not a join (and without an arc that looks like a
+// node). `crossers` are the perpendicular segments of every other edge: `c` is their
+// constant coordinate and `[s0,s1]` their span. In vertical layout the gap-spanning
+// run is horizontal; in horizontal layout it is vertical. Only interior crossings break.
 function relHopPath(pts, crossers, horiz) {
-  const R = 4.5;
+  const R = 3.5;                                          // half-gap
   let d = `M ${pts[0].x} ${pts[0].y}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
-    // The gap-spanning run hops: horizontal in a vertical layout, vertical otherwise.
+    // The gap-spanning run breaks: horizontal in a vertical layout, vertical otherwise.
     const hoppable = horiz ? (Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) > 1)
                            : (Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) > 1);
     if (!hoppable) { d += ` L ${b.x} ${b.y}`; continue; }
@@ -1106,10 +1107,9 @@ function relHopPath(pts, crossers, horiz) {
       .filter((v) => v.c > Math.min(t0, t1) + 2 && v.c < Math.max(t0, t1) - 2 && fixed > v.s0 + 1 && fixed < v.s1 - 1)
       .map((v) => v.c)
       .sort((x, y) => dir * (x - y));
-    for (const c of cuts) {
-      const sweep = dir > 0 ? 0 : 1;                     // arc bulges toward the gap start (up / left)
-      if (horiz) d += ` L ${a.x} ${c - dir * R} A ${R} ${R} 0 0 ${sweep} ${a.x} ${c + dir * R}`;
-      else d += ` L ${c - dir * R} ${a.y} A ${R} ${R} 0 0 ${sweep} ${c + dir * R} ${a.y}`;
+    for (const c of cuts) {                              // draw up to the crossing, then skip over it
+      if (horiz) d += ` L ${a.x} ${c - dir * R} M ${a.x} ${c + dir * R}`;
+      else d += ` L ${c - dir * R} ${a.y} M ${c + dir * R} ${a.y}`;
     }
     d += ` L ${b.x} ${b.y}`;
   }
