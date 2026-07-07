@@ -1495,9 +1495,14 @@ function relationshipMap() {
         const rect = s("rect", { x: sg.x, y: barY, width: sg.w, height: barH, fill: REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#9aa5bd" });
         const ti = s("title", {}); ti.textContent = `${owner ? owner.name : "Owner"} — ${sg.pct}%`; rect.appendChild(ti);
         barG.appendChild(rect);
-        const lbl = `${owner ? owner.initials : "?"} ${sg.pct}%`;
-        if (sg.w > 46) barG.appendChild(svgText(lbl, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
-        else if (sg.w > 15) barG.appendChild(svgText(`${sg.pct}`, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        // Prefer the full "II pct%"; when the slice is too narrow keep the OWNER's
+        // initials (who owns the slice is the point of the bar — the exact percent is
+        // on hover) rather than dropping to a bare, ownerless number.
+        const initials = owner ? owner.initials : "?";
+        const full = `${initials} ${sg.pct}%`;
+        const wide = sg.w >= full.length * 5.4;
+        const label = wide ? full : (sg.w >= 16 ? initials : "");
+        if (label) barG.appendChild(svgText(label, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": wide ? "9.5" : "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
       });
       g.appendChild(barG);
     }
