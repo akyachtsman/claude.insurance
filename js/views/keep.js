@@ -1145,26 +1145,27 @@ function relLayout() {
   const wOf = (id) => (isDummy(id) ? REL_DUMMY_W : (horiz ? REL_NODE_H : REL_NODE_W));
   const sepOf = (a, b) => wOf(a) / 2 + wOf(b) / 2 + ((isDummy(a) || isDummy(b)) ? 16 : (horiz ? REL_VGAP : REL_HGAP));
   const cross = alignCross(order, rows, up, down, sepOf);
-  // Centering refinement (root band only): the alignment pins each owner above its
-  // *leftmost* holding, so a top-level owner of a wide subtree is dragged far to one
-  // side and the top row spreads across the whole canvas. Pull each root toward the
-  // median column of what it owns, within the slack its row neighbours allow, so it
-  // sits over the MIDDLE of its holdings and the top row reads as a tighter cluster.
-  // Only the roots move — every lower band keeps its verified crossing-free position.
+  // Cluster the top-level owners (root band). The alignment pins each owner above
+  // its holdings, so an owner whose entities sit at the far edge of a wide tree (a
+  // business partner who only co-owns two right-hand companies) is stranded off on
+  // its own, far from the other people. Instead pack the roots together at their
+  // minimum separation and centre that block over the span of everything they own,
+  // so the top row reads as one group of people; each owner's link then routes out
+  // to its holdings on its own lane. Only the roots move — every lower band keeps
+  // its verified crossing-free position, and the overlap-deconfliction pass still
+  // runs afterward.
   {
-    const median = (a) => { if (!a.length) return null; const q = [...a].sort((x, y) => x - y); const m = q.length >> 1; return q.length % 2 ? q[m] : (q[m - 1] + q[m]) / 2; };
-    const r = order[0], ids = rows[r] || [];
-    for (let pass = 0; pass < 4; pass++) {
-      const idx = pass % 2 ? [...ids.keys()].reverse() : [...ids.keys()];
-      for (const i of idx) {
-        const id = ids[i];
-        if (isDummy(id)) continue;
-        const t = median((down[id] || []).map((n) => cross[n]).filter((v) => v != null));
-        if (t == null) continue;
-        const lo = i > 0 ? cross[ids[i - 1]] + sepOf(ids[i - 1], id) : -Infinity;
-        const hi = i < ids.length - 1 ? cross[ids[i + 1]] - sepOf(id, ids[i + 1]) : Infinity;
-        cross[id] = Math.max(lo, Math.min(hi, t));
-      }
+    const ids = (rows[order[0]] || []).filter((id) => !isDummy(id));
+    if (ids.length) {
+      const rel = [0];
+      for (let i = 1; i < ids.length; i++) rel.push(rel[i - 1] + sepOf(ids[i - 1], ids[i]));
+      const span = rel[rel.length - 1] || 0;
+      const owned = [];
+      ids.forEach((id) => (down[id] || []).forEach((n) => { if (cross[n] != null) owned.push(cross[n]); }));
+      owned.sort((a, b) => a - b);
+      const center = owned.length ? (owned[0] + owned[owned.length - 1]) / 2 : span / 2;   // centre of the holdings' span
+      const start = center - span / 2;
+      ids.forEach((id, i) => { cross[id] = start + rel[i]; });
     }
   }
   // Pull each long-edge routing dummy toward its edge's target column, within the
