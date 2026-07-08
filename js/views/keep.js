@@ -1395,12 +1395,48 @@ function relationshipMap() {
     const v = channelY.get(laneKey(up));
     return v != null ? v : (laneMain(p) + laneMain(q)) / 2;
   };
+  // A run's coordinate along the band-stacking axis (its length) and across it (its
+  // column). A band-traversing run — a long edge's drop, a box's exit/entry stub —
+  // holds a near-constant cross while its main sweeps between bands; these are the
+  // runs that can lie collinear on top of each other.
+  const mainC = (p) => (horiz ? p.x : p.y);
+  const crossC = (p) => (horiz ? p.y : p.x);
+  const isDrop = (a, b) => Math.abs(crossC(a) - crossC(b)) < 0.5 && Math.abs(mainC(a) - mainC(b)) > 1;
   const updateEdges = () => {
     // Pass 1: route every edge orthogonally (owner → owned through box centres and any
     // dummy waypoints, each owner on its own lane) and keep its point list.
     edgeRefs.forEach((er) => {
       const chain = [center(er.from), ...er.wp, center(er.to)];
       er.pts = relOrtho(chain, horiz, channelOf, entryCrossFor(er)).pts || [];
+    });
+    // Pass 1.5: no two owners' lines may lie on top of each other. A single owner's
+    // lines sharing one trunk down a column is fine (an intentional bus); but where a
+    // long edge's drop runs collinear with a DIFFERENT owner's vertical — e.g. an
+    // owner two bands up dropping straight down a column that another owner's box
+    // already exits — the two read as one line. Only a long edge's INTERIOR drop is
+    // free to move (its own box stub and its cap-slice entry stay anchored so the
+    // arrow still lands on the right owner's slice); shift it one lane off the shadowed
+    // column and let its horizontal jogs absorb the offset, so the lines separate.
+    const LANE = 16;
+    const dropsOf = (er, ei) => {
+      const out = [];
+      for (let i = 0; i < er.pts.length - 1; i++) {
+        if (isDrop(er.pts[i], er.pts[i + 1])) out.push({ ei, i, from: er.from, col: crossC(er.pts[i]), m0: Math.min(mainC(er.pts[i]), mainC(er.pts[i + 1])), m1: Math.max(mainC(er.pts[i]), mainC(er.pts[i + 1])) });
+      }
+      return out;
+    };
+    const allDrops = edgeRefs.flatMap((er, ei) => dropsOf(er, ei));
+    edgeRefs.forEach((er, ei) => {
+      for (let i = 1; i < er.pts.length - 2; i++) {              // interior drops only — skip the box stubs at either end
+        const a = er.pts[i], b = er.pts[i + 1];
+        if (!isDrop(a, b)) continue;
+        const col = crossC(a), m0 = Math.min(mainC(a), mainC(b)), m1 = Math.max(mainC(a), mainC(b));
+        const clash = allDrops.some((d) => d.ei !== ei && d.from !== er.from && Math.abs(d.col - col) < 2 && Math.min(d.m1, m1) - Math.max(d.m0, m0) > 3);
+        if (!clash) continue;
+        const dir = Math.sign(crossC(er.pts[er.pts.length - 1]) - col) || 1;   // step toward this edge's own entry side
+        const nc = col + dir * LANE;
+        if (horiz) { a.y = nc; b.y = nc; } else { a.x = nc; b.x = nc; }         // jogs at P[i-1]→P[i] and P[i+1]→P[i+2] follow the shifted column
+      }
     });
     // Collect the perpendicular runs (verticals in a vertical layout) each edge could
     // be hopped over: constant coordinate `c`, span `[s0,s1]`, tagged by edge index.
