@@ -1936,49 +1936,69 @@ export async function renderKeepEntity(params, id) {
     .filter((o) => o.ent || o.name)
     .sort((a, b) => b.pct - a.pct);
 
-  // Compact identity header (avatar + name + category) with the primary action.
-  const header = el("div", { class: "k-ehero" }, [
+  // Overview band: identity on the left, the headline insured value on the right,
+  // the primary action at the end. The at-a-glance figure leads the page.
+  const band = el("div", { class: "k-eband" }, [
     entityAvatar(entity),
-    el("div", { class: "k-ehero__id" }, [
-      el("div", { class: "k-ehero__top" }, [
+    el("div", { class: "k-eband__who" }, [
+      el("div", { class: "k-eband__name" }, [
         el("h1", { text: entity.name }),
         el("span", { class: `k-et k-et--${suffix}`, text: entityCategory(entity) }),
       ]),
-      subtype !== "—" ? el("div", { class: "k-ehero__sub", text: subtype }) : null,
+      subtype !== "—" ? el("div", { class: "k-eband__sub", text: subtype }) : null,
+    ]),
+    el("div", { class: "k-eband__hero" }, [
+      el("div", { class: "k-eband__herok", text: "Insured value" }),
+      el("div", { class: "k-eband__herov", text: value ? money(value) : "—" }),
     ]),
     el("a", { class: "k-btn", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
   ]);
 
-  // At-a-glance parameters, each in its own block — fills the panel tidily
-  // instead of leaving one large empty box.
-  const paramList = [
-    { l: "Category", v: entityCategory(entity) },
-    { l: "Subtype", v: subtype === "—" ? "Not set" : subtype },
-    { l: "Assets", v: String(sum.assets) },
-    { l: "Coverage in place", v: String(sum.inPlace) },
-    { l: "Open gaps", v: String(sum.gaps), tone: sum.gaps > 0 ? "warn" : null },
-    { l: "Insured value", v: value ? money(value) : "—" },
-    { l: "Entities owned", v: String(owned.length) },
-  ];
-  const paramGrid = el("div", { class: "k-params" }, paramList.map((p) =>
-    el("div", { class: `k-param${p.tone ? ` k-param--${p.tone}` : ""}` }, [
-      el("div", { class: "k-param__l", text: p.l }),
-      el("div", { class: "k-param__v", text: p.v }),
-    ])));
+  // Inline metric row (no boxes) — the secondary figures read as one scannable line.
+  const metric = (k, v, warn) => el("div", { class: "k-emetric" }, [
+    el("div", { class: "k-emetric__k", text: k }),
+    el("div", { class: `k-emetric__v${warn ? " k-emetric__v--warn" : ""}`, text: v }),
+  ]);
+  const metrics = el("div", { class: "k-emetrics" }, [
+    metric("Assets", String(sum.assets)),
+    metric("Coverage in place", String(sum.inPlace)),
+    metric("Open gaps", String(sum.gaps), sum.gaps > 0),
+    metric("Entities owned", String(owned.length)),
+  ]);
+
+  // Coverage allocation bar: how much of what this entity needs is in place vs open —
+  // so the open-gap risk reads at a glance. Only shown once needs are analysed.
+  const covTotal = sum.inPlace + sum.gaps;
+  const coveredPct = covTotal ? (sum.inPlace / covTotal) * 100 : 0;
+  const alloc = covTotal ? el("div", { class: "k-ealloc" }, [
+    el("div", { class: "k-ealloc__lbl" }, [
+      el("span", { text: "Coverage across needs" }),
+      el("span", { class: "k-ealloc__sum", text: `${sum.inPlace} in place · ${sum.gaps} open` }),
+    ]),
+    el("div", { class: "k-etrack" }, [
+      el("span", { class: "k-eseg k-eseg--ok", attrs: { style: `width:${coveredPct}%` } }),
+      el("span", { class: "k-eseg k-eseg--gap", attrs: { style: `width:${100 - coveredPct}%` } }),
+    ]),
+    el("div", { class: "k-ekey" }, [
+      el("span", { class: "k-ekey__i" }, [el("i", { class: "k-edot k-edot--ok" }), el("span", { text: "In place" })]),
+      el("span", { class: "k-ekey__i" }, [el("i", { class: "k-edot k-edot--gap" }), el("span", { text: "Open gap" })]),
+    ]),
+  ]) : null;
 
   const view = page("list", [
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    el("section", { class: `k-epanel k-panel--${suffix}` }, [header, paramGrid]),
+    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc]),
     owned.length ? el("section", { class: "k-eassets" }, [
       el("div", { class: "k-lbl", text: "Entities owned" }),
       el("div", { class: "k-owned" }, owned.map((o) => {
         const e = o.ent, managed = e && e._managed;
+        const pct = Math.max(0, Math.min(100, o.pct || 0));
         const kids = [
           e ? entityAvatar(e) : null,
           el("div", { class: "k-ownrow__id" }, [
             el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
-            e ? el("span", { class: `k-et k-et--${colorSuffix(e)}`, text: entityCategory(e) }) : null,
+            el("div", { class: "k-ownrow__bar" }, [el("i", { attrs: { style: `width:${pct}%` } })]),
           ]),
           el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
         ];

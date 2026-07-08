@@ -238,17 +238,35 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
 .k-epanel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-7); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
-.k-ehero { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
-.k-ehero__id { min-width: 0; }
-.k-ehero__top { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.k-ehero__top h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; }
-.k-ehero__sub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 3px; }
-.k-ehero .k-btn { margin-left: auto; }
-.k-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--space-3); margin-top: var(--space-6); }
-.k-param { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 13px 16px; }
-.k-param__l { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .06em; color: var(--color-text-secondary); }
-.k-param__v { font: 800 19px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; margin-top: 4px; }
-.k-param--warn .k-param__v { color: #D6333A; }
+/* Overview band — identity + headline insured value + primary action */
+.k-eband { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.k-eband__who { min-width: 0; flex: 1; }
+.k-eband__name { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.k-eband__name h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; }
+.k-eband__sub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 3px; }
+.k-eband__hero { text-align: right; }
+.k-eband__herok { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); }
+.k-eband__herov { font: 700 32px var(--font-display); letter-spacing: -.02em; color: var(--color-text-primary); line-height: 1.05; font-variant-numeric: tabular-nums; }
+
+/* Inline metric row (no boxes) — the secondary figures read as one scannable line */
+.k-emetrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-6); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.k-emetric__k { font: 800 10.5px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); }
+.k-emetric__v { font: 700 22px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.k-emetric__v--warn { color: var(--color-gap); }
+
+/* Coverage allocation bar — in-place vs open gaps at a glance */
+.k-ealloc { margin-top: var(--space-6); }
+.k-ealloc__lbl { display: flex; justify-content: space-between; gap: var(--space-4); font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-bottom: 8px; }
+.k-ealloc__sum { color: var(--color-text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+.k-etrack { display: flex; height: 14px; border-radius: 8px; overflow: hidden; background: var(--color-border); }
+.k-eseg { height: 100%; }
+.k-eseg--ok { background: var(--color-ok); }
+.k-eseg--gap { background: var(--color-gap); }
+.k-ekey { display: flex; gap: var(--space-4); margin-top: 9px; font: 600 12.5px var(--font-sans); color: var(--color-text-secondary); }
+.k-ekey__i { display: inline-flex; align-items: center; gap: 6px; }
+.k-edot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; }
+.k-edot--ok { background: var(--color-ok); }
+.k-edot--gap { background: var(--color-gap); }
 .k-eassets { margin-bottom: var(--space-6); }
 .k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: var(--space-4); }
 
@@ -258,9 +276,11 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 a.k-ownrow:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); color: inherit; }
 .k-owned .k-bigav { width: 40px; height: 40px; border-radius: 13px; font-size: 15px; }
 .k-owned .k-bigav .icon { width: 19px; height: 19px; }
-.k-ownrow__id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.k-ownrow__id { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1; }
 .k-ownrow__name { font: 700 15px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; }
+.k-ownrow__bar { height: 6px; max-width: 320px; border-radius: 4px; background: var(--color-border); overflow: hidden; }
+.k-ownrow__bar i { display: block; height: 100%; border-radius: 4px; background: var(--color-accent); }
+.k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
@@ -634,9 +654,9 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
   .k-nav { display: none; }
   .k-banner .k-btn { margin-left: 0; }
   .k-stats { grid-template-columns: 1fr 1fr; }
-  .k-params { grid-template-columns: 1fr 1fr; }
   .k-agrid { grid-template-columns: 1fr; }
-  .k-ehero .k-btn { margin-left: 0; }
+  .k-eband__who { flex-basis: 100%; }
+  .k-eband__hero { text-align: left; }
   .k-search__in { width: 160px; }
 }
 @media (max-width: 480px) {
