@@ -1927,6 +1927,15 @@ export async function renderKeepEntity(params, id) {
   const value = entityValue(entity);
   const subtype = entitySubtype(entity);
 
+  // Entities this one owns — the out-edges of the ownership graph, each with its
+  // stake — so the page shows the holdings, not just what this entity is made of.
+  const map = getMapData();
+  const owned = map.edges
+    .filter((e) => e.from === entity.id && parsePct(e.stake) != null)
+    .map((e) => ({ ent: getEntity(e.to), name: (map.nodes.find((n) => n.id === e.to) || {}).name, pct: parsePct(e.stake), stake: e.stake }))
+    .filter((o) => o.ent || o.name)
+    .sort((a, b) => b.pct - a.pct);
+
   // Compact identity header (avatar + name + category) with the primary action.
   const header = el("div", { class: "k-ehero" }, [
     entityAvatar(entity),
@@ -1949,6 +1958,7 @@ export async function renderKeepEntity(params, id) {
     { l: "Coverage in place", v: String(sum.inPlace) },
     { l: "Open gaps", v: String(sum.gaps), tone: sum.gaps > 0 ? "warn" : null },
     { l: "Insured value", v: value ? money(value) : "—" },
+    { l: "Entities owned", v: String(owned.length) },
   ];
   const paramGrid = el("div", { class: "k-params" }, paramList.map((p) =>
     el("div", { class: `k-param${p.tone ? ` k-param--${p.tone}` : ""}` }, [
@@ -1960,6 +1970,23 @@ export async function renderKeepEntity(params, id) {
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
     el("section", { class: `k-epanel k-panel--${suffix}` }, [header, paramGrid]),
+    owned.length ? el("section", { class: "k-eassets" }, [
+      el("div", { class: "k-lbl", text: "Entities owned" }),
+      el("div", { class: "k-owned" }, owned.map((o) => {
+        const e = o.ent, managed = e && e._managed;
+        const kids = [
+          e ? entityAvatar(e) : null,
+          el("div", { class: "k-ownrow__id" }, [
+            el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
+            e ? el("span", { class: `k-et k-et--${colorSuffix(e)}`, text: entityCategory(e) }) : null,
+          ]),
+          el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
+        ];
+        return managed
+          ? el("a", { class: "k-ownrow k-ilink", attrs: { href: `#/keep/entity/${e.id}` } }, kids)
+          : el("div", { class: "k-ownrow" }, kids);
+      })),
+    ]) : null,
     el("section", { class: "k-eassets" }, [
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
       entity.assets.length

@@ -252,6 +252,16 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-eassets { margin-bottom: var(--space-6); }
 .k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: var(--space-4); }
 
+/* ── Entities owned (holdings list on the entity page) ──────────────────────── */
+.k-owned { display: flex; flex-direction: column; gap: var(--space-3); }
+.k-ownrow { display: flex; align-items: center; gap: 13px; padding: 11px 16px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); text-decoration: none; color: inherit; transition: transform .14s, box-shadow .14s; }
+a.k-ownrow:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); color: inherit; }
+.k-owned .k-bigav { width: 40px; height: 40px; border-radius: 13px; font-size: 15px; }
+.k-owned .k-bigav .icon { width: 19px; height: 19px; }
+.k-ownrow__id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.k-ownrow__name { font: 700 15px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; }
+
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
 .k-enttable .k-bigav .icon { width: 17px; height: 17px; }
