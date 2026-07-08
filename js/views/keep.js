@@ -1145,6 +1145,28 @@ function relLayout() {
   const wOf = (id) => (isDummy(id) ? REL_DUMMY_W : (horiz ? REL_NODE_H : REL_NODE_W));
   const sepOf = (a, b) => wOf(a) / 2 + wOf(b) / 2 + ((isDummy(a) || isDummy(b)) ? 16 : (horiz ? REL_VGAP : REL_HGAP));
   const cross = alignCross(order, rows, up, down, sepOf);
+  // Centering refinement (root band only): the alignment pins each owner above its
+  // *leftmost* holding, so a top-level owner of a wide subtree is dragged far to one
+  // side and the top row spreads across the whole canvas. Pull each root toward the
+  // median column of what it owns, within the slack its row neighbours allow, so it
+  // sits over the MIDDLE of its holdings and the top row reads as a tighter cluster.
+  // Only the roots move — every lower band keeps its verified crossing-free position.
+  {
+    const median = (a) => { if (!a.length) return null; const q = [...a].sort((x, y) => x - y); const m = q.length >> 1; return q.length % 2 ? q[m] : (q[m - 1] + q[m]) / 2; };
+    const r = order[0], ids = rows[r] || [];
+    for (let pass = 0; pass < 4; pass++) {
+      const idx = pass % 2 ? [...ids.keys()].reverse() : [...ids.keys()];
+      for (const i of idx) {
+        const id = ids[i];
+        if (isDummy(id)) continue;
+        const t = median((down[id] || []).map((n) => cross[n]).filter((v) => v != null));
+        if (t == null) continue;
+        const lo = i > 0 ? cross[ids[i - 1]] + sepOf(ids[i - 1], id) : -Infinity;
+        const hi = i < ids.length - 1 ? cross[ids[i + 1]] - sepOf(id, ids[i + 1]) : Infinity;
+        cross[id] = Math.max(lo, Math.min(hi, t));
+      }
+    }
+  }
   // Pull each long-edge routing dummy toward its edge's target column, within the
   // slack its row neighbours allow. A long edge (owner two+ layers above what it
   // owns) otherwise drops through a dummy parked at the midpoint — often right beside
