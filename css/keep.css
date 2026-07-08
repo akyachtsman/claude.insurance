@@ -164,7 +164,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-privacy a { color: var(--color-accent); font-weight: 800; margin-left: auto; white-space: nowrap; }
 
 /* ── Security & privacy page ────────────────────────────────────────────────── */
-.shero { display: flex; align-items: center; gap: var(--space-4); background: linear-gradient(150deg,#E7EFFE,#eafaf3 60%,#fff); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 24px 28px; box-shadow: var(--shadow-md); margin-bottom: var(--space-5); }
+.shero { display: flex; align-items: center; gap: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 24px 28px; box-shadow: var(--shadow-md); margin-bottom: var(--space-5); }
 .shero .k-cic { width: 72px; height: 72px; border-radius: 22px; background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); color: #fff; }
 .shero h1 { font: 700 27px var(--font-display); }
 .shero p { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: 4px; }
@@ -207,13 +207,9 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 
 /* ── Entity panels (tinted boxes that hold assets) ──────────────────────────── */
 .k-panel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-8); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
-/* Entity-type colour coordination:
-   You / People = blue · Business = red · Nonprofit = green · Trust & Estate = yellow */
-.k-panel--me { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 55%,#fff); }
-.k-panel--person { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 55%,#fff); }
-.k-panel--biz { background: linear-gradient(150deg,#fdecec,#fef4f4 60%,#fff); }
-.k-panel--np { background: linear-gradient(150deg,#e2f6ec,#eafaf3 60%,#fff); }
-.k-panel--trust { background: linear-gradient(150deg,#fff3e0,#fffaf0 60%,#fff); }
+/* Panels are plain white surfaces; entity type is signalled by the avatar and
+   type chip, not a background tint. */
+.k-panel--me, .k-panel--person, .k-panel--biz, .k-panel--np, .k-panel--trust { background: var(--color-surface); }
 .k-ehead { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-6); flex-wrap: wrap; }
 /* Entity colours — soft pastel tints with a coloured icon/initials + text
    (Individual = blue · Business = light red · Nonprofit = light green ·
@@ -237,7 +233,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
-.k-epanel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-7); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
+.k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-7); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
 /* Overview band — identity + headline insured value + primary action */
 .k-eband { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .k-eband__who { min-width: 0; flex: 1; }
@@ -353,7 +349,7 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-addtile:hover { border-color: var(--color-accent); background: var(--color-accent-light); }
 
 /* ── Coverage analysis ──────────────────────────────────────────────────────── */
-.k-ahero { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 60%,#fff); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-8); display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5); box-shadow: var(--shadow-md); }
+.k-ahero { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-8); display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5); box-shadow: var(--shadow-md); }
 .k-ahero .k-cic { width: 72px; height: 72px; border-radius: 22px; }
 .k-ahero h1 { font: 700 28px var(--font-display); }
 .k-facts { display: flex; gap: var(--space-4); flex-wrap: wrap; font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-1); }
@@ -470,7 +466,7 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-empty { background: var(--color-surface); border: 2px dashed var(--color-border-hover); border-radius: var(--radius-lg); padding: var(--space-8); text-align: center; color: var(--color-text-secondary); font: 600 15px var(--font-sans); }
 
 /* ── Policy detail (full record) ────────────────────────────────────────────── */
-.k-phead { background: linear-gradient(150deg,#E7EFFE,#E9F4FF 60%,#fff); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 20px 24px; display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-md); margin-bottom: var(--space-2); }
+.k-phead { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 20px 24px; display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-md); margin-bottom: var(--space-2); }
 .k-phead .k-cic { width: 60px; height: 60px; border-radius: 18px; }
 .k-phead__t { flex: 1; min-width: 0; }
 .k-phead h1 { font: 700 23px var(--font-display); }
