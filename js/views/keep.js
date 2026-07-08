@@ -1994,6 +1994,7 @@ export async function renderKeepEntity(params, id) {
       el("div", { class: "k-owned" }, owned.map((o) => {
         const e = o.ent, managed = e && e._managed;
         const pct = Math.max(0, Math.min(100, o.pct || 0));
+        const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
         const kids = [
           e ? entityAvatar(e) : null,
           el("div", { class: "k-ownrow__id" }, [
@@ -2003,8 +2004,8 @@ export async function renderKeepEntity(params, id) {
           el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
         ];
         return managed
-          ? el("a", { class: "k-ownrow k-ilink", attrs: { href: `#/keep/entity/${e.id}` } }, kids)
-          : el("div", { class: "k-ownrow" }, kids);
+          ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)
+          : el("div", { class: `k-ownrow${tone}` }, kids);
       })),
     ]) : null,
     el("section", { class: "k-eassets" }, [
