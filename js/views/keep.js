@@ -1092,7 +1092,7 @@ function relOrtho(chain, horiz, channelOf, entryCross) {
 // constant coordinate and `[s0,s1]` their span. In vertical layout the gap-spanning
 // run is horizontal; in horizontal layout it is vertical. Only interior crossings break.
 function relHopPath(pts, crossers, horiz) {
-  const R = 3.5;                                          // half-gap
+  const R = 6;                                            // half-gap (the rounded line-caps eat ~1.25px each side)
   let d = `M ${pts[0].x} ${pts[0].y}`;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
