@@ -2035,7 +2035,7 @@ export async function renderKeepEntity(params, id) {
   const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
     el("div", { class: "k-ecol__h" }, [
       el("div", { class: "k-ecol__ht" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
-      el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [icon("plus", { size: 16 }), el("span", { text: "Add asset" })]),
+      el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [el("span", { text: "Add asset" })]),
     ]),
     entity.assets.length
       ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
