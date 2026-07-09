@@ -234,7 +234,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
-.k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-7); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
+.k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-8) var(--space-10); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
 /* Overview band — identity + headline insured value + primary action */
 .k-eband { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .k-eband__who { min-width: 0; flex: 1; }
