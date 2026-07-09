@@ -245,6 +245,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-eband__hero { text-align: right; }
 .k-eband__herok { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); }
 .k-eband__herov { font: 700 32px var(--font-display); letter-spacing: -.02em; color: var(--color-text-primary); line-height: 1.05; font-variant-numeric: tabular-nums; }
+.k-eband__eyebrow { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .12em; color: var(--color-text-secondary); margin-bottom: 5px; }
 
 /* Inline metric row (no boxes) — the secondary figures read as one scannable line */
 .k-emetrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-6); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
@@ -258,12 +259,12 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-ealloc__sum { color: var(--color-text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
 .k-etrack { display: flex; height: 14px; border-radius: 8px; overflow: hidden; background: var(--color-border); }
 .k-eseg { height: 100%; }
-.k-eseg--ok { background: var(--color-ok); }
+.k-eseg--ok { background: var(--color-accent); }
 .k-eseg--gap { background: var(--color-gap); }
 .k-ekey { display: flex; gap: var(--space-4); margin-top: 9px; font: 600 12.5px var(--font-sans); color: var(--color-text-secondary); }
 .k-ekey__i { display: inline-flex; align-items: center; gap: 6px; }
 .k-edot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; }
-.k-edot--ok { background: var(--color-ok); }
+.k-edot--ok { background: var(--color-accent); }
 .k-edot--gap { background: var(--color-gap); }
 .k-eassets { margin-bottom: var(--space-6); }
 .k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: var(--space-3); }
@@ -291,16 +292,18 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-esplit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; margin-bottom: var(--space-6); }
 .k-esplit .k-epanel { margin-bottom: 0; }
 .k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-6) var(--space-8); min-width: 0; }
-.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.k-ecol__h .k-lbl { margin-bottom: var(--space-4); }
+.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); }
+.k-ecol__ht { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.k-ecol__h .k-lbl { margin-bottom: 0; }
 .k-ecol__cnt { flex: none; font: 800 11px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 3px 10px; border-radius: var(--radius-pill); }
+.k-btn--sm { min-height: 40px; padding: 9px 16px; font-size: 14px; flex: none; }
 
 /* Assets grouped by protection status */
 .k-agroups { display: flex; flex-direction: column; gap: var(--space-5); }
 .k-agroup__h { display: flex; align-items: center; gap: 8px; font: 700 13.5px var(--font-display); color: var(--color-text-primary); margin-bottom: 10px; }
 .k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .k-agroup__dot--gap { background: var(--color-gap); }
-.k-agroup__dot--ok { background: var(--color-ok); }
+.k-agroup__dot--ok { background: var(--color-accent); }
 .k-agroup__c { color: var(--color-text-secondary); font-weight: 700; }
 .k-agroup__list { display: flex; flex-direction: column; gap: 8px; }
 .k-arow { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 9px 12px; border-radius: var(--radius-md); background: var(--color-bg); text-decoration: none; color: inherit; transition: transform .12s, box-shadow .12s; }
@@ -314,7 +317,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-arow__st { flex: none; font: 800 12px var(--font-sans); white-space: nowrap; }
 .k-arow__st--gap { color: var(--color-gap); }
 .k-arow__st--rec { color: var(--color-warn); }
-.k-arow__st--ok { color: var(--color-ok); }
+.k-arow__st--ok { color: var(--color-accent); }
 @media (max-width: 760px) { .k-esplit { grid-template-columns: 1fr; } }
 
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */

@@ -1938,9 +1938,16 @@ export async function renderKeepEntity(params, id) {
 
   // Overview band: identity on the left, the headline insured value on the right,
   // the primary action at the end. The at-a-glance figure leads the page.
+  // People show their name's initials (e.g. "JM"); businesses/trusts keep their icon.
+  const nameInitials = (entity.name || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const isPersonKind = entity.kind === "personal" || entity.kind === "person";
+  const bandAvatar = isPersonKind
+    ? el("span", { class: "k-bigav k-bigav--person", text: nameInitials })
+    : entityAvatar(entity);
   const band = el("div", { class: "k-eband" }, [
-    entityAvatar(entity),
+    bandAvatar,
     el("div", { class: "k-eband__who" }, [
+      el("div", { class: "k-eband__eyebrow", text: "Entity" }),
       el("div", { class: "k-eband__name" }, [
         el("h1", { text: entity.name }),
         el("span", { class: `k-et k-et--${suffix}`, text: entityCategory(entity) }),
@@ -1951,7 +1958,6 @@ export async function renderKeepEntity(params, id) {
       el("div", { class: "k-eband__herok", text: "Insured value" }),
       el("div", { class: "k-eband__herov", text: value ? money(value) : "—" }),
     ]),
-    el("a", { class: "k-btn", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
   ]);
 
   // Inline metric row (no boxes) — the secondary figures read as one scannable line.
@@ -2027,7 +2033,10 @@ export async function renderKeepEntity(params, id) {
     el("div", { class: "k-agroup__list" }, items.map(assetRow)),
   ]) : null;
   const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
-    el("div", { class: "k-ecol__h" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
+    el("div", { class: "k-ecol__h" }, [
+      el("div", { class: "k-ecol__ht" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
+      el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [icon("plus", { size: 16 }), el("span", { text: "Add asset" })]),
+    ]),
     entity.assets.length
       ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
       : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
