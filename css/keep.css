@@ -300,7 +300,8 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 /* Uniform micro-label scale across both frames (section labels match the eyebrow). */
 .k-eoverview .k-lbl, .k-ecol .k-lbl { font-size: 11px; letter-spacing: .1em; }
 .k-ecol__cnt { flex: none; font: 800 11px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 3px 10px; border-radius: var(--radius-pill); }
-.k-btn--sm { min-height: 40px; padding: 9px 16px; font-size: 14px; flex: none; }
+.k-btn--sm { min-height: 40px; padding: 0 18px; font-size: 14px; gap: 6px; flex: none; box-shadow: 0 6px 14px -8px rgba(47,106,246,.6); text-decoration: none; }
+.k-btn--sm .icon { width: 16px; height: 16px; }
 
 /* Assets grouped by protection status */
 .k-agroups { display: flex; flex-direction: column; gap: var(--space-5); }
