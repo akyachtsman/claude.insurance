@@ -240,16 +240,17 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-eband { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .k-eband__who { min-width: 0; flex: 1; }
 .k-eband__name { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.k-eband__name h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; }
+.k-eband__name h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; margin: 0; }
 .k-eband__sub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 3px; }
 .k-eband__hero { text-align: right; }
-.k-eband__herok { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); }
+.k-eband__herok { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .1em; color: var(--color-text-secondary); }
 .k-eband__herov { font: 700 32px var(--font-display); letter-spacing: -.02em; color: var(--color-text-primary); line-height: 1.05; font-variant-numeric: tabular-nums; }
-.k-eband__eyebrow { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .12em; color: var(--color-text-secondary); margin-bottom: 5px; }
+.k-eband__eyebrow { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .1em; color: var(--color-text-secondary); margin-bottom: 5px; }
+.k-eband .k-bigav { width: 64px; height: 64px; border-radius: 20px; font-size: 22px; }
 
 /* Inline metric row (no boxes) — the secondary figures read as one scannable line */
 .k-emetrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-6); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
-.k-emetric__k { font: 800 10.5px var(--font-sans); text-transform: uppercase; letter-spacing: .07em; color: var(--color-text-secondary); }
+.k-emetric__k { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .1em; color: var(--color-text-secondary); }
 .k-emetric__v { font: 700 22px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .k-emetric__v--warn { color: var(--color-gap); }
 
@@ -291,10 +292,13 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 /* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
 .k-esplit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; margin-bottom: var(--space-6); }
 .k-esplit .k-epanel { margin-bottom: 0; }
-.k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-6) var(--space-8); min-width: 0; }
-.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); }
+.k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-8); min-width: 0; }
+/* Header band mirrors the entity frame's hero: content centred, divided by a rule. */
+.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 72px; margin-bottom: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-border); }
 .k-ecol__ht { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .k-ecol__h .k-lbl { margin-bottom: 0; }
+/* Uniform micro-label scale across both frames (section labels match the eyebrow). */
+.k-eoverview .k-lbl, .k-ecol .k-lbl { font-size: 11px; letter-spacing: .1em; }
 .k-ecol__cnt { flex: none; font: 800 11px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 3px 10px; border-radius: var(--radius-pill); }
 .k-btn--sm { min-height: 40px; padding: 9px 16px; font-size: 14px; flex: none; }
 
