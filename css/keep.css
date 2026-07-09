@@ -286,6 +286,35 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-ownrow--np .k-ownrow__bar i { background: #0E8E66; }
 .k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 
+/* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
+.k-esplit { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); align-items: start; margin-bottom: var(--space-6); }
+.k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-6) var(--space-8); min-width: 0; }
+.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.k-ecol__h .k-lbl { margin-bottom: var(--space-4); }
+.k-ecol__cnt { flex: none; font: 800 11px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 3px 10px; border-radius: var(--radius-pill); }
+
+/* Assets grouped by protection status */
+.k-agroups { display: flex; flex-direction: column; gap: var(--space-5); }
+.k-agroup__h { display: flex; align-items: center; gap: 8px; font: 700 13.5px var(--font-display); color: var(--color-text-primary); margin-bottom: 10px; }
+.k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.k-agroup__dot--gap { background: var(--color-gap); }
+.k-agroup__dot--ok { background: var(--color-ok); }
+.k-agroup__c { color: var(--color-text-secondary); font-weight: 700; }
+.k-agroup__list { display: flex; flex-direction: column; gap: 8px; }
+.k-arow { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 9px 12px; border-radius: var(--radius-md); background: var(--color-bg); text-decoration: none; color: inherit; transition: transform .12s, box-shadow .12s; }
+a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); color: inherit; }
+.k-arow--attn { background: var(--color-gap-bg); }
+.k-arow .k-cic { width: 40px; height: 40px; border-radius: 12px; }
+.k-arow .k-cic .icon { width: 20px; height: 20px; }
+.k-arow__main { min-width: 0; }
+.k-arow__name { font: 700 14.5px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-arow__meta { font: 600 12px var(--font-sans); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.k-arow__st { flex: none; font: 800 12px var(--font-sans); white-space: nowrap; }
+.k-arow__st--gap { color: var(--color-gap); }
+.k-arow__st--rec { color: var(--color-warn); }
+.k-arow__st--ok { color: var(--color-ok); }
+@media (max-width: 760px) { .k-esplit { grid-template-columns: 1fr; } }
+
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
 .k-enttable .k-bigav .icon { width: 17px; height: 17px; }
