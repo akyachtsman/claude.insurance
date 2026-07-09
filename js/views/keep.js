@@ -1985,29 +1985,32 @@ export async function renderKeepEntity(params, id) {
     ]),
   ]) : null;
 
+  // The holdings live INSIDE the overview panel (divided by a rule) so the entity
+  // and what it owns read as one connected card, not a detached list floating below.
+  const ownedBlock = owned.length ? el("div", { class: "k-eowned" }, [
+    el("div", { class: "k-lbl", text: "Entities owned" }),
+    el("div", { class: "k-owned" }, owned.map((o) => {
+      const e = o.ent, managed = e && e._managed;
+      const pct = Math.max(0, Math.min(100, o.pct || 0));
+      const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
+      const kids = [
+        e ? entityAvatar(e) : null,
+        el("div", { class: "k-ownrow__id" }, [
+          el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
+          el("div", { class: "k-ownrow__bar" }, [el("i", { attrs: { style: `width:${pct}%` } })]),
+        ]),
+        el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
+      ];
+      return managed
+        ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)
+        : el("div", { class: `k-ownrow${tone}` }, kids);
+    })),
+  ]) : null;
+
   const view = page("list", [
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc]),
-    owned.length ? el("section", { class: "k-eassets" }, [
-      el("div", { class: "k-lbl", text: "Entities owned" }),
-      el("div", { class: "k-owned" }, owned.map((o) => {
-        const e = o.ent, managed = e && e._managed;
-        const pct = Math.max(0, Math.min(100, o.pct || 0));
-        const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
-        const kids = [
-          e ? entityAvatar(e) : null,
-          el("div", { class: "k-ownrow__id" }, [
-            el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
-            el("div", { class: "k-ownrow__bar" }, [el("i", { attrs: { style: `width:${pct}%` } })]),
-          ]),
-          el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
-        ];
-        return managed
-          ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)
-          : el("div", { class: `k-ownrow${tone}` }, kids);
-      })),
-    ]) : null,
+    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc, ownedBlock]),
     el("section", { class: "k-eassets" }, [
       el("div", { class: "k-lbl", text: "Assets in this entity" }),
       entity.assets.length
