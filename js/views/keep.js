@@ -388,7 +388,7 @@ function appBar(active) {
 }
 
 function page(active, contentChildren, opts = {}) {
-  const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : opts.mid ? " k-wrap--mid" : ""}`;
+  const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : opts.mid ? " k-wrap--mid" : opts.split ? " k-wrap--split" : ""}`;
   return el("div", {}, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
 }
 
@@ -1985,10 +1985,11 @@ export async function renderKeepEntity(params, id) {
     ]),
   ]) : null;
 
-  // Left column — entities this one owns, each stake drawn as a proportion bar.
-  const ownedCol = el("section", { class: "k-ecol" }, [
+  // Entities owned — kept nested INSIDE the entity frame (divided by a rule), so the
+  // entity and what it owns stay one connected card, exactly as before.
+  const ownedBlock = owned.length ? el("div", { class: "k-eowned" }, [
     el("div", { class: "k-lbl", text: "Entities owned" }),
-    owned.length ? el("div", { class: "k-owned" }, owned.map((o) => {
+    el("div", { class: "k-owned" }, owned.map((o) => {
       const e = o.ent, managed = e && e._managed;
       const pct = Math.max(0, Math.min(100, o.pct || 0));
       const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
@@ -2003,11 +2004,13 @@ export async function renderKeepEntity(params, id) {
       return managed
         ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)
         : el("div", { class: `k-ownrow${tone}` }, kids);
-    })) : el("p", { class: "k-setnote", text: "This entity doesn't own any others." }),
-  ]);
+    })),
+  ]) : null;
+  // The whole entity frame, unchanged: identity, metrics, coverage bar, entities owned.
+  const entityFrame = el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc, ownedBlock]);
 
-  // Right column — assets grouped by protection: what needs attention first, then
-  // what's covered. A tinted row and a status label make the gap story read at a glance.
+  // The assets frame — Option B, grouped by protection — placed NEXT TO the entity
+  // frame. Needs attention (gaps / uninsured, tinted) first, then protected.
   const rated = entity.assets.map((a) => ({ a, st: assetStatus(a, settings) }));
   const attention = rated.filter((x) => x.st.cls !== "ok");
   const covered = rated.filter((x) => x.st.cls === "ok");
@@ -2023,7 +2026,7 @@ export async function renderKeepEntity(params, id) {
     el("div", { class: "k-agroup__h" }, [el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }), el("span", { text: title }), el("span", { class: "k-agroup__c", text: String(items.length) })]),
     el("div", { class: "k-agroup__list" }, items.map(assetRow)),
   ]) : null;
-  const assetsCol = el("section", { class: "k-ecol" }, [
+  const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
     el("div", { class: "k-ecol__h" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
     entity.assets.length
       ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
@@ -2033,9 +2036,8 @@ export async function renderKeepEntity(params, id) {
   const view = page("list", [
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc]),
-    owned.length ? el("div", { class: "k-esplit" }, [ownedCol, assetsCol]) : assetsCol,
-  ]);
+    el("div", { class: "k-esplit" }, [entityFrame, assetsFrame]),
+  ], { split: true });
   mount(view);
 }
 
