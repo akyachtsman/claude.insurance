@@ -266,9 +266,11 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-eassets { margin-bottom: var(--space-6); }
 .k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: var(--space-3); }
 
-/* ── Entities owned (holdings list on the entity page) ──────────────────────── */
-/* Bare rows (no cards) — a full-width proportion bar draws each stake, coloured
-   to the owned entity's type, matching the avatar. */
+/* ── Entities owned (holdings list, inside the overview panel) ───────────────── */
+/* Divided from the coverage bar by a rule so the entity and its holdings read as
+   one connected card. Bare rows — a full-width proportion bar draws each stake,
+   coloured to the owned entity's type, matching the avatar. */
+.k-eowned { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--color-border); }
 .k-owned { display: flex; flex-direction: column; gap: var(--space-2); }
 .k-ownrow { display: flex; align-items: center; gap: 13px; padding: 8px 6px; border-radius: var(--radius-md); text-decoration: none; color: inherit; transition: background .12s; }
 a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
