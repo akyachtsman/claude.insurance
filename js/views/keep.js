@@ -1985,11 +1985,10 @@ export async function renderKeepEntity(params, id) {
     ]),
   ]) : null;
 
-  // The holdings live INSIDE the overview panel (divided by a rule) so the entity
-  // and what it owns read as one connected card, not a detached list floating below.
-  const ownedBlock = owned.length ? el("div", { class: "k-eowned" }, [
+  // Left column — entities this one owns, each stake drawn as a proportion bar.
+  const ownedCol = el("section", { class: "k-ecol" }, [
     el("div", { class: "k-lbl", text: "Entities owned" }),
-    el("div", { class: "k-owned" }, owned.map((o) => {
+    owned.length ? el("div", { class: "k-owned" }, owned.map((o) => {
       const e = o.ent, managed = e && e._managed;
       const pct = Math.max(0, Math.min(100, o.pct || 0));
       const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
@@ -2004,20 +2003,39 @@ export async function renderKeepEntity(params, id) {
       return managed
         ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)
         : el("div", { class: `k-ownrow${tone}` }, kids);
-    })),
+    })) : el("p", { class: "k-setnote", text: "This entity doesn't own any others." }),
+  ]);
+
+  // Right column — assets grouped by protection: what needs attention first, then
+  // what's covered. A tinted row and a status label make the gap story read at a glance.
+  const rated = entity.assets.map((a) => ({ a, st: assetStatus(a, settings) }));
+  const attention = rated.filter((x) => x.st.cls !== "ok");
+  const covered = rated.filter((x) => x.st.cls === "ok");
+  const assetRow = ({ a, st }) => el("a", { class: `k-arow k-arow--${st.cls === "ok" ? "ok" : "attn"}`, attrs: { href: `#/keep/asset/${a.id}` } }, [
+    cic(a),
+    el("div", { class: "k-arow__main" }, [
+      el("div", { class: "k-arow__name", text: a.name }),
+      el("div", { class: "k-arow__meta", text: `${a.meta} · ${money(a.value)}` }),
+    ]),
+    el("span", { class: `k-arow__st k-arow__st--${st.cls}`, text: st.label }),
+  ]);
+  const group = (title, items, tone) => items.length ? el("div", { class: "k-agroup" }, [
+    el("div", { class: "k-agroup__h" }, [el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }), el("span", { text: title }), el("span", { class: "k-agroup__c", text: String(items.length) })]),
+    el("div", { class: "k-agroup__list" }, items.map(assetRow)),
   ]) : null;
+  const assetsCol = el("section", { class: "k-ecol" }, [
+    el("div", { class: "k-ecol__h" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
+    entity.assets.length
+      ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
+      : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
+  ]);
 
   const view = page("list", [
     backLink("#/keep/list", "entities"),
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc, ownedBlock]),
-    el("section", { class: "k-eassets" }, [
-      el("div", { class: "k-lbl", text: "Assets in this entity" }),
-      entity.assets.length
-        ? el("div", { class: "k-agrid" }, entity.assets.map((a) => assetCard(a, settings)))
-        : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
-    ]),
-  ], { mid: true });
+    el("section", { class: `k-epanel k-eoverview k-panel--${suffix}` }, [band, metrics, alloc]),
+    owned.length ? el("div", { class: "k-esplit" }, [ownedCol, assetsCol]) : assetsCol,
+  ]);
   mount(view);
 }
 
