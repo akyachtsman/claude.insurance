@@ -190,7 +190,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* ── Layout ─────────────────────────────────────────────────────────────────── */
 .k-wrap { max-width: var(--maxw-wide); margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-16); }
 .k-wrap--narrow { max-width: 760px; }
-.k-wrap--mid { max-width: 1000px; }
+.k-wrap--mid { max-width: 880px; }
 .k-crumbs { font: 700 14px var(--font-sans); color: var(--color-text-secondary); margin-bottom: var(--space-5); }
 .k-crumbs a { color: var(--color-accent); }
 .k-crumbs a:hover { text-decoration: underline; }
