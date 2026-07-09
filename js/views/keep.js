@@ -388,7 +388,7 @@ function appBar(active) {
 }
 
 function page(active, contentChildren, opts = {}) {
-  const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : ""}`;
+  const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : opts.mid ? " k-wrap--mid" : ""}`;
   return el("div", {}, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
 }
 
@@ -2017,7 +2017,7 @@ export async function renderKeepEntity(params, id) {
         ? el("div", { class: "k-agrid" }, entity.assets.map((a) => assetCard(a, settings)))
         : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
     ]),
-  ]);
+  ], { mid: true });
   mount(view);
 }
 
