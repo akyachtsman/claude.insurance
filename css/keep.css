@@ -298,7 +298,22 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 @media (max-width: 760px) { .k-edethead { grid-template-columns: 1fr; justify-items: center; } .k-edethead .k-crumbs { justify-self: start; } .k-eviews { grid-column: 1; } }
 
 /* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
-.k-esplit { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.85fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
+/* Entity frame narrows; the assets split into two frames — Needs attention (given
+   the most room, since it usually holds the most) and Protected. Each frame's list
+   flows into as many compact columns as its width allows, so the whole page fits
+   across the screen instead of running down one long column. */
+.k-esplit { display: grid; grid-template-columns: minmax(340px, 1.35fr) minmax(0, 1.75fr) minmax(0, 0.9fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
+.k-eassetcol .k-ecol__h { min-height: 44px; }
+.k-eassetcol .k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.k-eassetcol .k-agroup__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; }
+@media (max-width: 1100px) {
+  .k-esplit { grid-template-columns: 1fr 1fr; }
+  .k-esplit .k-eoverview { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .k-esplit { grid-template-columns: 1fr; }
+  .k-esplit .k-eoverview { grid-column: auto; }
+}
 .k-esplit .k-epanel { margin-bottom: 0; }
 .k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-5) var(--space-6); min-width: 0; }
 /* Header band mirrors the entity frame's hero: content centred, divided by a rule. */

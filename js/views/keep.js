@@ -2070,19 +2070,25 @@ export async function renderKeepEntity(params, id) {
     ]),
     el("span", { class: `k-arow__st k-arow__st--${st.cls}`, text: st.label }),
   ]);
-  const group = (title, items, tone) => items.length ? el("div", { class: "k-agroup" }, [
-    el("div", { class: "k-agroup__h" }, [el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }), el("span", { text: title }), el("span", { class: "k-agroup__c", text: String(items.length) })]),
-    el("div", { class: "k-agroup__list" }, items.map(assetRow)),
-  ]) : null;
-  const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
+  // Two asset frames side by side — Needs attention and Protected — each its own
+  // card. Splitting the assets lets the entity frame narrow so the whole page
+  // (entity + both asset columns) fits across the screen without deep scrolling.
+  const addBtn = el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [el("span", { text: "Add asset" })]);
+  const assetFrame = (title, tone, items, action) => el("section", { class: `k-ecol k-eassetcol k-eassetcol--${tone}` }, [
     el("div", { class: "k-ecol__h" }, [
-      el("div", { class: "k-ecol__ht" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
-      el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [el("span", { text: "Add asset" })]),
+      el("div", { class: "k-ecol__ht" }, [
+        el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }),
+        el("div", { class: "k-lbl", text: title }),
+        el("span", { class: "k-ecol__cnt", text: String(items.length) }),
+      ]),
+      action || null,
     ]),
-    entity.assets.length
-      ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
-      : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
+    items.length
+      ? el("div", { class: "k-agroup__list" }, items.map(assetRow))
+      : el("p", { class: "k-setnote", text: tone === "gap" ? "Nothing needs attention — every asset is covered." : "No fully-protected assets yet." }),
   ]);
+  const attentionFrame = assetFrame("Needs attention", "gap", attention, addBtn);
+  const protectedFrame = assetFrame("Protected", "ok", covered, null);
 
   // The "Me" entity is the Entities-tab landing (a top-level page), so it drops
   // the back affordance; drilled-in entities keep the origin-aware back. Every
@@ -2106,7 +2112,7 @@ export async function renderKeepEntity(params, id) {
   const view = page("list", [
     isLanding ? null : backLink("#/keep/list", "entities"),
     header,
-    el("div", { class: "k-esplit" }, [entityFrame, assetsFrame]),
+    el("div", { class: "k-esplit" }, [entityFrame, attentionFrame, protectedFrame]),
   ].filter(Boolean), { split: true });
   mount(view);
 }
