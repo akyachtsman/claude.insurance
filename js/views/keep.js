@@ -430,6 +430,29 @@ function backLink(fallbackHref, fallbackLabel) {
   ]);
 }
 
+// Friendly label for a route, resolving a dynamic entity route to its name so a
+// back control reads "Back to Jordan Mercer" rather than a bare "Back".
+function routeLabel(hash) {
+  if (KEEP_LABELS[hash]) return KEEP_LABELS[hash];
+  const m = hash.match(/^#\/keep\/entity(?:\/([^/]+))?$/);
+  if (m) { const e = m[1] ? getEntity(m[1]) : primaryEntity(); return e ? e.name : "entity"; }
+  return null;
+}
+// Back row shown only when you arrived from another in-app Keep page (e.g. an
+// entity detail via its Relationships / All entities control) — so a top-level
+// nav visit to a list/map page doesn't get a spurious back control.
+function originBackRow() {
+  const prev = previousRoute();
+  if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
+  const label = routeLabel(prev);
+  return el("div", { class: "k-backrow" }, [
+    el("a", { class: "k-back", attrs: { href: prev } }, [
+      icon("arrow-right", { size: 18, class: "icon-flip" }),
+      el("span", { text: label ? `Back to ${label}` : "Back" }),
+    ]),
+  ]);
+}
+
 function cic(asset) {
   const meta = ASSET_META[asset.type] || { cic: "home", icon: "shield" };
   return el("span", { class: `k-cic k-cic--${meta.cic}` }, [icon(meta.icon, { size: 28 })]);
@@ -1227,21 +1250,28 @@ function relLayout() {
 // On first paint it scales to fit the viewport but never below the readable node
 // floor, so a large chart overflows and you drag to reach the rest. A press that
 // lands on a node without moving opens it.
-function setupRelViewport(wrap, svg, W, H) {
+function setupRelViewport(wrap, svg, W, H, anchor) {
   const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
+  const TOPM = 28;                                 // top margin when the chart is top-aligned
   let k = 1, tx = 0, ty = 0, fitted = false;
   const applyT = () => { svg.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
-  // Keep at least a margin of the chart on-screen; centre it on the axes where it fits.
+  // Keep the chart on-screen: centre horizontally where it fits, else clamp the
+  // pan. Vertically, top-align with a small margin (rather than centre) so the
+  // root sits near the top and there's no dead space floating above it.
   const clampPan = (vw, vh) => {
     const cw = W * k, ch = H * k, M = 48;
     tx = cw <= vw ? (vw - cw) / 2 : Math.min(M, Math.max(vw - cw - M, tx));
-    ty = ch <= vh ? (vh - ch) / 2 : Math.min(M, Math.max(vh - ch - M, ty));
+    ty = ch <= vh ? TOPM : Math.min(M, Math.max(vh - ch - M, ty));
   };
   const fit = () => {
     const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
     if (!vw || !vh) return;
     k = Math.max(MIN_K, Math.min(vw / W, vh / H, 1));   // fit the whole chart, but not below the node floor
-    tx = (vw - W * k) / 2; ty = (vh - H * k) / 2;        // centre it
+    // Anchor on the root ("Me") node — centred horizontally, near the top — so a
+    // large graph opens focused on you, not on its geometric middle. clampPan
+    // then centres/top-aligns when the whole chart fits, or clamps when it pans.
+    if (anchor) { tx = vw / 2 - anchor.cx * k; ty = TOPM - anchor.top * k; }
+    else { tx = (vw - W * k) / 2; ty = (vh - H * k) / 2; }
     clampPan(vw, vh); applyT(); fitted = true;
   };
   if (typeof ResizeObserver !== "undefined") {
@@ -1628,7 +1658,12 @@ function relationshipMap() {
   zoomCtl.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   zoomCtl.addEventListener("click", (ev) => ev.stopPropagation());
   wrap.appendChild(zoomCtl);
-  setupRelViewport(wrap, svg, W, H);
+  // Anchor the initial view on the root ("Me") node so the map opens centred on it.
+  const rootN = nodes.find((n) => n.kind === "personal") || nodes[0];
+  const anchor = rootN && pos[rootN.id]
+    ? { cx: pos[rootN.id].x + NODE_W / 2, top: pos[rootN.id].cy - NODE_H / 2 }
+    : null;
+  setupRelViewport(wrap, svg, W, H, anchor);
   return wrap;
 }
 
@@ -1837,6 +1872,7 @@ async function renderEntityCollection(layout) {
     body = entityTable(entities, settings);
   }
   const view = page("list", [
+    originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle(layout),
     entitiesPrivacyRow(),
@@ -1916,6 +1952,7 @@ export function renderKeepEntities() {
   const tools = relToolbar(drawMap, host);
   drawMap();
   const view = page("list", [
+    originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle("map"),
     entitiesPrivacyRow(),
