@@ -192,7 +192,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-wrap--narrow { max-width: 760px; }
 .k-wrap--mid { max-width: 880px; }
 .k-wrap--split { max-width: 1400px; }
-.k-crumbs { font: 700 14px var(--font-sans); color: var(--color-text-secondary); margin-bottom: var(--space-5); }
+.k-crumbs { font: 700 14px var(--font-sans); color: var(--color-text-secondary); margin-bottom: var(--space-3); }
 .k-crumbs a { color: var(--color-accent); }
 .k-crumbs a:hover { text-decoration: underline; }
 .k-backrow { margin-bottom: var(--space-3); }
@@ -231,13 +231,13 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-emeta { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-2); }
 .k-emeta b { color: var(--color-text-primary); font-weight: 800; }
 .k-ehead .k-btn { margin-left: auto; }
-.k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-4); }
+.k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-3); }
 .k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
-.k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-8) var(--space-10); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
+.k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-8); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
 /* Overview band — identity + headline insured value + primary action */
-.k-eband { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.k-eband { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .k-eband__who { min-width: 0; flex: 1; }
 .k-eband__name { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .k-eband__name h1 { font: 700 25px var(--font-display); letter-spacing: -.01em; margin: 0; }
@@ -249,13 +249,13 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-eband .k-bigav { width: 64px; height: 64px; border-radius: 20px; font-size: 22px; }
 
 /* Inline metric row (no boxes) — the secondary figures read as one scannable line */
-.k-emetrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-6); padding: var(--space-5) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.k-emetrics { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-top: var(--space-5); padding: var(--space-4) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .k-emetric__k { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .1em; color: var(--color-text-secondary); }
 .k-emetric__v { font: 700 22px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .k-emetric__v--warn { color: var(--color-gap); }
 
 /* Coverage allocation bar — in-place vs open gaps at a glance */
-.k-ealloc { margin-top: var(--space-6); }
+.k-ealloc { margin-top: var(--space-5); }
 .k-ealloc__lbl { display: flex; justify-content: space-between; gap: var(--space-4); font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-bottom: 8px; }
 .k-ealloc__sum { color: var(--color-text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
 .k-etrack { display: flex; height: 14px; border-radius: 8px; overflow: hidden; background: var(--color-border); }
@@ -274,7 +274,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* Divided from the coverage bar by a rule so the entity and its holdings read as
    one connected card. Bare rows — a full-width proportion bar draws each stake,
    coloured to the owned entity's type, matching the avatar. */
-.k-eowned { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--color-border); }
+.k-eowned { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
 .k-owned { display: flex; flex-direction: column; gap: var(--space-2); }
 .k-ownrow { display: flex; align-items: center; gap: 13px; padding: 8px 6px; border-radius: var(--radius-md); text-decoration: none; color: inherit; transition: background .12s; }
 a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
@@ -290,11 +290,11 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 
 /* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
-.k-esplit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; margin-bottom: var(--space-6); }
+.k-esplit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
 .k-esplit .k-epanel { margin-bottom: 0; }
-.k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-8); min-width: 0; }
+.k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-6) var(--space-8); min-width: 0; }
 /* Header band mirrors the entity frame's hero: content centred, divided by a rule. */
-.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 72px; margin-bottom: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-border); }
+.k-ecol__h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 52px; margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-border); }
 .k-ecol__ht { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .k-ecol__h .k-lbl { margin-bottom: 0; }
 /* Uniform micro-label scale across both frames (section labels match the eyebrow). */
@@ -304,7 +304,7 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-btn--sm .icon { width: 16px; height: 16px; }
 
 /* Assets grouped by protection status */
-.k-agroups { display: flex; flex-direction: column; gap: var(--space-5); }
+.k-agroups { display: flex; flex-direction: column; gap: var(--space-4); }
 .k-agroup__h { display: flex; align-items: center; gap: 8px; font: 700 13.5px var(--font-display); color: var(--color-text-primary); margin-bottom: 10px; }
 .k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .k-agroup__dot--gap { background: var(--color-gap); }
