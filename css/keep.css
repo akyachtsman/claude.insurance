@@ -291,7 +291,7 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 /* ── Entity page: two-column split (entity info | assets grouped) ────────────── */
 /* Entity information keeps the majority of the width; a single assets frame beside
    it holds the two protection groups (Needs attention, then Protected) stacked. */
-.k-esplit { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.85fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
+.k-esplit { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.55fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
 @media (max-width: 760px) { .k-esplit { grid-template-columns: 1fr; } }
 .k-esplit .k-epanel { margin-bottom: 0; }
 .k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-5) var(--space-6); min-width: 0; }
@@ -306,7 +306,9 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-btn--sm .icon { width: 16px; height: 16px; }
 
 /* Assets grouped by protection status */
-.k-agroups { display: flex; flex-direction: column; gap: var(--space-3); }
+/* Two columns inside the assets frame: Needs attention · Protected. */
+.k-agroups { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4) var(--space-5); align-items: start; }
+@media (max-width: 900px) { .k-agroups { grid-template-columns: 1fr; } }
 .k-agroup__h { display: flex; align-items: center; gap: 8px; font: 700 13.5px var(--font-display); color: var(--color-text-primary); margin-bottom: 7px; }
 .k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .k-agroup__dot--gap { background: var(--color-gap); }
