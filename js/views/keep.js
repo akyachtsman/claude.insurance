@@ -377,7 +377,7 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
-        link("Entities", "#/keep/list", "list"),
+        link("Entities", "#/keep/entity", "list"),
         link("Assets", "#/keep/assets", "assets"),
         link("Policies", "#/keep/insurance", "insurance"),
         link("Documents", "#/keep/documents", "documents"),
@@ -527,6 +527,14 @@ function colorSuffix(entity) {
   return "me";
 }
 function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
+
+// The client's own "Me" entity (kind personal) — the default landing for the
+// Entities tab, which opens straight onto this detail view. Falls back to the
+// first managed entity if there's no personal one.
+function primaryEntity() {
+  const ents = getEntities();
+  return ents.find((e) => e.kind === "personal") || ents[0] || null;
+}
 
 // The broad entity type shown as the category: Individual (you + people),
 // Business, or Trust.
@@ -1919,7 +1927,8 @@ export function renderKeepEntities() {
 }
 
 export async function renderKeepEntity(params, id) {
-  const entity = getEntity(id);
+  // No id (the Entities tab lands here) → open the client's own "Me" entity.
+  const entity = getEntity(id) || primaryEntity();
   if (!entity) return renderKeepEntityList();
   const settings = await getRuleDefaults();
   const suffix = colorSuffix(entity);
@@ -2038,11 +2047,23 @@ export async function renderKeepEntity(params, id) {
       : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
   ]);
 
-  const view = page("list", [
-    backLink("#/keep/list", "entities"),
+  // The "Me" entity is the Entities-tab landing (a top-level page), so it drops
+  // the back affordance; drilled-in entities keep the origin-aware back. Every
+  // detail page carries clear controls back out to the full list and the map.
+  const isLanding = entity.kind === "personal";
+  const detActions = el("div", { class: "k-edetnav" }, [
+    el("a", { class: "k-detbtn", attrs: { href: "#/keep/list" } }, [icon("clipboard", { size: 15 }), el("span", { text: "All entities" })]),
+    el("a", { class: "k-detbtn", attrs: { href: "#/keep/entities" } }, [icon("swap", { size: 15 }), el("span", { text: "Relationships" })]),
+  ]);
+  const header = el("div", { class: "k-edethead" }, [
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
+    detActions,
+  ]);
+  const view = page("list", [
+    isLanding ? null : backLink("#/keep/list", "entities"),
+    header,
     el("div", { class: "k-esplit" }, [entityFrame, assetsFrame]),
-  ], { split: true });
+  ].filter(Boolean), { split: true });
   mount(view);
 }
 
