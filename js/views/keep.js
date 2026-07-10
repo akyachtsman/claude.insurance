@@ -377,7 +377,7 @@ function appBar(active) {
       ]),
       el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
         link("Home", "#/keep", "home"),
-        link("Entities", "#/keep/entity", "list"),
+        link("Entities", "#/keep/list", "list"),
         link("Assets", "#/keep/assets", "assets"),
         link("Policies", "#/keep/insurance", "insurance"),
         link("Documents", "#/keep/documents", "documents"),
@@ -942,6 +942,8 @@ function entitiesToggle(active) {
     seg("Rows", "clipboard", "#/keep/list", "rows"),
     seg("Cards", "book", "#/keep/grid", "cards"),
     seg("Relationships", "swap", "#/keep/entities", "map"),
+    // Fourth: jump to your own (logged-in) entity's page.
+    seg("Owner", "user", "#/keep/entity", "owner"),
   ]);
 }
 
@@ -2070,50 +2072,30 @@ export async function renderKeepEntity(params, id) {
     ]),
     el("span", { class: `k-arow__st k-arow__st--${st.cls}`, text: st.label }),
   ]);
-  // Two asset frames side by side — Needs attention and Protected — each its own
-  // card. Splitting the assets lets the entity frame narrow so the whole page
-  // (entity + both asset columns) fits across the screen without deep scrolling.
-  const addBtn = el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [el("span", { text: "Add asset" })]);
-  const assetFrame = (title, tone, items, action) => el("section", { class: `k-ecol k-eassetcol k-eassetcol--${tone}` }, [
+  // A single assets frame beside the entity frame: the two protection groups
+  // (Needs attention, then Protected) stacked in one column, so the entity
+  // information keeps the majority of the width.
+  const group = (title, items, tone) => items.length ? el("div", { class: "k-agroup" }, [
+    el("div", { class: "k-agroup__h" }, [el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }), el("span", { text: title }), el("span", { class: "k-agroup__c", text: String(items.length) })]),
+    el("div", { class: "k-agroup__list" }, items.map(assetRow)),
+  ]) : null;
+  const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
     el("div", { class: "k-ecol__h" }, [
-      el("div", { class: "k-ecol__ht" }, [
-        el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }),
-        el("div", { class: "k-lbl", text: title }),
-        el("span", { class: "k-ecol__cnt", text: String(items.length) }),
-      ]),
-      action || null,
+      el("div", { class: "k-ecol__ht" }, [el("div", { class: "k-lbl", text: "Assets in this entity" }), entity.assets.length ? el("span", { class: "k-ecol__cnt", text: String(entity.assets.length) }) : null]),
+      el("a", { class: "k-btn k-btn--sm", attrs: { href: `#/keep/add-asset/${entity.id}` } }, [el("span", { text: "Add asset" })]),
     ]),
-    items.length
-      ? el("div", { class: "k-agroup__list" }, items.map(assetRow))
-      : el("p", { class: "k-setnote", text: tone === "gap" ? "Nothing needs attention — every asset is covered." : "No fully-protected assets yet." }),
+    entity.assets.length
+      ? el("div", { class: "k-agroups" }, [group("Needs attention", attention, "gap"), group("Protected", covered, "ok")].filter(Boolean))
+      : el("p", { class: "k-setnote", text: "No assets yet — use Add asset above." }),
   ]);
-  const attentionFrame = assetFrame("Needs attention", "gap", attention, addBtn);
-  const protectedFrame = assetFrame("Protected", "ok", covered, null);
 
-  // The "Me" entity is the Entities-tab landing (a top-level page), so it drops
-  // the back affordance; drilled-in entities keep the origin-aware back. Every
-  // detail page carries clear controls back out to the full list and the map.
-  const isLanding = entity.kind === "personal";
-  // One centered segmented switch across the entity views — the current entity,
-  // the full list, and the relationships map — reusing the Rows/Cards/Relationships
-  // switch language. "This entity" is the active segment (its own glyph by type).
-  const selfIcon = entity.kind === "business" ? "briefcase" : (entity.kind === "trust" ? "doc" : "user");
-  const viewSwitch = el("div", { class: "k-eviews" }, [
-    el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entity views" } }, [
-      el("span", { class: "k-seg__btn is-on", attrs: { role: "tab", "aria-selected": "true", tabindex: "0" } }, [icon(selfIcon, { size: 16 }), el("span", { text: "This entity" })]),
-      el("a", { class: "k-seg__btn", attrs: { role: "tab", "aria-selected": "false", href: "#/keep/list" } }, [icon("clipboard", { size: 16 }), el("span", { text: "All entities" })]),
-      el("a", { class: "k-seg__btn", attrs: { role: "tab", "aria-selected": "false", href: "#/keep/entities" } }, [icon("swap", { size: 16 }), el("span", { text: "Relationships" })]),
-    ]),
-  ]);
-  const header = el("div", { class: "k-edethead" }, [
-    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    viewSwitch,
-  ]);
+  // Reached from the Owner tab / a drill-in, so it carries an origin-aware back;
+  // a plain breadcrumb, no in-page view switch.
   const view = page("list", [
-    isLanding ? null : backLink("#/keep/list", "entities"),
-    header,
-    el("div", { class: "k-esplit" }, [entityFrame, attentionFrame, protectedFrame]),
-  ].filter(Boolean), { split: true });
+    backLink("#/keep/list", "entities"),
+    el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
+    el("div", { class: "k-esplit" }, [entityFrame, assetsFrame]),
+  ], { split: true });
   mount(view);
 }
 
