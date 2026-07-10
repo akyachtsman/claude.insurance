@@ -2088,13 +2088,20 @@ export async function renderKeepEntity(params, id) {
   // the back affordance; drilled-in entities keep the origin-aware back. Every
   // detail page carries clear controls back out to the full list and the map.
   const isLanding = entity.kind === "personal";
-  const detActions = el("div", { class: "k-edetnav" }, [
-    el("a", { class: "k-detbtn", attrs: { href: "#/keep/list" } }, [icon("clipboard", { size: 15 }), el("span", { text: "All entities" })]),
-    el("a", { class: "k-detbtn", attrs: { href: "#/keep/entities" } }, [icon("swap", { size: 15 }), el("span", { text: "Relationships" })]),
+  // One centered segmented switch across the entity views — the current entity,
+  // the full list, and the relationships map — reusing the Rows/Cards/Relationships
+  // switch language. "This entity" is the active segment (its own glyph by type).
+  const selfIcon = entity.kind === "business" ? "briefcase" : (entity.kind === "trust" ? "doc" : "user");
+  const viewSwitch = el("div", { class: "k-eviews" }, [
+    el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entity views" } }, [
+      el("span", { class: "k-seg__btn is-on", attrs: { role: "tab", "aria-selected": "true", tabindex: "0" } }, [icon(selfIcon, { size: 16 }), el("span", { text: "This entity" })]),
+      el("a", { class: "k-seg__btn", attrs: { role: "tab", "aria-selected": "false", href: "#/keep/list" } }, [icon("clipboard", { size: 16 }), el("span", { text: "All entities" })]),
+      el("a", { class: "k-seg__btn", attrs: { role: "tab", "aria-selected": "false", href: "#/keep/entities" } }, [icon("swap", { size: 16 }), el("span", { text: "Relationships" })]),
+    ]),
   ]);
   const header = el("div", { class: "k-edethead" }, [
     el("nav", { class: "k-crumbs" }, [el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(), el("span", { text: entity.name })]),
-    detActions,
+    viewSwitch,
   ]);
   const view = page("list", [
     isLanding ? null : backLink("#/keep/list", "entities"),

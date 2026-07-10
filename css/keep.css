@@ -288,13 +288,14 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-ownrow--trust .k-ownrow__pct { color: #B5660A; background: #FBEBCF; }
 .k-ownrow--np .k-ownrow__pct { color: #0E8E66; background: #DFF3EA; }
 
-/* Detail header: breadcrumb + explicit controls back out to the list and the map */
-.k-edethead { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+/* Detail header: breadcrumb pinned left, a single centred segmented switch across
+   the entity views (this entity · all entities · relationships). */
+.k-edethead { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
 .k-edethead .k-crumbs { margin-bottom: 0; }
-.k-edetnav { display: flex; gap: 8px; flex: none; }
-.k-detbtn { display: inline-flex; align-items: center; gap: 7px; font: 700 13px var(--font-sans); color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 7px 14px; text-decoration: none; transition: border-color .12s, color .12s; }
-.k-detbtn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.k-detbtn .icon { width: 15px; height: 15px; }
+.k-eviews { grid-column: 2; display: flex; justify-content: center; }
+.k-eviews .k-seg { margin: 0; }
+.k-eviews .k-seg__btn { text-decoration: none; }
+@media (max-width: 760px) { .k-edethead { grid-template-columns: 1fr; justify-items: center; } .k-edethead .k-crumbs { justify-self: start; } .k-eviews { grid-column: 1; } }
 
 /* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
 .k-esplit { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.85fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
