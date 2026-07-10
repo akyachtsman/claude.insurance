@@ -1997,15 +1997,11 @@ export async function renderKeepEntity(params, id) {
     el("div", { class: "k-lbl", text: "Entities owned" }),
     el("div", { class: "k-owned" }, owned.map((o) => {
       const e = o.ent, managed = e && e._managed;
-      const pct = Math.max(0, Math.min(100, o.pct || 0));
       const tone = e ? ` k-ownrow--${colorSuffix(e)}` : "";
       const kids = [
         e ? entityAvatar(e) : null,
-        el("div", { class: "k-ownrow__id" }, [
-          el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
-          el("div", { class: "k-ownrow__bar" }, [el("i", { attrs: { style: `width:${pct}%` } })]),
-        ]),
-        el("span", { class: "k-ownrow__pct", text: o.stake || `${o.pct}%` }),
+        el("span", { class: "k-ownrow__name", text: o.name || (e && e.name) || "Entity" }),
+        el("span", { class: "k-ownrow__pct", text: `${o.stake || `${o.pct}%`} owned` }),
       ];
       return managed
         ? el("a", { class: `k-ownrow${tone} k-ilink`, attrs: { href: `#/keep/entity/${e.id}` } }, kids)

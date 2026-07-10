@@ -280,17 +280,16 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-owned .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
 .k-owned .k-bigav .icon { width: 17px; height: 17px; }
-.k-ownrow__id { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.k-ownrow__name { font: 700 15px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.k-ownrow__bar { height: 6px; border-radius: 4px; background: var(--color-border); overflow: hidden; }
-.k-ownrow__bar i { display: block; height: 100%; border-radius: 4px; background: var(--color-accent); }
-.k-ownrow--biz .k-ownrow__bar i { background: #D6333A; }
-.k-ownrow--trust .k-ownrow__bar i { background: #B5660A; }
-.k-ownrow--np .k-ownrow__bar i { background: #0E8E66; }
-.k-ownrow__pct { margin-left: auto; flex: none; font: 800 18px var(--font-display); color: var(--color-text-primary); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.k-ownrow__name { flex: 1; min-width: 0; font: 700 15px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Stake shown as a tinted pill (the type's colour) rather than a proportion bar. */
+.k-ownrow__pct { margin-left: auto; flex: none; font: 800 12.5px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 4px 12px; border-radius: var(--radius-pill); font-variant-numeric: tabular-nums; }
+.k-ownrow--me .k-ownrow__pct, .k-ownrow--person .k-ownrow__pct { color: var(--color-accent); background: var(--color-accent-light); }
+.k-ownrow--biz .k-ownrow__pct { color: #D6333A; background: #FBE9E9; }
+.k-ownrow--trust .k-ownrow__pct { color: #B5660A; background: #FBEBCF; }
+.k-ownrow--np .k-ownrow__pct { color: #0E8E66; background: #DFF3EA; }
 
 /* ── Entity page: two-column split (entities owned | assets grouped) ─────────── */
-.k-esplit { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
+.k-esplit { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.85fr); gap: var(--space-4); align-items: start; margin-bottom: var(--space-5); }
 .k-esplit .k-epanel { margin-bottom: 0; }
 .k-ecol { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: var(--space-5) var(--space-6); min-width: 0; }
 /* Header band mirrors the entity frame's hero: content centred, divided by a rule. */
