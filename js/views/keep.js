@@ -934,16 +934,16 @@ export function renderKeepAssets() {
 // list, a Cards grid, and the Relationships map. `active` is "rows" | "cards" |
 // "map"; each segment deep-links to its route.
 function entitiesToggle(active) {
-  const seg = (label, iconName, href, key) => el("a", {
+  const seg = (label, iconName, href, key, title) => el("a", {
     class: `k-seg__btn${active === key ? " is-on" : ""}`,
-    attrs: { href, role: "tab", "aria-selected": String(active === key) },
+    attrs: Object.assign({ href, role: "tab", "aria-selected": String(active === key) }, title ? { title, "aria-label": title } : {}),
   }, [icon(iconName, { size: 16 }), el("span", { text: label })]);
   return el("div", { class: "k-seg", attrs: { role: "tablist", "aria-label": "Entities view" } }, [
     seg("Rows", "clipboard", "#/keep/list", "rows"),
     seg("Cards", "book", "#/keep/grid", "cards"),
     seg("Relationships", "swap", "#/keep/entities", "map"),
-    // Fourth: jump to your own (logged-in) entity's page.
-    seg("Owner", "user", "#/keep/entity", "owner"),
+    // Fourth: jump to the account's own (logged-in) entity — the ultimate beneficial owner.
+    seg("UBO", "user", "#/keep/entity", "owner", "Ultimate beneficial owner"),
   ]);
 }
 
