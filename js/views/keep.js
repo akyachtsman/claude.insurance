@@ -1269,11 +1269,11 @@ function setupRelViewport(wrap, svg, W, H, anchor) {
     const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
     if (!vw || !vh) return;
     k = Math.max(MIN_K, Math.min(vw / W, vh / H, 1));   // fit the whole chart, but not below the node floor
-    // Anchor on the root ("Me") node — centred horizontally, near the top — so a
-    // large graph opens focused on you, not on its geometric middle. clampPan
-    // then centres/top-aligns when the whole chart fits, or clamps when it pans.
-    if (anchor) { tx = vw / 2 - anchor.cx * k; ty = TOPM - anchor.top * k; }
-    else { tx = (vw - W * k) / 2; ty = (vh - H * k) / 2; }
+    // Centre the whole chart horizontally (so it reads balanced for single- or
+    // multi-root graphs), and anchor the top layer near the viewport top so the
+    // roots stay visible. clampPan then centres/top-aligns or clamps the pan.
+    tx = (vw - W * k) / 2;
+    ty = anchor ? TOPM - anchor.top * k : (vh - H * k) / 2;
     clampPan(vw, vh); applyT(); fitted = true;
   };
   if (typeof ResizeObserver !== "undefined") {
@@ -1961,7 +1961,7 @@ export function renderKeepEntities() {
     tools,
     host,
     el("p", { class: "k-relcaption", text: "Each arrow points from an owner to what it owns; the bar on an entity shows its ownership split, coloured by owner type (blue people, red businesses, amber trusts). Use the controls above to re-orient, regroup, focus on one entity, or declutter. Drag anywhere to move the map; tap an entity you manage to open it." }),
-  ]);
+  ], { split: true });   // wide canvas so a large graph fits and zooms up, centred
   mount(view);
 }
 
