@@ -607,12 +607,14 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-ilink:hover { text-decoration: underline; }
 .k-imuted { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 2px; }
 .k-doc-ic { color: var(--color-text-secondary); margin-right: 7px; }
-/* Documents table — compact rows, everything in blue. */
-.k-doctable .k-itable th { padding: 9px 16px; }
-.k-doctable .k-itable td { padding: 7px 16px; color: var(--color-accent); }
-.k-doctable .k-doc-ic { color: var(--color-accent); }
+/* Documents table — very compact rows, black text. */
+.k-doctable .k-itable th { padding: 6px 16px; }
+.k-doctable .k-itable td { padding: 4px 16px; color: var(--color-text-primary); font-size: 13px; }
+.k-doctable .k-ilink { color: var(--color-text-primary); font-size: 13px; }
+.k-doctable .k-ilink:hover { color: var(--color-accent); }
+.k-doctable .k-doc-ic { color: var(--color-text-primary); }
 .k-doctable .k-doc-ic svg { fill: currentColor; }
-.k-doctable .k-imuted { color: var(--color-accent); opacity: .7; margin-top: 1px; }
+.k-doctable .k-imuted { color: var(--color-text-secondary); font-size: 11px; margin-top: 0; }
 .k-doc-ic .icon { vertical-align: -3px; }
 .k-idocs { display: flex; flex-direction: column; gap: 6px; }
 .k-idocs .k-doclink { margin: 0; }
