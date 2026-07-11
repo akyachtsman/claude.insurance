@@ -219,7 +219,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
    icon in the type colour (transparent framing). */
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: #2F6AF6; display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
-.k-bigav .icon { width: 82%; height: 82%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .k-bigav--person { color: #2F6AF6; }
 .k-bigav--biz { color: #D6333A; }
 .k-bigav--np { color: #0E8E66; }
@@ -281,7 +281,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-ownrow { display: flex; align-items: center; gap: 11px; padding: 5px 6px; border-radius: var(--radius-md); text-decoration: none; color: inherit; transition: background .12s; }
 a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-owned .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
-.k-owned .k-bigav .icon { width: 17px; height: 17px; }
+.k-owned .k-bigav .icon { width: 24px; height: 24px; }
 .k-ownrow__name { flex: 1; min-width: 0; font: 700 15px var(--font-display); color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Stake shown as a tinted pill (the type's colour) rather than a proportion bar. */
 .k-ownrow__pct { margin-left: auto; flex: none; font: 800 12.5px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 4px 12px; border-radius: var(--radius-pill); font-variant-numeric: tabular-nums; }
@@ -333,7 +333,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
-.k-enttable .k-bigav .icon { width: 17px; height: 17px; }
+.k-enttable .k-bigav .icon { width: 24px; height: 24px; }
 .k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 11px; }
 .k-enttable .k-etcell__name { font: 700 15px var(--font-display); }
 .k-enttable .k-et { margin-left: 0; }
@@ -366,7 +366,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-etile--trust .k-etile__bar { background: #F0C879; }
 .k-etile--np .k-etile__bar { background: #7FD4A8; }
 .k-etile .k-bigav { width: 40px; height: 40px; border-radius: 12px; margin: 0; font-size: 15px; flex: none; }
-.k-etile .k-bigav .icon { width: 20px; height: 20px; }
+.k-etile .k-bigav .icon { width: 28px; height: 28px; }
 .k-etile__body { flex: 1; min-width: 0; }
 .k-etile__name { font: 700 15px var(--font-display); margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .k-etile__meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
