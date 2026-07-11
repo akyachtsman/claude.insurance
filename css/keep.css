@@ -313,6 +313,7 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-agroup__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .k-agroup__dot--gap { background: var(--color-gap); }
 .k-agroup__dot--ok { background: var(--color-accent); }
+.k-agroup__shield { width: 15px; height: 15px; flex: none; color: var(--color-accent); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .k-agroup__c { color: var(--color-text-secondary); font-weight: 700; }
 .k-agroup__list { display: flex; flex-direction: column; gap: 6px; }
 .k-arow { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 7px 12px; border-radius: var(--radius-md); background: var(--color-bg); text-decoration: none; color: inherit; transition: transform .12s, box-shadow .12s; }

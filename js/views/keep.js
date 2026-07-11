@@ -2076,7 +2076,12 @@ export async function renderKeepEntity(params, id) {
   // (Needs attention, then Protected) stacked in one column, so the entity
   // information keeps the majority of the width.
   const group = (title, items, tone) => items.length ? el("div", { class: "k-agroup" }, [
-    el("div", { class: "k-agroup__h" }, [el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }), el("span", { text: title }), el("span", { class: "k-agroup__c", text: String(items.length) })]),
+    el("div", { class: "k-agroup__h" }, [
+      // Protected is marked by a blue shield; needs-attention keeps the status dot.
+      tone === "ok" ? icon("shield", { size: 15, class: "k-agroup__shield" }) : el("i", { class: `k-agroup__dot k-agroup__dot--${tone}` }),
+      el("span", { text: title }),
+      el("span", { class: "k-agroup__c", text: String(items.length) }),
+    ]),
     el("div", { class: "k-agroup__list" }, items.map(assetRow)),
   ]) : null;
   const assetsFrame = el("section", { class: "k-ecol k-eassetframe" }, [
