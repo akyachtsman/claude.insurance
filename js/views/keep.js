@@ -2707,6 +2707,7 @@ export function renderKeepDocuments() {
   ];
 
   const table = rows.length ? sortableTable(columns, rows, { defaultIdx: 1, defaultDir: 1 }) : null;  // Entity
+  if (table) table.wrap.classList.add("k-doctable");   // compact, all-blue document rows
   const empty = el("div", { class: "k-docs-empty", attrs: { hidden: "" }, text: "No documents match your search." });
 
   const search = el("input", { class: "k-docsearch", attrs: { type: "search", placeholder: "Search documents by name, policy, asset or entity…", "aria-label": "Search documents" } });
