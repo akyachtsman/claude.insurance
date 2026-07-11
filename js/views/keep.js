@@ -579,12 +579,12 @@ function entitySubtype(entity) {
 }
 
 function entityAvatar(entity) {
-  // Businesses (red / nonprofit green) and trusts (yellow) get an icon avatar;
-  // you and family members (blue) show their initials.
-  if (entity.kind === "business" || entity.kind === "trust") {
-    return el("span", { class: `k-bigav k-bigav--${colorSuffix(entity)}` }, [icon(entity.icon || (entity.kind === "trust" ? "doc" : "briefcase"), { size: 30 })]);
-  }
-  return el("span", { class: `k-bigav${entity.kind === "person" ? " k-bigav--person" : ""}`, text: entity.initials });
+  // Each entity type gets its own detailed line icon, tinted to the type colour:
+  // individuals blue (person), businesses red/green (office), trusts amber (columns).
+  const isPerson = entity.kind === "personal" || entity.kind === "person";
+  const suffix = isPerson ? "person" : colorSuffix(entity);
+  const name = entity.kind === "business" ? "ent-company" : (entity.kind === "trust" ? "ent-trust" : "ent-person");
+  return el("span", { class: `k-bigav k-bigav--${suffix}` }, [icon(name, { size: 30 })]);
 }
 
 // ── views ────────────────────────────────────────────────────────────────────
@@ -1985,13 +1985,9 @@ export async function renderKeepEntity(params, id) {
     .sort((a, b) => b.pct - a.pct);
 
   // Overview band: identity on the left, the headline insured value on the right,
-  // the primary action at the end. The at-a-glance figure leads the page.
-  // People show their name's initials (e.g. "JM"); businesses/trusts keep their icon.
-  const nameInitials = (entity.name || "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  const isPersonKind = entity.kind === "personal" || entity.kind === "person";
-  const bandAvatar = isPersonKind
-    ? el("span", { class: "k-bigav k-bigav--person", text: nameInitials })
-    : entityAvatar(entity);
+  // the primary action at the end. The at-a-glance figure leads the page. Every
+  // type shows its detailed line icon (the entity name sits right beside it).
+  const bandAvatar = entityAvatar(entity);
   const band = el("div", { class: "k-eband" }, [
     bandAvatar,
     el("div", { class: "k-eband__who" }, [
