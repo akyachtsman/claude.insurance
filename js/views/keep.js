@@ -24,6 +24,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
+import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityRelStyleKey as relStyleKey, entityAvatarIcon, entityMapSub } from "../keep/entity-display.js";
 import { capTablesByEntity, controlsByEntity, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
@@ -559,14 +560,9 @@ function assetCard(asset, settings) {
   ]);
 }
 
-// Per-type colour coordination, consistent across the app:
-//   You / People → blue · Business → red · Nonprofit → green · Trust & Estate → yellow.
-function colorSuffix(entity) {
-  if (entity.kind === "business") return isNonprofitType(entity.subtype || entity.label) ? "np" : "biz";
-  if (entity.kind === "trust") return "trust";
-  if (entity.kind === "person") return "person";
-  return "me";
-}
+// Entity category / colour / subtype / avatar all live in one place —
+// js/keep/entity-display.js — so no two views can label the same entity
+// differently. Imported above; callers below use them unchanged.
 function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
 
 // The client's own "Me" entity (kind personal) — the default landing for the
@@ -577,34 +573,11 @@ function primaryEntity() {
   return ents.find((e) => e.kind === "personal") || ents[0] || null;
 }
 
-// The broad entity type shown as the category: UBO (the account holder — the
-// ultimate beneficial owner), Individual (other people), Company, or Trust.
-// The UBO is kept distinct from Individual so it isn't double-counted.
-function entityCategory(entity) {
-  if (entity.kind === "business") return "Company";
-  if (entity.kind === "trust") return "Trust";
-  if (entity.kind === "personal") return "UBO"; // you — the account holder
-  return "Individual"; // spouse, partners, other people
-}
-
-// The specific subtype (Revocable trust, LLC, Spouse…). Seeded rows keep it in
-// either `subtype` or `label`, and the other field holds a generic category
-// word — so pick the first candidate that isn't generic. "You" for yourself.
-const GENERIC_TYPE = new Set(["business", "company", "trust", "individual", "personal", "you · personal", ""]);
-function entitySubtype(entity) {
-  for (const c of [entity.subtype, entity.label]) {
-    if (c && !GENERIC_TYPE.has(c.trim().toLowerCase())) return c;
-  }
-  return entity.kind === "personal" ? "You" : "—";
-}
-
 function entityAvatar(entity) {
-  // Each entity type gets its own detailed line icon, tinted to the type colour:
-  // individuals blue (person), businesses red/green (office), trusts amber (columns).
+  // Detailed line icon + colour, both from the single entity-display source.
   const isPerson = entity.kind === "personal" || entity.kind === "person";
   const suffix = isPerson ? "person" : colorSuffix(entity);
-  const name = entity.kind === "business" ? "ent-company" : (entity.kind === "trust" ? "ent-trust" : "ent-person");
-  return el("span", { class: `k-bigav k-bigav--${suffix}` }, [icon(name, { size: 30 })]);
+  return el("span", { class: `k-bigav k-bigav--${suffix}` }, [icon(entityAvatarIcon(entity), { size: 30 })]);
 }
 
 // ── views ────────────────────────────────────────────────────────────────────
@@ -1042,12 +1015,6 @@ const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 const relView = { orient: "vertical", mode: "ownership", focus: null, chips: true, trustees: true };
 // DB entity node → REL_STYLE key. Personal renders as the gradient "me" node;
 // nonprofit businesses (green) split from for-profit businesses (red) by subtype.
-function relStyleKey(node) {
-  if (node.kind === "personal") return "me";
-  if (node.kind === "business") return isNonprofitType(node.subtype) ? "np" : "biz";
-  if (node.kind === "trust") return "trust";
-  return "person";
-}
 // Node geometry and layout spacing. The map lays out top-down by ownership depth
 // (owners above what they own) — see keep/relmap.js orchestrate — and sizes the
 // canvas to the busiest row and the depth of the deepest chain, so boxes never
@@ -1633,7 +1600,7 @@ function relationshipMap() {
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
     g.appendChild(svgText(n.initials, { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD }));
     g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
-    g.appendChild(svgText(n.sub, { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
     // Asset chips: little circles for what this entity holds — initials inside,
     // full name on hover. Overflow collapses to a "+N" chip.
