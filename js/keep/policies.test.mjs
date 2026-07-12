@@ -44,22 +44,27 @@ test("reminderInfo: expired policy has no next reminder", () => {
   assert.deepEqual(r.sent, [60, 30, 14, 7, 1]);
 });
 
-test("policyType maps known lines to a category + detailed icon", () => {
-  assert.deepEqual(policyType({ line: "Windstorm" }), { key: "property", label: "Property", icon: "as-home" });
-  assert.deepEqual(policyType({ line: "Flood (NFIP)" }), { key: "property", label: "Property", icon: "as-home" });
-  assert.deepEqual(policyType({ line: "Personal auto" }), { key: "vehicle", label: "Vehicle", icon: "as-auto" });
-  assert.deepEqual(policyType({ line: "Commercial auto" }), { key: "vehicle", label: "Vehicle", icon: "as-truck" });
-  assert.deepEqual(policyType({ line: "Watercraft" }), { key: "watercraft", label: "Watercraft", icon: "as-boat" });
-  assert.deepEqual(policyType({ line: "Scheduled personal property" }), { key: "valuables", label: "Valuables", icon: "as-gem" });
-  assert.deepEqual(policyType({ line: "Business owner's policy (BOP)" }), { key: "business", label: "Business", icon: "as-commercial" });
-  assert.deepEqual(policyType({ line: "General liability" }), { key: "liability", label: "Liability", icon: "as-shield" });
+test("policyType names the specific coverage per known line + detailed icon", () => {
+  assert.deepEqual(policyType({ line: "Homeowners (HO-3)" }), { key: "home", label: "Home insurance", icon: "as-home" });
+  assert.deepEqual(policyType({ line: "Windstorm" }), { key: "windstorm", label: "Windstorm insurance", icon: "as-home" });
+  assert.deepEqual(policyType({ line: "Flood (NFIP)" }), { key: "flood", label: "Flood insurance", icon: "as-home" });
+  assert.deepEqual(policyType({ line: "Personal auto" }), { key: "auto", label: "Auto insurance", icon: "as-auto" });
+  assert.deepEqual(policyType({ line: "Commercial auto" }), { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck" });
+  assert.deepEqual(policyType({ line: "Watercraft" }), { key: "watercraft", label: "Watercraft insurance", icon: "as-boat" });
+  assert.deepEqual(policyType({ line: "Scheduled personal property" }), { key: "valuables", label: "Valuables insurance", icon: "as-gem" });
+  assert.deepEqual(policyType({ line: "Business owner's policy (BOP)" }), { key: "business", label: "Business insurance", icon: "as-commercial" });
+  assert.deepEqual(policyType({ line: "General liability" }), { key: "liability", label: "Liability insurance", icon: "as-shield" });
 });
 
-test("policyType falls back by keyword, then to Other", () => {
-  assert.equal(policyType({ line: "Personal umbrella policy" }).label, "Liability");
-  assert.equal(policyType({ line: "Motorcycle physical damage" }).label, "Vehicle");
-  assert.equal(policyType({ line: "Renters (HO-4)" }).label, "Property");
-  assert.equal(policyType({ line: "Yacht hull" }).label, "Watercraft");
+test("policyType falls back to a specific type by keyword (specific wins), then Other", () => {
+  assert.equal(policyType({ line: "Personal umbrella policy" }).label, "Umbrella insurance");
+  assert.equal(policyType({ line: "Errors & omissions" }).label, "Errors & omissions (E&O)");
+  assert.equal(policyType({ line: "Professional liability" }).label, "Errors & omissions (E&O)"); // E&O beats generic liability
+  assert.equal(policyType({ line: "Workers' compensation" }).label, "Workers' comp");
+  assert.equal(policyType({ line: "Commercial auto — fleet" }).label, "Commercial auto insurance"); // beats plain auto
+  assert.equal(policyType({ line: "Motorcycle physical damage" }).label, "Auto insurance");
+  assert.equal(policyType({ line: "Renters (HO-4)" }).label, "Renters insurance");
+  assert.equal(policyType({ line: "Yacht hull" }).label, "Watercraft insurance");
   assert.deepEqual(policyType({ line: "Something unheard of" }), { key: "other", label: "Other", icon: "as-box" });
   assert.equal(policyType({}).label, "Other");
 });

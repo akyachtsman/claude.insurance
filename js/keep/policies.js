@@ -27,35 +27,50 @@ export function renewalBand(renewalInDays) {
   return null;
 }
 
-// Categorise a policy into a human "type" (Property / Vehicle / Watercraft /
-// Valuables / Business / Liability / Other) plus the detailed frame-less icon
-// used in the Policies table's leading column. Keyed on the canonical policy
-// line, with keyword fallbacks so a new line still lands in a sensible bucket.
+// Name a policy's specific coverage type (e.g. "Flood insurance", "Home
+// insurance", "Liability insurance") plus the detailed frame-less icon used in
+// the Policies table's leading column. Keyed on the canonical policy line, with
+// ordered keyword fallbacks (most specific first) so a new line still lands on
+// a sensible, specific type rather than a broad bucket.
 const POLICY_LINE_TYPE = {
-  "Homeowners (HO-3)": { key: "property", label: "Property", icon: "as-home" },
-  "Windstorm": { key: "property", label: "Property", icon: "as-home" },
-  "Flood (NFIP)": { key: "property", label: "Property", icon: "as-home" },
-  "Dwelling": { key: "property", label: "Property", icon: "as-home" },
-  "Personal auto": { key: "vehicle", label: "Vehicle", icon: "as-auto" },
-  "Commercial auto": { key: "vehicle", label: "Vehicle", icon: "as-truck" },
-  "Watercraft": { key: "watercraft", label: "Watercraft", icon: "as-boat" },
-  "Scheduled personal property": { key: "valuables", label: "Valuables", icon: "as-gem" },
-  "Business owner's policy (BOP)": { key: "business", label: "Business", icon: "as-commercial" },
-  "General liability": { key: "liability", label: "Liability", icon: "as-shield" },
-  "Umbrella": { key: "liability", label: "Liability", icon: "as-shield" },
+  "Homeowners (HO-3)": { key: "home", label: "Home insurance", icon: "as-home" },
+  "Windstorm": { key: "windstorm", label: "Windstorm insurance", icon: "as-home" },
+  "Flood (NFIP)": { key: "flood", label: "Flood insurance", icon: "as-home" },
+  "Dwelling": { key: "dwelling", label: "Dwelling insurance", icon: "as-home" },
+  "Personal auto": { key: "auto", label: "Auto insurance", icon: "as-auto" },
+  "Commercial auto": { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck" },
+  "Watercraft": { key: "watercraft", label: "Watercraft insurance", icon: "as-boat" },
+  "Scheduled personal property": { key: "valuables", label: "Valuables insurance", icon: "as-gem" },
+  "Business owner's policy (BOP)": { key: "business", label: "Business insurance", icon: "as-commercial" },
+  "General liability": { key: "liability", label: "Liability insurance", icon: "as-shield" },
+  "Umbrella": { key: "umbrella", label: "Umbrella insurance", icon: "as-shield" },
 };
 const POLICY_TYPE_OTHER = { key: "other", label: "Other", icon: "as-box" };
+
+// Ordered [pattern, type] fallbacks — first match wins, so more specific lines
+// (commercial auto, E&O, umbrella) must precede their broader cousins.
+const POLICY_TYPE_FALLBACK = [
+  [/flood/, { key: "flood", label: "Flood insurance", icon: "as-home" }],
+  [/wind|hail/, { key: "windstorm", label: "Windstorm insurance", icon: "as-home" }],
+  [/errors|omission|\be&o\b|professional liab/, { key: "eo", label: "Errors & omissions (E&O)", icon: "as-shield" }],
+  [/worker|comp\b/, { key: "workers", label: "Workers' comp", icon: "as-commercial" }],
+  [/umbrella/, { key: "umbrella", label: "Umbrella insurance", icon: "as-shield" }],
+  [/liability/, { key: "liability", label: "Liability insurance", icon: "as-shield" }],
+  [/renter/, { key: "renters", label: "Renters insurance", icon: "as-home" }],
+  [/condo/, { key: "condo", label: "Condo insurance", icon: "as-home" }],
+  [/commercial auto/, { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck" }],
+  [/\bauto\b|vehicle|motor/, { key: "auto", label: "Auto insurance", icon: "as-auto" }],
+  [/watercraft|boat|marine|yacht/, { key: "watercraft", label: "Watercraft insurance", icon: "as-boat" }],
+  [/jewel|scheduled|valuab|fine art|collect/, { key: "valuables", label: "Valuables insurance", icon: "as-gem" }],
+  [/business|\bbop\b|commercial|general/, { key: "business", label: "Business insurance", icon: "as-commercial" }],
+  [/home|dwelling|hazard|property/, { key: "home", label: "Home insurance", icon: "as-home" }],
+];
 
 export function policyType(policy) {
   const line = policy && policy.line ? policy.line : "";
   if (POLICY_LINE_TYPE[line]) return POLICY_LINE_TYPE[line];
   const s = line.toLowerCase();
-  if (/umbrella|liability/.test(s)) return { key: "liability", label: "Liability", icon: "as-shield" };
-  if (/\bauto\b|vehicle|motor/.test(s)) return { key: "vehicle", label: "Vehicle", icon: "as-auto" };
-  if (/watercraft|boat|marine|yacht/.test(s)) return { key: "watercraft", label: "Watercraft", icon: "as-boat" };
-  if (/jewel|scheduled|valuab|fine art|collect/.test(s)) return { key: "valuables", label: "Valuables", icon: "as-gem" };
-  if (/business|bop|commercial|general/.test(s)) return { key: "business", label: "Business", icon: "as-commercial" };
-  if (/home|dwelling|flood|wind|property|hazard|renters|condo/.test(s)) return { key: "property", label: "Property", icon: "as-home" };
+  for (const [pattern, type] of POLICY_TYPE_FALLBACK) if (pattern.test(s)) return type;
   return POLICY_TYPE_OTHER;
 }
 
