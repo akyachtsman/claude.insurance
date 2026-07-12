@@ -1278,12 +1278,12 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
     bx = L - wr.left; by = T - wr.top; bw = R - L; bh = B - T;
     return true;
   };
-  // Always centre the real node box; clamp the pan only when it's larger than the
-  // viewport so at least a margin of it stays reachable by dragging.
+  // Keep the pan within bounds but never snap back to centre — the chart stays
+  // draggable even when it fits, as long as a margin of it stays on screen.
   const clampPan = (vw, vh) => {
-    const cw = bw * k, ch = bh * k, M = 48;
-    tx = cw <= vw ? (vw - cw) / 2 - bx * k : Math.min(M - bx * k, Math.max(vw - M - (bx + bw) * k, tx));
-    ty = ch <= vh ? (vh - ch) / 2 - by * k : Math.min(M - by * k, Math.max(vh - M - (by + bh) * k, ty));
+    const M = 48;
+    tx = Math.min(vw - M - bx * k, Math.max(M - (bx + bw) * k, tx));
+    ty = Math.min(vh - M - by * k, Math.max(M - (by + bh) * k, ty));
   };
   // First paint (and every resize): measure the nodes, scale to fill the width,
   // hug the content height (no dead space), and centre the node box on both axes —
