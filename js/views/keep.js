@@ -465,6 +465,17 @@ function assetTypeLabel(asset) {
   return (meta && meta.label) || "Other";
 }
 
+// Detailed, frame-less asset-type picture (drawn straight on the row), tinted to
+// the type's colour. Used as the leading column in the Assets table.
+const ASSET_TYPE_ICON = {
+  home: "as-home", auto: "as-auto", watercraft: "as-boat", valuables: "as-gem",
+  "commercial-space": "as-commercial", "commercial-auto": "as-truck", business: "as-commercial", other: "as-box",
+};
+function assetTypeIcon(asset) {
+  const meta = ASSET_META[asset.type] || { cic: "home" };
+  return el("span", { class: `k-aicon k-aicon--${meta.cic}` }, [icon(ASSET_TYPE_ICON[asset.type] || "as-box", { size: 30 })]);
+}
+
 function statusPill(st) {
   return el("span", { class: `k-pill k-pill--${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]);
 }
@@ -908,12 +919,20 @@ export function renderKeepAssets() {
   }
 
   const columns = [
+    // Leading column: the detailed, frame-less asset-type picture. No `get` → not sortable.
+    { label: "", cell: (r) => assetTypeIcon(r.asset) },
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Type", get: (r) => assetTypeLabel(r.asset), cell: (r) => el("span", { text: assetTypeLabel(r.asset) }) },
     { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
     { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
     { label: "Policies", get: (r) => (r.asset.policies || []).length, cell: (r) => el("span", { text: String((r.asset.policies || []).length) }) },
   ];
+
+  // Summary stats across the whole table.
+  const totalValue = rows.reduce((s, r) => s + (r.asset.value || 0), 0);
+  const totalPolicies = rows.reduce((s, r) => s + (r.asset.policies || []).length, 0);
+  const uninsured = rows.filter((r) => !(r.asset.policies || []).length).length;
+  const insuredEntities = new Set(rows.filter((r) => r.entity).map((r) => r.entity.id)).size;
 
   const view = page("assets", [
     el("div", { class: "k-reqhead" }, [
@@ -923,8 +942,14 @@ export function renderKeepAssets() {
       ]),
       el("a", { class: "k-btn", attrs: { href: "#/keep/add-asset" } }, [icon("plus", { size: 18 }), el("span", { text: "Add asset" })]),
     ]),
+    el("div", { class: "k-astats" }, [
+      statTile("Assets", String(rows.length), `across ${insuredEntities} ${insuredEntities === 1 ? "entity" : "entities"}`),
+      statTile("Total value", money(totalValue) || "$0", "insured value on file"),
+      statTile("Policies", String(totalPolicies), "in force"),
+      statTile("Uninsured", String(uninsured), uninsured ? "no policy yet" : "all covered"),
+    ]),
     rows.length
-      ? sortableTable(columns, rows, { defaultIdx: 2, defaultDir: 1, rowClass: (r) => (r.entity ? "" : "k-trorphan") }).wrap  // Entity
+      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 3, defaultDir: 1, rowClass: (r) => (r.entity ? "" : "k-trorphan") }); t.wrap.classList.add("k-atable"); return t.wrap; })()  // default sort: Entity
       : el("div", { class: "k-empty", text: "No assets yet — use Add asset to add one." }),
   ]);
   mount(view);
