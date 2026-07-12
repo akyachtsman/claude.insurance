@@ -260,11 +260,11 @@ export function findPolicy(policyId) {
 export function getMapData() {
   if (!cache) return { nodes: [], edges: [] };
   const ids = new Set();
-  // The graph shows connected entities — anything in a relationship edge — plus
-  // "You" (personal), which always anchors the map. Entities with no links yet
-  // simply don't appear in the relationship graph (they're never "orphans");
-  // they still show in the Rows/Cards entity lists.
-  cache.entities.forEach((e) => { if (e._managed && e.kind === "personal") ids.add(e.id); });
+  // The graph shows every individual — "You" (personal) plus all the people you've
+  // added (spouse, partners…), even those with no relationship yet, so no one is
+  // missing from the flowchart — plus any entity that appears in a relationship
+  // edge. Unlinked people simply sit in the top band with no connectors.
+  cache.entities.forEach((e) => { if (e._managed && (e.kind === "personal" || e.kind === "person")) ids.add(e.id); });
   cache.relationships.forEach((r) => { ids.add(r.from); ids.add(r.to); });
   const nodes = [...ids].map((id) => {
     const e = cache.entityById.get(id);
