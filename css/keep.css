@@ -218,12 +218,10 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
    Trust = light orange). */
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
    icon in the type colour (transparent framing). */
-.k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: #2F6AF6; display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
+/* Entity avatars — all rendered in black (was type-tinted). */
+.k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-text-primary); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
 .k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.k-bigav--person { color: #2F6AF6; }
-.k-bigav--biz { color: #D6333A; }
-.k-bigav--np { color: #0E8E66; }
-.k-bigav--trust { color: #B5660A; }
+.k-bigav--person, .k-bigav--biz, .k-bigav--np, .k-bigav--trust { color: var(--color-text-primary); }
 .k-ehead h1 { font: 700 27px var(--font-display); letter-spacing: -.01em; display: inline; }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
    renewal badges). Blue = individual, red = company, green = nonprofit, amber = trust. */
@@ -337,7 +335,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
 .k-enttable .k-bigav .icon { width: 24px; height: 24px; }
 .k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 11px; }
-.k-enttable .k-etcell__name { font: 700 15px var(--font-display); }
+.k-enttable .k-etcell__name { font: 700 15px var(--font-display); color: var(--color-text-primary); }
 .k-enttable .k-et { margin-left: 0; }
 .k-etsub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 
