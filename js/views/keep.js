@@ -505,7 +505,8 @@ function expiryBadge(renewalInDays) {
   const kind = policyKind(renewalInDays);
   if (kind === "exp") return el("span", { class: "k-exp k-exp--exp" }, [icon("x", { size: 14 }), el("span", { text: `Expired ${dateShort(renewalInDays)}` })]);
   if (kind === "warn") return el("span", { class: "k-exp k-exp--warn" }, [icon("alert", { size: 14 }), el("span", { text: `Expires in ${renewalInDays} day${renewalInDays === 1 ? "" : "s"} · ${dateShort(renewalInDays)}` })]);
-  return el("span", { class: "k-exp k-exp--ok" }, [icon("check", { size: 14 }), el("span", { text: `Active · renews ${dateFromDays(renewalInDays)}` })]);
+  // Active: no check icon — the subtle green text alone conveys the state.
+  return el("span", { class: "k-exp k-exp--ok" }, [el("span", { text: `Active · renews ${dateFromDays(renewalInDays)}` })]);
 }
 
 function policySummaryCard(policy) {

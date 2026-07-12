@@ -513,7 +513,7 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
    quiet neutral text; only the states that need attention keep a restrained
    colour cue (text + icon), never a loud background. */
 .k-exp { display: inline-flex; align-items: center; gap: 6px; font: 700 12px var(--font-sans); padding: 2px 0; background: none; white-space: nowrap; }
-.k-exp--ok { color: var(--color-text-secondary); }
+.k-exp--ok { color: #3E9B74; } /* subtle green — softer than the strong --color-ok */
 .k-exp--warn { color: var(--color-warn); }
 .k-exp--exp { color: var(--color-gap); }
 .k-pcard__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); }
