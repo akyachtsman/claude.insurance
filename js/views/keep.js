@@ -920,7 +920,7 @@ export function renderKeepAssets() {
   const columns = [
     // Leading column: the detailed, frame-less asset-type picture. No `get` → not sortable.
     { label: "", cell: (r) => assetTypeIcon(r.asset) },
-    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink k-aname", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
+    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Type", get: (r) => assetTypeLabel(r.asset), cell: (r) => el("span", { text: assetTypeLabel(r.asset) }) },
     { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
     { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
