@@ -332,10 +332,14 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-arow__st--ok { color: var(--color-accent); }
 
 /* ── Entities · Rows layout (Option A) — sortable table ─────────────────────── */
-.k-enttable .k-bigav { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
-.k-enttable .k-bigav .icon { width: 24px; height: 24px; }
-.k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 11px; }
-.k-enttable .k-etcell__name { font: 700 15px var(--font-display); color: var(--color-text-primary); }
+/* Condensed rows (matches the Assets table): tight cell padding, middle-aligned
+   single lines, and a smaller leading avatar that sets the row-height floor. */
+.k-enttable .k-itable th { padding: 6px 16px; }
+.k-enttable .k-itable td { padding: 3px 16px; font-size: 13px; vertical-align: middle; }
+.k-enttable .k-bigav { width: 24px; height: 24px; border-radius: 8px; font-size: 13px; }
+.k-enttable .k-bigav .icon { width: 22px; height: 22px; }
+.k-enttable .k-etcell { display: inline-flex; align-items: center; gap: 9px; }
+.k-enttable .k-etcell__name { font: 700 14px var(--font-display); color: var(--color-text-primary); }
 .k-enttable .k-et { margin-left: 0; }
 .k-etsub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 
