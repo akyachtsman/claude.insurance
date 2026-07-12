@@ -30,11 +30,30 @@ caused the "You · personal" (map) vs "UBO" (table) divergence.
   category (not "Individual"), so it isn't double-counted, and its map node reads
   "You · UBO" — computed in one place, so it agrees everywhere.
 
+## `entities.label` is overloaded (real data, not stale)
+
+A read of live data corrected an earlier assumption: `label` is **not** junk — it
+carries different meaning per kind, distinct from `subtype` (the legal structure):
+
+| kind | `label` holds | `subtype` holds |
+|---|---|---|
+| business | **industry** ("Media", "Real estate", "Holding company") | legal structure ("LLC", "C-Corp") |
+| person | **relationship role** ("Spouse", "Child", "Business partner") | often generic "Individual" |
+| trust | **specific trust type** ("Revocable trust", "Irrevocable trust") | generic "Trust" |
+| personal | *(was "You · personal" — cleared)* | null |
+
+`entitySubtype` deliberately surfaces `label` when `subtype` is generic (so a
+person shows their role, a trust its specific type). **Do not blanket-clear
+`label`** — it would lose the industry/role/trust-type. Only the stale personal
+identity string was removed (migration `clear_stale_personal_entity_label`). A
+proper tidy would split business industry into its own column — deliberate schema
+work, not an automated cleanup.
+
 ## Known follow-ups (need a DB migration → separate, approval-gated)
 
-- `entities.label` still holds stale free text ("You · personal") on old rows.
-  Harmless now (nothing reads it for identity); a migration can null it out.
 - `policies.premium` is `text` ("$2,260 / yr"); parsed by `annualPremium`. Could
   become a numeric amount + period.
 - `policies.documents` is a jsonb string array with no id/type; could become a
   typed shape or its own table if documents grow beyond display.
+- `entities.label` overload (industry vs role vs trust-type) → a dedicated
+  `industry` column for businesses would be cleaner than the shared field.
