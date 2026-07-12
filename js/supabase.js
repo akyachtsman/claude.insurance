@@ -274,7 +274,9 @@ export function getMapData() {
       kind: e.kind,
       subtype: e.subtype || e.label || "",
       name: e.name,
-      sub: e.label || e.subtype || "",
+      // The account holder is the ultimate beneficial owner — label its map
+      // node as such rather than the generic "You · personal".
+      sub: e.kind === "personal" ? "You · UBO" : (e.label || e.subtype || ""),
       initials: e.initials,
       assetNames: (e.assets || []).map((a) => a.name),
       href: e._managed ? `#/keep/entity/${e.id}` : null,
