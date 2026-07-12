@@ -629,6 +629,9 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-aicon { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; color: var(--color-gap); }
 .k-aicon .icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .k-dep-hold { color: var(--color-text-secondary); }
+/* Policies table reuses the Assets condensed-row + leading-icon treatment
+   (.k-atable); it just needs more width for its extra columns. */
+.k-ptable .k-itable { min-width: 980px; }
 /* Asset detail — value & depreciation (ACV) schedule */
 .k-deptable { margin-top: 2px; }
 .k-deptable .k-itable { min-width: 0; }
