@@ -577,12 +577,14 @@ function primaryEntity() {
   return ents.find((e) => e.kind === "personal") || ents[0] || null;
 }
 
-// The broad entity type shown as the category: Individual (you + people),
-// Business, or Trust.
+// The broad entity type shown as the category: UBO (the account holder — the
+// ultimate beneficial owner), Individual (other people), Company, or Trust.
+// The UBO is kept distinct from Individual so it isn't double-counted.
 function entityCategory(entity) {
   if (entity.kind === "business") return "Company";
   if (entity.kind === "trust") return "Trust";
-  return "Individual"; // personal + person
+  if (entity.kind === "personal") return "UBO"; // you — the account holder
+  return "Individual"; // spouse, partners, other people
 }
 
 // The specific subtype (Revocable trust, LLC, Spouse…). Seeded rows keep it in
@@ -1963,12 +1965,14 @@ async function renderEntityCollection(layout) {
   const companies = entities.filter((e) => entityCategory(e) === "Company").length;
   const individuals = entities.filter((e) => entityCategory(e) === "Individual").length;
   const trusts = entities.filter((e) => entityCategory(e) === "Trust").length;
+  const ubos = entities.filter((e) => entityCategory(e) === "UBO").length; // the account holder(s)
   const totalAssets = entities.reduce((s, e) => s + e.assets.length, 0);
   const totalGaps = entities.reduce((s, e) => s + entitySummary(e, settings).gaps, 0);
   const totalValue = entities.reduce((s, e) => s + entityValue(e), 0);
   const mix = [companies ? `${companies} ${companies === 1 ? "company" : "companies"}` : null,
     individuals ? `${individuals} individual${individuals === 1 ? "" : "s"}` : null,
-    trusts ? `${trusts} trust${trusts === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+    trusts ? `${trusts} trust${trusts === 1 ? "" : "s"}` : null,
+    ubos ? `${ubos} UBO` : null].filter(Boolean).join(" · ");
   const stats = el("div", { class: "k-astats" }, [
     statTile("Entities", String(entities.length), mix || "in your account"),
     statTile("Assets", String(totalAssets), "across your entities"),
