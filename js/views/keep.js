@@ -1958,12 +1958,30 @@ async function renderEntityCollection(layout) {
   } else {
     body = entityTable(entities, settings);
   }
+
+  // Summary stats across all entities (same treatment as the Assets table).
+  const companies = entities.filter((e) => entityCategory(e) === "Company").length;
+  const individuals = entities.filter((e) => entityCategory(e) === "Individual").length;
+  const trusts = entities.filter((e) => entityCategory(e) === "Trust").length;
+  const totalAssets = entities.reduce((s, e) => s + e.assets.length, 0);
+  const totalGaps = entities.reduce((s, e) => s + entitySummary(e, settings).gaps, 0);
+  const totalValue = entities.reduce((s, e) => s + entityValue(e), 0);
+  const mix = [companies ? `${companies} ${companies === 1 ? "company" : "companies"}` : null,
+    individuals ? `${individuals} individual${individuals === 1 ? "" : "s"}` : null,
+    trusts ? `${trusts} trust${trusts === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+  const stats = el("div", { class: "k-astats" }, [
+    statTile("Entities", String(entities.length), mix || "in your account"),
+    statTile("Assets", String(totalAssets), "across your entities"),
+    statTile("Coverage gaps", String(totalGaps), totalGaps ? "review recommended" : "none open"),
+    statTile("Total value", money(totalValue) || "$0", "insured value on file"),
+  ]);
+
   const view = page("list", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
     entitiesToggle(layout),
     entitiesPrivacyRow(),
-    entities.length ? body : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
+    entities.length ? el("div", {}, [stats, body]) : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
   ]);
   mount(view);
 }
