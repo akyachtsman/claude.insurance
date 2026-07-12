@@ -17,6 +17,7 @@ import {
   addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest,
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
+import { depreciationFor, depreciationMilestones } from "../keep/depreciation.js";
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
@@ -924,6 +925,14 @@ export function renderKeepAssets() {
     { label: "Type", get: (r) => assetTypeLabel(r.asset), cell: (r) => el("span", { text: assetTypeLabel(r.asset) }) },
     { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
     { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
+    // Summary of the type's actual-cash-value depreciation (full schedule lives
+    // on the asset detail page). Non-depreciating types read "Holds value".
+    { label: "Depreciation", get: (r) => depreciationFor(r.asset).annual, cell: (r) => {
+      const d = depreciationFor(r.asset);
+      return d.depreciates
+        ? el("span", { text: `−${money(d.annual)}/yr` })
+        : el("span", { class: "k-dep-hold", text: r.asset.value ? "Holds value" : "—" });
+    } },
     { label: "Policies", get: (r) => (r.asset.policies || []).length, cell: (r) => el("span", { text: String((r.asset.policies || []).length) }) },
   ];
 
@@ -2154,6 +2163,44 @@ export async function renderKeepEntity(params, id) {
   mount(view);
 }
 
+// Value & depreciation panel for the asset detail page. Depreciating types show
+// a milestone actual-cash-value (ACV) schedule; non-depreciating types show a
+// short "holds value" note. Returns null when the asset has no value to project.
+function depreciationSection(asset) {
+  if (!asset || !asset.value) return null;
+  const d = depreciationFor(asset);
+
+  if (!d.depreciates) {
+    return el("section", { class: "k-sec" }, [
+      el("h2", { text: "Value & depreciation" }),
+      el("p", { class: "k-sub2", text: "How this asset's insurable value changes over time" }),
+      el("div", { class: "k-depnote" }, [
+        el("span", { class: "k-cic" }, [icon("shield", { size: 22 })]),
+        el("p", { text: "This asset type typically holds its value or appreciates, so no actual-cash-value depreciation is applied. Coverage is written on a replacement-cost or agreed-value basis." }),
+      ]),
+    ]);
+  }
+
+  const yearLabel = (y) => (y === 0 ? "Today" : `Year ${y}`);
+  const head = el("tr", {}, ["When", "Replacement value", "Actual cash value", "Depreciated"].map((t, i) =>
+    el("th", i === 0 ? {} : { class: "k-depnum" }, [el("span", { text: t })])));
+  const body = depreciationMilestones(d).map((row) => el("tr", {}, [
+    el("td", { text: yearLabel(row.year) }),
+    el("td", { class: "k-depnum", text: money(row.rc) }),
+    el("td", { class: "k-depnum k-depacv", text: money(row.acv) }),
+    el("td", { class: "k-depnum k-depdown", text: row.dep ? `−${money(row.dep)}` : "—" }),
+  ]));
+
+  return el("section", { class: "k-sec" }, [
+    el("h2", { text: "Value & depreciation" }),
+    el("p", { class: "k-sub2", text: "Estimated actual cash value (ACV) as this asset ages — replacement cost minus depreciation" }),
+    el("div", { class: "k-itable-wrap k-deptable" }, [
+      el("table", { class: "k-itable" }, [el("thead", {}, [head]), el("tbody", {}, body)]),
+    ]),
+    el("p", { class: "k-depfoot", text: `Straight-line over ~${d.life} years to a ${Math.round(d.salvage * 100)}% salvage floor — about ${money(d.annual)}/year. Estimate only; a claim paid on a replacement-cost basis is not reduced by this depreciation.` }),
+  ]);
+}
+
 export async function renderKeepAsset(params, id) {
   const found = findAsset(id);
   if (!found) return renderKeepEntityList();
@@ -2192,6 +2239,9 @@ export async function renderKeepAsset(params, id) {
   ];
 
   sections.push(policiesSection(asset));
+
+  const depSec = depreciationSection(asset);
+  if (depSec) sections.push(depSec);
 
   if (gaps > 0) {
     sections.push(el("div", { class: "k-banner k-banner--gap" }, [
