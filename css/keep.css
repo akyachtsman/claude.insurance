@@ -225,11 +225,13 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-bigav--np { color: #0E8E66; }
 .k-bigav--trust { color: #B5660A; }
 .k-ehead h1 { font: 700 27px var(--font-display); letter-spacing: -.01em; display: inline; }
-.k-et { font: 800 12px var(--font-sans); background: #E7EFFE; color: #2F6AF6; padding: 5px 13px; border-radius: var(--radius-pill); margin-left: var(--space-2); white-space: nowrap; }
-.k-et--me, .k-et--person { background: #E7EFFE; color: #2F6AF6; }
-.k-et--biz { background: #FBE1E2; color: #D6333A; }
-.k-et--np { background: #DEF4E9; color: #0E8E66; }
-.k-et--trust { background: #FBEBCF; color: #B5660A; }
+/* Entity type — subtle, no filled pills: just colour-cued text (matches the
+   renewal badges). Blue = individual, red = company, green = nonprofit, amber = trust. */
+.k-et { font: 700 12px var(--font-sans); background: none; color: #2F6AF6; padding: 0; margin-left: var(--space-2); white-space: nowrap; }
+.k-et--me, .k-et--person { color: #2F6AF6; }
+.k-et--biz { color: #D6333A; }
+.k-et--np { color: #0E8E66; }
+.k-et--trust { color: #B5660A; }
 .k-emeta { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-2); }
 .k-emeta b { color: var(--color-text-primary); font-weight: 800; }
 .k-ehead .k-btn { margin-left: auto; }
@@ -370,7 +372,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-etile__body { flex: 1; min-width: 0; }
 .k-etile__name { font: 700 15px var(--font-display); margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .k-etile__meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.k-etile .k-et { display: inline-block; margin: 0; font-size: 10px; padding: 2px 8px; }
+.k-etile .k-et { display: inline-block; margin: 0; font-size: 10px; padding: 0; }
 .k-etile__sub { font: 600 11px var(--font-sans); color: var(--color-text-secondary); }
 .k-etile__stats { display: flex; gap: 13px; flex: none; padding-left: 13px; border-left: 1px solid var(--color-border); text-align: center; }
 .k-etile__stat b { display: block; font: 800 15px var(--font-display); color: var(--color-text-primary); }
