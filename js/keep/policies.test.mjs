@@ -2,7 +2,7 @@
 // Run: node --test js/keep/policies.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { policyKind, reminderInfo, renewalBand, policyType, annualPremium } from "./policies.js";
+import { policyKind, reminderInfo, renewalBand, policyType, annualPremium, policyPresentation } from "./policies.js";
 import { findPolicy } from "./data.js";
 
 test("policyKind classifies active / expiring / expired", () => {
@@ -67,6 +67,21 @@ test("policyType falls back to a specific type by keyword (specific wins), then 
   assert.equal(policyType({ line: "Yacht hull" }).label, "Watercraft insurance");
   assert.deepEqual(policyType({ line: "Something unheard of" }), { key: "other", label: "Other", icon: "as-box" });
   assert.equal(policyType({}).label, "Other");
+});
+
+test("policyPresentation is the single source: policyType projects from it", () => {
+  // Card icon + tile colour (used by the adapter) come from the same facet as
+  // the table's type label + detailed icon — they can't drift.
+  const wind = policyPresentation({ line: "Windstorm" });
+  assert.equal(wind.card, "umbrella");   // detail-card glyph
+  assert.equal(wind.color, "home");      // cic tile colour
+  assert.equal(wind.icon, "as-home");    // table leading icon
+  // policyType is a projection of the same facet.
+  assert.deepEqual(policyType({ line: "Windstorm" }), { key: wind.key, label: wind.label, icon: wind.icon });
+  // Unknown lines fall back to the shield/home default (matches the old adapter).
+  const other = policyPresentation({ line: "Something unheard of" });
+  assert.equal(other.card, "shield");
+  assert.equal(other.color, "home");
 });
 
 test("annualPremium parses strings, annualises monthly, handles missing", () => {

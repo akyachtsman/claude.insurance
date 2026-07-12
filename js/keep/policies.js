@@ -27,51 +27,60 @@ export function renewalBand(renewalInDays) {
   return null;
 }
 
-// Name a policy's specific coverage type (e.g. "Flood insurance", "Home
-// insurance", "Liability insurance") plus the detailed frame-less icon used in
-// the Policies table's leading column. Keyed on the canonical policy line, with
-// ordered keyword fallbacks (most specific first) so a new line still lands on
-// a sensible, specific type rather than a broad bucket.
-const POLICY_LINE_TYPE = {
-  "Homeowners (HO-3)": { key: "home", label: "Home insurance", icon: "as-home" },
-  "Windstorm": { key: "windstorm", label: "Windstorm insurance", icon: "as-home" },
-  "Flood (NFIP)": { key: "flood", label: "Flood insurance", icon: "as-home" },
-  "Dwelling": { key: "dwelling", label: "Dwelling insurance", icon: "as-home" },
-  "Personal auto": { key: "auto", label: "Auto insurance", icon: "as-auto" },
-  "Commercial auto": { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck" },
-  "Watercraft": { key: "watercraft", label: "Watercraft insurance", icon: "as-boat" },
-  "Scheduled personal property": { key: "valuables", label: "Valuables insurance", icon: "as-gem" },
-  "Business owner's policy (BOP)": { key: "business", label: "Business insurance", icon: "as-commercial" },
-  "General liability": { key: "liability", label: "Liability insurance", icon: "as-shield" },
-  "Umbrella": { key: "umbrella", label: "Umbrella insurance", icon: "as-shield" },
+// SINGLE source of truth for how a policy line presents everywhere, keyed on the
+// canonical `line`. Each facet: key + label (the specific coverage type) + icon
+// (detailed frame-less glyph for the Policies table's leading column) + card
+// (small glyph on policy detail cards) + color (the `cic` tile-colour class).
+// The adapter (js/supabase.js) and the views all read from here, so the two
+// former line→presentation maps can no longer drift.
+const POLICY_LINE = {
+  "Homeowners (HO-3)": { key: "home", label: "Home insurance", icon: "as-home", card: "home", color: "home" },
+  "Windstorm": { key: "windstorm", label: "Windstorm insurance", icon: "as-home", card: "umbrella", color: "home" },
+  "Flood (NFIP)": { key: "flood", label: "Flood insurance", icon: "as-home", card: "flood", color: "boat" },
+  "Dwelling": { key: "dwelling", label: "Dwelling insurance", icon: "as-home", card: "home", color: "home" },
+  "Personal auto": { key: "auto", label: "Auto insurance", icon: "as-auto", card: "auto", color: "auto" },
+  "Commercial auto": { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck", card: "commercial-auto", color: "auto" },
+  "Watercraft": { key: "watercraft", label: "Watercraft insurance", icon: "as-boat", card: "boat", color: "boat" },
+  "Scheduled personal property": { key: "valuables", label: "Valuables insurance", icon: "as-gem", card: "gem", color: "gem" },
+  "Business owner's policy (BOP)": { key: "business", label: "Business insurance", icon: "as-commercial", card: "general-liability", color: "cp" },
+  "General liability": { key: "liability", label: "Liability insurance", icon: "as-shield", card: "general-liability", color: "cp" },
+  "Umbrella": { key: "umbrella", label: "Umbrella insurance", icon: "as-shield", card: "umbrella", color: "cp" },
 };
-const POLICY_TYPE_OTHER = { key: "other", label: "Other", icon: "as-box" };
+const POLICY_LINE_OTHER = { key: "other", label: "Other", icon: "as-box", card: "shield", color: "home" };
 
-// Ordered [pattern, type] fallbacks — first match wins, so more specific lines
+// Ordered [pattern, facet] fallbacks — first match wins, so more specific lines
 // (commercial auto, E&O, umbrella) must precede their broader cousins.
-const POLICY_TYPE_FALLBACK = [
-  [/flood/, { key: "flood", label: "Flood insurance", icon: "as-home" }],
-  [/wind|hail/, { key: "windstorm", label: "Windstorm insurance", icon: "as-home" }],
-  [/errors|omission|\be&o\b|professional liab/, { key: "eo", label: "Errors & omissions (E&O)", icon: "as-shield" }],
-  [/worker|comp\b/, { key: "workers", label: "Workers' comp", icon: "as-commercial" }],
-  [/umbrella/, { key: "umbrella", label: "Umbrella insurance", icon: "as-shield" }],
-  [/liability/, { key: "liability", label: "Liability insurance", icon: "as-shield" }],
-  [/renter/, { key: "renters", label: "Renters insurance", icon: "as-home" }],
-  [/condo/, { key: "condo", label: "Condo insurance", icon: "as-home" }],
-  [/commercial auto/, { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck" }],
-  [/\bauto\b|vehicle|motor/, { key: "auto", label: "Auto insurance", icon: "as-auto" }],
-  [/watercraft|boat|marine|yacht/, { key: "watercraft", label: "Watercraft insurance", icon: "as-boat" }],
-  [/jewel|scheduled|valuab|fine art|collect/, { key: "valuables", label: "Valuables insurance", icon: "as-gem" }],
-  [/business|\bbop\b|commercial|general/, { key: "business", label: "Business insurance", icon: "as-commercial" }],
-  [/home|dwelling|hazard|property/, { key: "home", label: "Home insurance", icon: "as-home" }],
+const POLICY_LINE_FALLBACK = [
+  [/flood/, { key: "flood", label: "Flood insurance", icon: "as-home", card: "flood", color: "boat" }],
+  [/wind|hail/, { key: "windstorm", label: "Windstorm insurance", icon: "as-home", card: "umbrella", color: "home" }],
+  [/errors|omission|\be&o\b|professional liab/, { key: "eo", label: "Errors & omissions (E&O)", icon: "as-shield", card: "general-liability", color: "cp" }],
+  [/worker|comp\b/, { key: "workers", label: "Workers' comp", icon: "as-commercial", card: "general-liability", color: "cp" }],
+  [/umbrella/, { key: "umbrella", label: "Umbrella insurance", icon: "as-shield", card: "umbrella", color: "cp" }],
+  [/liability/, { key: "liability", label: "Liability insurance", icon: "as-shield", card: "general-liability", color: "cp" }],
+  [/renter/, { key: "renters", label: "Renters insurance", icon: "as-home", card: "home", color: "home" }],
+  [/condo/, { key: "condo", label: "Condo insurance", icon: "as-home", card: "home", color: "home" }],
+  [/commercial auto/, { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck", card: "commercial-auto", color: "auto" }],
+  [/\bauto\b|vehicle|motor/, { key: "auto", label: "Auto insurance", icon: "as-auto", card: "auto", color: "auto" }],
+  [/watercraft|boat|marine|yacht/, { key: "watercraft", label: "Watercraft insurance", icon: "as-boat", card: "boat", color: "boat" }],
+  [/jewel|scheduled|valuab|fine art|collect/, { key: "valuables", label: "Valuables insurance", icon: "as-gem", card: "gem", color: "gem" }],
+  [/business|\bbop\b|commercial|general/, { key: "business", label: "Business insurance", icon: "as-commercial", card: "general-liability", color: "cp" }],
+  [/home|dwelling|hazard|property/, { key: "home", label: "Home insurance", icon: "as-home", card: "home", color: "home" }],
 ];
 
-export function policyType(policy) {
-  const line = policy && policy.line ? policy.line : "";
-  if (POLICY_LINE_TYPE[line]) return POLICY_LINE_TYPE[line];
+// The full presentation facet for a policy (or a bare line string). Used by the
+// adapter to set the card icon + tile colour.
+export function policyPresentation(policyOrLine) {
+  const line = typeof policyOrLine === "string" ? policyOrLine : (policyOrLine && policyOrLine.line ? policyOrLine.line : "");
+  if (POLICY_LINE[line]) return POLICY_LINE[line];
   const s = line.toLowerCase();
-  for (const [pattern, type] of POLICY_TYPE_FALLBACK) if (pattern.test(s)) return type;
-  return POLICY_TYPE_OTHER;
+  for (const [pattern, facet] of POLICY_LINE_FALLBACK) if (pattern.test(s)) return facet;
+  return POLICY_LINE_OTHER;
+}
+
+// The specific coverage type + the table's leading detailed icon.
+export function policyType(policy) {
+  const f = policyPresentation(policy);
+  return { key: f.key, label: f.label, icon: f.icon };
 }
 
 // Best-effort annual premium as a number, parsed from the policy's premium field

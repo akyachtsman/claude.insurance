@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ASSET_META } from "./keep/data.js";
+import { policyPresentation } from "./keep/policies.js";
 
 const CONFIG = {
   url: "https://bdsegmjcgfmgzuxwiplj.supabase.co",
@@ -174,27 +175,17 @@ function adaptAsset(row, policies) {
   };
 }
 
-// Per-line presentation (icon glyph + asset-tile color class) — not stored in the
-// DB; derived here so the policy cards render with the right marker.
-const LINE_PRES = {
-  "Homeowners (HO-3)": { icon: "home", cic: "home" },
-  "Flood (NFIP)": { icon: "flood", cic: "boat" },
-  "Windstorm": { icon: "umbrella", cic: "home" },
-  "Personal auto": { icon: "auto", cic: "auto" },
-  "Scheduled personal property": { icon: "gem", cic: "gem" },
-  "Business owner's policy (BOP)": { icon: "general-liability", cic: "cp" },
-  "Commercial auto": { icon: "commercial-auto", cic: "auto" },
-};
-
 function adaptPolicy(row) {
-  const pres = LINE_PRES[row.line] || { icon: "shield", cic: "home" };
+  // Card icon + tile colour come from the single policy-line source (keep/
+  // policies.js), the same map the Policies table + type label read from.
+  const pres = policyPresentation(row.line);
   return {
     id: row.id,
     _assetId: row.asset_id,
     line: row.line,
     form: row.form,
-    icon: pres.icon,
-    cic: pres.cic,
+    icon: pres.card,
+    cic: pres.color,
     carrier: row.carrier,
     naic: row.naic,
     number: row.number,
@@ -274,9 +265,9 @@ export function getMapData() {
       kind: e.kind,
       subtype: e.subtype || e.label || "",
       name: e.name,
-      // The account holder is the ultimate beneficial owner — label its map
-      // node as such rather than the generic "You · personal".
-      sub: e.kind === "personal" ? "You · UBO" : (e.label || e.subtype || ""),
+      // Raw record fields only — the view derives the display sub-label via the
+      // single entity-display source (getMapData stays a thin data adapter).
+      sub: e.subtype || e.label || "",
       initials: e.initials,
       assetNames: (e.assets || []).map((a) => a.name),
       href: e._managed ? `#/keep/entity/${e.id}` : null,
@@ -315,9 +306,11 @@ export async function savePrefs(prefs) {
 export async function addEntity({ kind, name, typeLabel }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in" };
-  const label = kind === "personal" ? "You · personal" : (typeLabel || (kind === "trust" ? "Trust" : "Company"));
+  // Don't store a free-text identity ("You · personal", "Company") — all labels
+  // derive from `kind` + `subtype` via entity-display. `subtype` is the one
+  // specific-type column; `label` is left null (display-only, always derived).
   const { data, error } = await supabase.from("entities")
-    .insert({ owner: user.id, kind, name, label, subtype: typeLabel || null })
+    .insert({ owner: user.id, kind, name, label: null, subtype: typeLabel || null })
     .select().single();
   if (error) return { ok: false, error: error.message };
   invalidate();
