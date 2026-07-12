@@ -895,7 +895,6 @@ export function renderKeepInsurance() {
       el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.policy.line }),
       el("div", { class: "k-imuted", text: r.policy.number || "" }),
     ] },
-    { label: "Type", get: (r) => policyType(r.policy).label, cell: (r) => el("span", { text: policyType(r.policy).label }) },
     { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Carrier", get: (r) => r.policy.carrier || "", cell: (r) => el("span", { text: r.policy.carrier || "—" }) },
@@ -921,7 +920,7 @@ export function renderKeepInsurance() {
       statTile("Annual premium", premiums.length ? (money(premiumTotal) || "$0") : "—", "total on file"),
     ]),
     rows.length
-      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 6, defaultDir: 1 }); t.wrap.classList.add("k-atable", "k-ptable"); return t.wrap; })()  // Renewal, soonest first
+      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 5, defaultDir: 1 }); t.wrap.classList.add("k-atable", "k-ptable"); return t.wrap; })()  // Renewal, soonest first
       : el("div", { class: "k-empty", text: "No policies on file yet — your broker adds them as they're bound." }),
   ]);
   mount(view);
