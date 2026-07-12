@@ -975,7 +975,7 @@ const REL_STYLE = {
 // original palette (blue = people, red = business, amber = trust, green =
 // nonprofit), so a colour on the map always reads as an entity type, not a
 // per-owner rainbow. Matches the accent/danger/warn/ok tokens in tokens.css.
-const REL_TYPE_COLOR = { me: "#2F6AF6", person: "#6E9BF5", biz: "#C42B30", trust: "#B5660A", np: "#0E8E66" };
+const REL_TYPE_COLOR = { me: "#1F52D6", person: "#3F6FD8", biz: "#C42B30", trust: "#B5660A", np: "#0E8E66" };
 // Band order for the "by type" perspective: people, trusts, businesses.
 const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // View controls for the Relationships map — held across in-view re-renders so the
@@ -1429,7 +1429,8 @@ function relationshipMap() {
     ]),
     // Arrowhead pointing from an owner to the entity it owns.
     s("marker", { id: "rel-arrow", viewBox: "0 0 10 10", refX: "8.5", refY: "5", markerWidth: "9", markerHeight: "9", orient: "auto", markerUnits: "userSpaceOnUse" }, [
-      s("path", { d: "M0,0 L10,5 L0,10 L2.5,5 Z", fill: "#b9c4dd" }),
+      // Inherit the edge's own colour so each arrowhead matches (and darkens with) its line.
+      s("path", { d: "M0,0 L10,5 L0,10 L2.5,5 Z", fill: "context-stroke", stroke: "none" }),
     ]),
   ]));
 
