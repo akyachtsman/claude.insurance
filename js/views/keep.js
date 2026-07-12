@@ -954,7 +954,7 @@ export function renderKeepAssets() {
       statTile("Uninsured", String(uninsured), uninsured ? "no policy yet" : "all covered"),
     ]),
     rows.length
-      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 3, defaultDir: 1, rowClass: (r) => (r.entity ? "" : "k-trorphan") }); t.wrap.classList.add("k-atable"); return t.wrap; })()  // default sort: Entity
+      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 3, defaultDir: 1, rowHref: (r) => `#/keep/asset/${r.asset.id}`, rowClass: (r) => (r.entity ? "" : "k-trorphan") }); t.wrap.classList.add("k-atable"); return t.wrap; })()  // default sort: Entity; whole row opens the asset
       : el("div", { class: "k-empty", text: "No assets yet — use Add asset to add one." }),
   ]);
   mount(view);
@@ -2214,7 +2214,7 @@ function depreciationSection(asset) {
 
 export async function renderKeepAsset(params, id) {
   const found = findAsset(id);
-  if (!found) return renderKeepEntityList();
+  if (!found) return renderKeepAssets(); // unknown asset → the assets list, not entities
   const { entity, asset } = found;
   const settings = await getRuleDefaults();
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
@@ -2234,12 +2234,18 @@ export async function renderKeepAsset(params, id) {
   ]);
 
   const sections = [
-    backLink(`#/keep/entity/${entity.id}`, entity.name),
-    el("nav", { class: "k-crumbs" }, [
-      el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(),
-      el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
-      el("span", { text: asset.name }),
-    ]),
+    // An orphan asset (entity didn't load) falls back to the Assets list.
+    backLink(entity ? `#/keep/entity/${entity.id}` : "#/keep/assets", entity ? entity.name : "assets"),
+    el("nav", { class: "k-crumbs" }, entity
+      ? [
+        el("a", { attrs: { href: "#/keep/list" }, text: "Entities" }), sep(),
+        el("a", { attrs: { href: `#/keep/entity/${entity.id}` }, text: entity.name }), sep(),
+        el("span", { text: asset.name }),
+      ]
+      : [
+        el("a", { attrs: { href: "#/keep/assets" }, text: "Assets" }), sep(),
+        el("span", { text: asset.name }),
+      ]),
     el("div", { class: "k-ahero" }, [
       el("span", { class: `k-cic k-cic--${assetMeta.cic}` }, [icon(assetMeta.icon, { size: 34 })]),
       el("div", {}, [

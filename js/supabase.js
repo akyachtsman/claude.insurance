@@ -228,11 +228,13 @@ export function getAllAssets() {
 
 export function findAsset(assetId) {
   if (!cache) return null;
-  for (const entity of cache.entities) {
-    const asset = entity.assets.find((a) => a.id === assetId);
-    if (asset) return { entity, asset };
-  }
-  return null;
+  // Resolve against the authoritative asset list (same source the Assets table
+  // is built from), then attach the entity — which may be null for an orphan
+  // asset whose entity didn't load. Searching only nested entity.assets would
+  // miss those and bounce a valid click away from its detail page.
+  const asset = cache.assets.find((a) => a.id === assetId);
+  if (!asset) return null;
+  return { asset, entity: cache.entityById.get(asset._entityId) || null };
 }
 
 export function findPolicy(policyId) {
