@@ -1254,26 +1254,30 @@ function relLayout() {
 // lands on a node without moving opens it.
 function setupRelViewport(wrap, svg, W, H, anchor) {
   const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
-  const TOPM = 28;                                 // top margin when the chart is top-aligned
+  const MAX_K = 1.25;                              // don't over-zoom a tiny graph
   let k = 1, tx = 0, ty = 0, fitted = false;
   const applyT = () => { svg.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
-  // Keep the chart on-screen: centre horizontally where it fits, else clamp the
-  // pan. Vertically, top-align with a small margin (rather than centre) so the
-  // root sits near the top and there's no dead space floating above it.
+  // Always centre both axes; clamp the pan only when the chart is bigger than the
+  // viewport so the far side stays reachable by dragging.
   const clampPan = (vw, vh) => {
     const cw = W * k, ch = H * k, M = 48;
     tx = cw <= vw ? (vw - cw) / 2 : Math.min(M, Math.max(vw - cw - M, tx));
-    ty = ch <= vh ? TOPM : Math.min(M, Math.max(vh - ch - M, ty));
+    ty = ch <= vh ? (vh - ch) / 2 : Math.min(M, Math.max(vh - ch - M, ty));
   };
+  // First paint (and every resize): fill the width, shrink the map to hug the
+  // scaled content height (no dead space), and centre — so it opens centred and
+  // as zoomed-in as fitting the width allows, every single time.
   const fit = () => {
-    const vw = wrap.clientWidth || 0, vh = wrap.clientHeight || 0;
-    if (!vw || !vh) return;
-    k = Math.max(MIN_K, Math.min(vw / W, vh / H, 1));   // fit the whole chart, but not below the node floor
-    // Centre the whole chart horizontally (so it reads balanced for single- or
-    // multi-root graphs), and anchor the top layer near the viewport top so the
-    // roots stay visible. clampPan then centres/top-aligns or clamps the pan.
+    const vw = wrap.clientWidth || 0;
+    if (!vw) return;
+    k = Math.max(MIN_K, Math.min(vw / W, MAX_K));
+    const ch = H * k;
+    const viewH = (typeof window !== "undefined" ? window.innerHeight : 800);
+    const boxH = Math.max(300, Math.min(ch + 24, viewH * 0.78, 760));
+    if (Math.abs((parseFloat(wrap.style.height) || 0) - boxH) > 0.5) wrap.style.height = boxH + "px";
+    const vh = wrap.clientHeight || boxH;
     tx = (vw - W * k) / 2;
-    ty = anchor ? TOPM - anchor.top * k : (vh - H * k) / 2;
+    ty = (vh - H * k) / 2;
     clampPan(vw, vh); applyT(); fitted = true;
   };
   if (typeof ResizeObserver !== "undefined") {
