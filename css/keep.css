@@ -509,10 +509,13 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-pcard__t { flex: 1; min-width: 0; }
 .k-pcard__line { font: 700 16px var(--font-display); }
 .k-pcard__sub { font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 1px; }
-.k-exp { display: inline-flex; align-items: center; gap: 6px; font: 800 12px var(--font-sans); padding: 6px 12px; border-radius: var(--radius-pill); white-space: nowrap; }
-.k-exp--ok { background: var(--color-ok-bg); color: var(--color-ok); }
-.k-exp--warn { background: var(--color-warn-bg); color: var(--color-warn); }
-.k-exp--exp { background: var(--color-gap-bg); color: var(--color-gap); }
+/* Renewal status — subtle, no filled pills. The common "Active" state reads as
+   quiet neutral text; only the states that need attention keep a restrained
+   colour cue (text + icon), never a loud background. */
+.k-exp { display: inline-flex; align-items: center; gap: 6px; font: 700 12px var(--font-sans); padding: 2px 0; background: none; white-space: nowrap; }
+.k-exp--ok { color: var(--color-text-secondary); }
+.k-exp--warn { color: var(--color-warn); }
+.k-exp--exp { color: var(--color-gap); }
 .k-pcard__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); }
 .k-pcard__chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .k-pcard__view { font: 800 13px var(--font-sans); color: var(--color-accent); white-space: nowrap; }
