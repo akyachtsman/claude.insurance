@@ -1252,32 +1252,53 @@ function relLayout() {
 // On first paint it scales to fit the viewport but never below the readable node
 // floor, so a large chart overflows and you drag to reach the rest. A press that
 // lands on a node without moving opens it.
-function setupRelViewport(wrap, svg, W, H, anchor) {
+function setupRelViewport(wrap, svg, W, H, bounds) {
   const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
   const MAX_K = 1.25;                              // don't over-zoom a tiny graph
+  svg.style.transformOrigin = "0 0";               // predictable translate/scale from the top-left
   let k = 1, tx = 0, ty = 0, fitted = false;
+  // Real node-cluster bounds in user units, measured from the actual rendered
+  // nodes (below). The declared canvas / getBBox include edge-routing overshoot,
+  // which would sit the graph off to the side — measuring the nodes avoids that.
+  let bx = bounds ? bounds.x : 0, by = bounds ? bounds.y : 0;
+  let bw = bounds ? bounds.w : W, bh = bounds ? bounds.h : H;
   const applyT = () => { svg.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
-  // Always centre both axes; clamp the pan only when the chart is bigger than the
-  // viewport so the far side stays reachable by dragging.
-  const clampPan = (vw, vh) => {
-    const cw = W * k, ch = H * k, M = 48;
-    tx = cw <= vw ? (vw - cw) / 2 : Math.min(M, Math.max(vw - cw - M, tx));
-    ty = ch <= vh ? (vh - ch) / 2 : Math.min(M, Math.max(vh - ch - M, ty));
+  // Momentarily render at 1:1 and read the union rect of the node elements, in px
+  // relative to the wrap (= user units at scale 1). Returns false if not yet laid out.
+  const measureNodes = () => {
+    const prev = svg.style.transform;
+    svg.style.transform = "translate(0px,0px) scale(1)";
+    const wr = wrap.getBoundingClientRect();
+    let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity, any = false;
+    svg.querySelectorAll(".k-relnode").forEach((n) => {
+      const r = n.getBoundingClientRect();
+      if (r.width) { any = true; L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom); }
+    });
+    if (!any) { svg.style.transform = prev; return false; }
+    bx = L - wr.left; by = T - wr.top; bw = R - L; bh = B - T;
+    return true;
   };
-  // First paint (and every resize): fill the width, shrink the map to hug the
-  // scaled content height (no dead space), and centre — so it opens centred and
-  // as zoomed-in as fitting the width allows, every single time.
+  // Always centre the real node box; clamp the pan only when it's larger than the
+  // viewport so at least a margin of it stays reachable by dragging.
+  const clampPan = (vw, vh) => {
+    const cw = bw * k, ch = bh * k, M = 48;
+    tx = cw <= vw ? (vw - cw) / 2 - bx * k : Math.min(M - bx * k, Math.max(vw - M - (bx + bw) * k, tx));
+    ty = ch <= vh ? (vh - ch) / 2 - by * k : Math.min(M - by * k, Math.max(vh - M - (by + bh) * k, ty));
+  };
+  // First paint (and every resize): measure the nodes, scale to fill the width,
+  // hug the content height (no dead space), and centre the node box on both axes —
+  // so it opens centred every single time.
   const fit = () => {
     const vw = wrap.clientWidth || 0;
-    if (!vw) return;
-    k = Math.max(MIN_K, Math.min(vw / W, MAX_K));
-    const ch = H * k;
+    if (!vw || !measureNodes()) return;
+    k = Math.max(MIN_K, Math.min(vw / bw, MAX_K));
+    const ch = bh * k;
     const viewH = (typeof window !== "undefined" ? window.innerHeight : 800);
     const boxH = Math.max(300, Math.min(ch + 24, viewH * 0.78, 760));
     if (Math.abs((parseFloat(wrap.style.height) || 0) - boxH) > 0.5) wrap.style.height = boxH + "px";
     const vh = wrap.clientHeight || boxH;
-    tx = (vw - W * k) / 2;
-    ty = (vh - H * k) / 2;
+    tx = (vw - bw * k) / 2 - bx * k;
+    ty = (vh - bh * k) / 2 - by * k;
     clampPan(vw, vh); applyT(); fitted = true;
   };
   if (typeof ResizeObserver !== "undefined") {
@@ -1664,12 +1685,16 @@ function relationshipMap() {
   zoomCtl.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   zoomCtl.addEventListener("click", (ev) => ev.stopPropagation());
   wrap.appendChild(zoomCtl);
-  // Anchor the initial view on the root ("Me") node so the map opens centred on it.
-  const rootN = nodes.find((n) => n.kind === "personal") || nodes[0];
-  const anchor = rootN && pos[rootN.id]
-    ? { cx: pos[rootN.id].x + NODE_W / 2, top: pos[rootN.id].cy - NODE_H / 2 }
-    : null;
-  setupRelViewport(wrap, svg, W, H, anchor);
+  // The true bounding box of the NODES (not the declared canvas, which includes
+  // edge-routing overshoot) so the map can open centred on the actual graph.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach((n) => {
+    const p = pos[n.id]; if (!p) return;
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x + NODE_W);
+    minY = Math.min(minY, p.cy - NODE_H / 2); maxY = Math.max(maxY, p.cy + NODE_H / 2);
+  });
+  const bounds = isFinite(minX) ? { x: minX - 8, y: minY - 8, w: (maxX - minX) + 16, h: (maxY - minY) + 16 } : null;
+  setupRelViewport(wrap, svg, W, H, bounds);
   return wrap;
 }
 
