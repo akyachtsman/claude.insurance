@@ -18,7 +18,7 @@ import {
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../keep/depreciation.js";
-import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE } from "../keep/policies.js";
+import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE, policyType, annualPremium } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 import { buildPdf, docLines } from "../keep/docfile.js";
@@ -476,6 +476,12 @@ function assetTypeIcon(asset) {
   return el("span", { class: "k-aicon" }, [icon(ASSET_TYPE_ICON[asset.type] || "as-box", { size: 30 })]);
 }
 
+// Detailed, frame-less policy-type picture for the leading column in the
+// Policies table (mirrors assetTypeIcon; policyType() picks the icon by line).
+function policyTypeIcon(policy) {
+  return el("span", { class: "k-aicon" }, [icon(policyType(policy).icon, { size: 30 })]);
+}
+
 function statusPill(st) {
   return el("span", { class: `k-pill k-pill--${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]);
 }
@@ -883,23 +889,39 @@ export function renderKeepInsurance() {
   }
 
   const columns = [
+    // Leading column: the detailed, frame-less policy-type picture. No `get` → not sortable.
+    { label: "", cell: (r) => policyTypeIcon(r.policy) },
     { label: "Policy", get: (r) => r.policy.line, cell: (r) => [
       el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.policy.line }),
       el("div", { class: "k-imuted", text: r.policy.number || "" }),
     ] },
+    { label: "Type", get: (r) => policyType(r.policy).label, cell: (r) => el("span", { text: policyType(r.policy).label }) },
     { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Carrier", get: (r) => r.policy.carrier || "", cell: (r) => el("span", { text: r.policy.carrier || "—" }) },
     { label: "Renewal", get: (r) => r.policy.renewalInDays, cell: (r) => expiryBadge(r.policy.renewalInDays) },
-    { label: "Premium", cell: (r) => el("span", { text: r.policy.premium || "—" }) },
+    { label: "Premium", get: (r) => annualPremium(r.policy) || 0, cell: (r) => el("span", { text: r.policy.premium || "—" }) },
     { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
   ];
+
+  // Summary stats across the whole table.
+  const active = rows.filter((r) => policyKind(r.policy.renewalInDays) !== "exp").length;
+  const attention = rows.filter((r) => r.policy.renewalInDays <= 30).length; // expiring soon or lapsed
+  const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
+  const premiumTotal = premiums.reduce((s, n) => s + n, 0);
+  const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
 
   const view = page("insurance", [
     el("h1", { class: "k-h1", text: "Policies" }),
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
+    el("div", { class: "k-astats" }, [
+      statTile("Policies", String(rows.length), `across ${insuredEntities} ${insuredEntities === 1 ? "entity" : "entities"}`),
+      statTile("Active", String(active), "in force"),
+      statTile("Needs attention", String(attention), attention ? "expiring or lapsed" : "all current"),
+      statTile("Annual premium", premiums.length ? (money(premiumTotal) || "$0") : "—", "total on file"),
+    ]),
     rows.length
-      ? sortableTable(columns, rows, { defaultIdx: 4, defaultDir: 1 }).wrap  // Renewal, soonest first
+      ? (() => { const t = sortableTable(columns, rows, { defaultIdx: 6, defaultDir: 1 }); t.wrap.classList.add("k-atable", "k-ptable"); return t.wrap; })()  // Renewal, soonest first
       : el("div", { class: "k-empty", text: "No policies on file yet — your broker adds them as they're bound." }),
   ]);
   mount(view);
