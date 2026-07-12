@@ -465,15 +465,14 @@ function assetTypeLabel(asset) {
   return (meta && meta.label) || "Other";
 }
 
-// Detailed, frame-less asset-type picture (drawn straight on the row), tinted to
-// the type's colour. Used as the leading column in the Assets table.
+// Detailed, frame-less asset-type picture (drawn straight on the row). Used as
+// the leading column in the Assets table; all types share the one red tint.
 const ASSET_TYPE_ICON = {
   home: "as-home", auto: "as-auto", watercraft: "as-boat", valuables: "as-gem",
   "commercial-space": "as-commercial", "commercial-auto": "as-truck", business: "as-commercial", other: "as-box",
 };
 function assetTypeIcon(asset) {
-  const meta = ASSET_META[asset.type] || { cic: "home" };
-  return el("span", { class: `k-aicon k-aicon--${meta.cic}` }, [icon(ASSET_TYPE_ICON[asset.type] || "as-box", { size: 30 })]);
+  return el("span", { class: "k-aicon" }, [icon(ASSET_TYPE_ICON[asset.type] || "as-box", { size: 30 })]);
 }
 
 function statusPill(st) {
@@ -921,7 +920,7 @@ export function renderKeepAssets() {
   const columns = [
     // Leading column: the detailed, frame-less asset-type picture. No `get` → not sortable.
     { label: "", cell: (r) => assetTypeIcon(r.asset) },
-    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
+    { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink k-aname", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Type", get: (r) => assetTypeLabel(r.asset), cell: (r) => el("span", { text: assetTypeLabel(r.asset) }) },
     { label: "Entity", get: (r) => (r.entity ? r.entity.name : "￿"), cell: (r) => entityCell(r.entity) },
     { label: "Value", get: (r) => r.asset.value || 0, cell: (r) => el("span", { text: r.asset.value ? money(r.asset.value) : "—" }) },
