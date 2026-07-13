@@ -49,11 +49,18 @@ identity string was removed (migration `clear_stale_personal_entity_label`). A
 proper tidy would split business industry into its own column — deliberate schema
 work, not an automated cleanup.
 
-## Known follow-ups (need a DB migration → separate, approval-gated)
+## Completed normalizations
 
-- `policies.premium` is `text` ("$2,260 / yr"); parsed by `annualPremium`. Could
-  become a numeric amount + period.
-- `policies.documents` is a jsonb string array with no id/type; could become a
-  typed shape or its own table if documents grow beyond display.
+- **`policies.premium` → numeric** (migration `policies_premium_numeric`).
+  Added `premium_amount` + `premium_period` ('yr'|'mo'), backfilled from the
+  legacy text. `annualPremium` reads the numeric source; `formatPremium` renders
+  the display string. The `premium` text column is kept as a display fallback.
+- **`policies.documents` → typed records** (migration `policies_documents_typed`).
+  Each document is now `{ name, kind }` instead of a bare string. Read through
+  `docName`/`docKind` (js/keep/docfile.js), which accept either shape.
+- **Stale personal `label` cleared** (migration `clear_stale_personal_entity_label`).
+
+## Known follow-ups (still open)
+
 - `entities.label` overload (industry vs role vs trust-type) → a dedicated
   `industry` column for businesses would be cleaner than the shared field.
