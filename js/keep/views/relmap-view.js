@@ -637,26 +637,32 @@ function relationshipMap() {
     g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
     // Asset markers: the red type icon for each asset this entity holds — no
-    // circle backdrop — with the full name on hover. Overflow collapses to "+N".
+    // circle backdrop, full name on hover. Icons flow left→right and wrap onto as
+    // many rows as fit inside the box, so we show every asset when there's room;
+    // only a genuine overflow (more than the box holds) collapses to a "+N".
     const owned = relView.chips ? (n.assetNames || []) : [];
     const ownedIcons = n.assetIcons || [];
     if (owned.length) {
-      const MAX = 6, shown = owned.length > MAX ? 5 : owned.length;
-      const cy = top + 66 + yoff, sz = 19;
-      let cx = n.x + 24;
+      const sz = 18, stepX = 21, stepY = 21, x0 = n.x + 24, y0 = top + 66 + yoff;
+      const perRow = Math.max(1, Math.floor((NODE_W - 48) / stepX) + 1);
+      const maxRows = Math.max(1, Math.floor((NODE_H - 14 - (y0 - top)) / stepY) + 1);
+      const capacity = perRow * maxRows;
+      const overflow = owned.length > capacity;
+      const shown = overflow ? capacity - 1 : owned.length;
+      const cellCX = (i) => x0 + (i % perRow) * stepX;
+      const cellCY = (i) => y0 + Math.floor(i / perRow) * stepY;
       for (let i = 0; i < shown; i++) {
         const grp = s("g", {});
         const ic = icon(ownedIcons[i] || "shield", { size: sz, class: "k-relassetic" });
-        ic.setAttribute("x", cx - sz / 2);
-        ic.setAttribute("y", cy - sz / 2);
+        ic.setAttribute("x", cellCX(i) - sz / 2);
+        ic.setAttribute("y", cellCY(i) - sz / 2);
         const ti = s("title", {}); ti.textContent = owned[i]; grp.appendChild(ic); grp.appendChild(ti);
         g.appendChild(grp);
-        cx += 23;
       }
-      if (owned.length > MAX) {
+      if (overflow) {
         const grp = s("g", {});
-        grp.appendChild(svgText("+" + (owned.length - 5), { x: cx, y: cy + 4, "text-anchor": "middle", "font-size": "11", "font-weight": "800", "font-family": FS, class: "k-relassetmore" }));
-        const ti = s("title", {}); ti.textContent = owned.slice(5).join(", "); grp.appendChild(ti);
+        grp.appendChild(svgText("+" + (owned.length - shown), { x: cellCX(shown), y: cellCY(shown) + 4, "text-anchor": "middle", "font-size": "11", "font-weight": "800", "font-family": FS, class: "k-relassetmore" }));
+        const ti = s("title", {}); ti.textContent = owned.slice(shown).join(", "); grp.appendChild(ti);
         g.appendChild(grp);
       }
     }
