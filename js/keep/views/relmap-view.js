@@ -32,6 +32,17 @@ const REL_STYLE = {
 // nonprofit), so a colour on the map always reads as an entity type, not a
 // per-owner rainbow. Mirrors the accent/company/text-primary/ok tokens.
 const REL_TYPE_COLOR = { me: "#3F6FD8", person: "#3F6FD8", biz: "#800020", trust: "#1B2540", np: "#0E8E66" };
+// Ownership / control pills use the LIGHT TINT of the owner's avatar as their
+// background with a dark type colour as text (mirrors the entity-view stake
+// pills), so a pill reads as the same colour as the initials it echoes.
+const REL_PILL = {
+  me:     { bg: "#E7EFFE", fg: "#1F52D6" },
+  person: { bg: "#E7EFFE", fg: "#1F52D6" },
+  biz:    { bg: "#F3E1E5", fg: "#800020" },
+  np:     { bg: "#DEFAEF", fg: "#0B7355" },
+  trust:  { bg: "#E6E8EF", fg: "#1B2540" },
+};
+const relPill = (sk) => REL_PILL[sk] || { bg: "#EAEDF4", fg: "#55607F" };
 // Band order for the "by type" perspective: people, trusts, businesses.
 const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // View controls for the Relationships map — held across in-view re-renders so the
@@ -712,8 +723,9 @@ function relationshipMap() {
       barG.appendChild(s("rect", { x: barX, y: barY, width: barW, height: barH, fill: "#EEF2FB" }));
       segs.forEach((sg, i) => {
         const owner = byId.get(sg.ownerId);
+        const pill = relPill(owner ? owner.sk : "person");
         if (i > 0) barG.appendChild(s("rect", { x: sg.x - 0.75, y: barY, width: 1.5, height: barH, fill: "#ffffff" }));
-        const rect = s("rect", { x: sg.x, y: barY, width: sg.w, height: barH, fill: REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#9aa5bd" });
+        const rect = s("rect", { x: sg.x, y: barY, width: sg.w, height: barH, fill: pill.bg });
         const ti = s("title", {}); ti.textContent = `${owner ? owner.name : "Owner"} — ${sg.pct}%`; rect.appendChild(ti);
         barG.appendChild(rect);
         // Prefer the full "II pct%"; when the slice is too narrow keep the OWNER's
@@ -723,7 +735,7 @@ function relationshipMap() {
         const full = `${initials} ${sg.pct}%`;
         const wide = sg.w >= full.length * 5.4;
         const label = wide ? full : (sg.w >= 16 ? initials : "");
-        if (label) barG.appendChild(svgText(label, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": wide ? "9.5" : "9", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        if (label) barG.appendChild(svgText(label, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": wide ? "9.5" : "9", "font-weight": "800", fill: pill.fg, "font-family": FS }));
       });
       g.appendChild(barG);
     }
@@ -737,11 +749,11 @@ function relationshipMap() {
       const shownC = ctrl.length > 2 ? 1 : ctrl.length;
       const items = [];
       for (let i = 0; i < shownC; i++) {
-        const c = ctrl[i], ow = byId.get(c.ownerId);
-        items.push({ label: `${ow ? ow.initials : "?"} ${c.role}`, fill: REL_TYPE_COLOR[ow ? ow.sk : "person"] || "#9aa5bd", tip: `${ow ? ow.name : "Someone"} — ${c.role}` });
+        const c = ctrl[i], ow = byId.get(c.ownerId), pill = relPill(ow ? ow.sk : "person");
+        items.push({ label: `${ow ? ow.initials : "?"} ${c.role}`, bg: pill.bg, fg: pill.fg, tip: `${ow ? ow.name : "Someone"} — ${c.role}` });
       }
       if (ctrl.length > shownC) {
-        items.push({ label: `+${ctrl.length - shownC}`, fill: "#9aa5bd", tip: ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", ") });
+        items.push({ label: `+${ctrl.length - shownC}`, bg: "#EAEDF4", fg: "#55607F", tip: ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", ") });
       }
       const ws = items.map((it) => Math.min(it.label.length * 5.7 + 16, NODE_W - 32));
       const totalW = ws.reduce((a, b) => a + b, 0) + (items.length - 1) * 6;
@@ -749,8 +761,8 @@ function relationshipMap() {
       items.forEach((it, i) => {
         const w = ws[i];
         const grp = s("g", {});
-        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill: it.fill }));
-        grp.appendChild(svgText(it.label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: "#ffffff", "font-family": FS }));
+        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill: it.bg }));
+        grp.appendChild(svgText(it.label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: it.fg, "font-family": FS }));
         if (it.tip) { const ti = s("title", {}); ti.textContent = it.tip; grp.appendChild(ti); }
         g.appendChild(grp);
         px += w + 6;
