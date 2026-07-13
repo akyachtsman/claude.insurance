@@ -3,15 +3,15 @@
 // schedule), and the add-asset picker flow. Extracted from views/keep.js; hangs
 // in the shared chrome from shell.js. Public: renderKeepAssets / renderKeepAsset
 // / renderKeepAddAsset.
-import { el, mount } from "../dom.js";
-import { go } from "../main.js";
-import { icon } from "../icons.js";
-import { s } from "../svg.js";
-import { getRuleDefaults } from "../content.js";
-import { ASSET_META } from "./data.js";
-import { analyzeAsset } from "./analysis.js";
-import { depreciationFor, depreciationMilestones } from "./depreciation.js";
-import { findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../supabase.js";
+import { el, mount } from "../../dom.js";
+import { go } from "../../main.js";
+import { icon } from "../../icons.js";
+import { s } from "../../svg.js";
+import { getRuleDefaults } from "../../content.js";
+import { ASSET_META } from "../logic/data.js";
+import { analyzeAsset } from "../logic/analysis.js";
+import { depreciationFor, depreciationMilestones } from "../logic/depreciation.js";
+import { findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
 import {
   BROKER_NAME, sep, page, backLink, originHref, money, cic, assetTypeLabel, assetTypeIcon,
   policyTypeIcon, coveragePill, policiesSection, sortableTable, statTile,

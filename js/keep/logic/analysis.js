@@ -4,7 +4,7 @@
 // come from the catalog below. Pure + deterministic so it's unit-testable and
 // will carry over unchanged when real assets come from Supabase.
 
-import { computeNeeds } from "../rules.js";
+import { computeNeeds } from "../../rules.js";
 
 const CATALOG = {
   home: {

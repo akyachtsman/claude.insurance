@@ -4,12 +4,12 @@
 // layout math lives in keep/relmap.js; this module owns the DOM/SVG rendering
 // and the map's view state. Extracted from views/keep.js.
 // Public interface: relationshipMap() + relToolbar(drawMap, host).
-import { el } from "../dom.js";
-import { s } from "../svg.js";
-import { getMapData } from "../supabase.js";
-import { parsePct } from "./ownership.js";
-import { entityRelStyleKey as relStyleKey, entityMapSub } from "./entity-display.js";
-import { capTablesByEntity, controlsByEntity, orchestrate } from "./relmap.js";
+import { el } from "../../dom.js";
+import { s } from "../../svg.js";
+import { getMapData } from "../../supabase.js";
+import { parsePct } from "../logic/ownership.js";
+import { entityRelStyleKey as relStyleKey, entityMapSub } from "../logic/entity-display.js";
+import { capTablesByEntity, controlsByEntity, orchestrate } from "../logic/relmap.js";
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 

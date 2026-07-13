@@ -5,17 +5,17 @@
 // formatters (money, dates, asset/policy icons, coverage pills, avatars).
 // Extracted from views/keep.js so the page-view functions stay separate from
 // the chrome they hang in. Pure presentation — no page-specific logic.
-import { el } from "../dom.js";
-import { go, previousRoute } from "../main.js";
-import { icon } from "../icons.js";
-import { s } from "../svg.js";
-import { ASSET_META } from "./data.js";
-import { policyKind, policyType, REMINDER_SCHEDULE } from "./policies.js";
-import { KEEP_ACTIONS, matchActions, searchRecords } from "./search.js";
-import { buildPdf, docLines, docName } from "./docfile.js";
-import { REQUEST_STAGES, stageInfo } from "./requests.js";
-import { entityColorSuffix as colorSuffix, entityAvatarIcon } from "./entity-display.js";
-import { getUser, getEntities, getEntity, getPrefs, savePrefs, signOut } from "../supabase.js";
+import { el } from "../../dom.js";
+import { go, previousRoute } from "../../main.js";
+import { icon } from "../../icons.js";
+import { s } from "../../svg.js";
+import { ASSET_META } from "../logic/data.js";
+import { policyKind, policyType, REMINDER_SCHEDULE } from "../logic/policies.js";
+import { KEEP_ACTIONS, matchActions, searchRecords } from "../logic/search.js";
+import { buildPdf, docLines, docName } from "../logic/docfile.js";
+import { REQUEST_STAGES, stageInfo } from "../logic/requests.js";
+import { entityColorSuffix as colorSuffix, entityAvatarIcon } from "../logic/entity-display.js";
+import { getUser, getEntities, getEntity, getPrefs, savePrefs, signOut } from "../../supabase.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
