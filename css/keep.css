@@ -189,20 +189,18 @@ body.in-keep { background: var(--color-bg); }
 /* Panels are plain white surfaces; entity type is signalled by the avatar and
    type chip, not a background tint. */
 .k-panel--me, .k-panel--person, .k-panel--biz, .k-panel--np, .k-panel--trust { background: var(--color-surface); }
-/* Entity colours — soft pastel tints with a coloured icon/initials + text
-   (Individual = blue · Business = light red · Nonprofit = light green ·
-   Trust = light orange). */
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
-   icon in the type colour (transparent framing). */
-/* Entity avatar icons are red; a trust is not itself an entity (it's a legal
-   arrangement holding assets), so its icon is rendered in neutral ink to set it
-   apart from the true entities. */
+   icon in the type colour (transparent framing). Colour cues, shared with the
+   type label + Relationships map: individual = red · business = violet ·
+   nonprofit = green · trust = neutral ink (a trust is a legal arrangement that
+   holds assets, not an entity, so it's set apart). */
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-danger); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
 .k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.k-bigav--person, .k-bigav--biz, .k-bigav--np { color: var(--color-danger); }
+.k-bigav--person, .k-bigav--np { color: var(--color-danger); }
+.k-bigav--biz { color: var(--color-company); }
 .k-bigav--trust { color: var(--color-text-primary); }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
-   renewal badges). Blue = individual, red = company, green = nonprofit, amber = trust. */
+   renewal badges). Blue = individual, violet = business, green = nonprofit, amber = trust. */
 .k-et { font: 700 12px var(--font-sans); background: none; color: var(--color-accent); padding: 0; margin-left: var(--space-2); white-space: nowrap; }
 .k-et--me, .k-et--person { color: var(--color-accent); }
 .k-et--biz { color: var(--color-company); }
@@ -337,7 +335,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-relcaption--top { margin: 0 0 var(--space-4); }
 .k-etile__bar { position: absolute; top: 0; left: 0; bottom: 0; width: 4px; background: var(--color-border); }
 .k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: #9DBCFF; }
-.k-etile--biz .k-etile__bar { background: #F0A6A9; }
+.k-etile--biz .k-etile__bar { background: #BFA3EC; }
 .k-etile--trust .k-etile__bar { background: #F0C879; }
 .k-etile--np .k-etile__bar { background: #7FD4A8; }
 .k-etile .k-bigav { width: 40px; height: 40px; border-radius: 12px; margin: 0; font-size: 15px; flex: none; }
