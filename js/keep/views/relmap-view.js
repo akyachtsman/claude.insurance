@@ -348,6 +348,25 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
       if (t.getComputedTextLength() > 27) { t.setAttribute("textLength", "27"); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
     });
   };
+  // Node name/subtitle can be longer than the fixed-width box (e.g. "Mercer Family
+  // Foundation"); truncate any that would spill past the right edge with an ellipsis
+  // — the full text stays available on hover. Re-measured on every fit AND on
+  // fonts.ready so it reflects the loaded font, not the narrower fallback.
+  const LABEL_MAXW = REL_NODE_W - 70;   // name/sub start 62px in; keep an 8px right margin
+  const clampLabels = () => {
+    svg.querySelectorAll(".k-relname, .k-relsub").forEach((t) => {
+      const full = t.getAttribute("data-full") || t.textContent;
+      t.setAttribute("data-full", full);
+      t.textContent = full;                                 // reset (drops any prior ellipsis/title) before re-measuring
+      if (t.getComputedTextLength() <= LABEL_MAXW) return;
+      let n = full.length;
+      while (n > 1 && t.getComputedTextLength() > LABEL_MAXW) {
+        n--;
+        t.textContent = full.slice(0, n).replace(/\s+$/, "") + "…";
+      }
+      const ti = s("title", {}); ti.textContent = full; t.appendChild(ti);
+    });
+  };
   // First paint (and every resize): measure the nodes, scale to fill the width,
   // hug the content height (no dead space), and centre the node box on both axes —
   // so it opens centred every single time.
@@ -355,6 +374,7 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
     const vw = wrap.clientWidth || 0;
     if (!vw || !measureNodes()) return;
     clampAvatars();
+    clampLabels();
     k = Math.max(MIN_K, Math.min(vw / bw, MAX_K));
     const ch = bh * k;
     const viewH = (typeof window !== "undefined" ? window.innerHeight : 800);
@@ -372,10 +392,11 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
     });
     ro.observe(wrap);
   }
-  // Webfonts can finish loading after the first fit — re-clamp avatar initials then
-  // so late-widening glyphs (e.g. "MF" in Quicksand) can't spill their circle.
+  // Webfonts can finish loading after the first fit — re-run the clamps then so
+  // late-widening glyphs can't spill (avatar initials out of their circle, or a
+  // long name past the box edge, e.g. "Mercer Family Foundation").
   if (typeof document !== "undefined" && document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => { if (wrap.isConnected) clampAvatars(); });
+    document.fonts.ready.then(() => { if (wrap.isConnected) { clampAvatars(); clampLabels(); } });
   }
   // Manual zoom: scale to `nk`, keeping the content point under the focal point
   // (fx, fy — viewport-relative) fixed, then re-clamp the pan.
@@ -641,8 +662,8 @@ function relationshipMap() {
     const ax = n.x + 34, avy = top + 30 + yoff;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
     g.appendChild(svgText((n.initials || "").slice(0, 2), { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD, class: "k-relav" }));
-    g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
-    g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
+    g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD, class: "k-relname" }));
+    g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS, class: "k-relsub" }));
 
     // Asset markers: the red type icon for each asset this entity holds — no
     // circle backdrop, full name on hover. Icons flow left→right and wrap onto as
