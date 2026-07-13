@@ -199,12 +199,12 @@ body.in-keep { background: var(--color-bg); }
 .k-bigav--person, .k-bigav--biz, .k-bigav--np { color: var(--color-danger); }
 .k-bigav--trust { color: var(--color-text-primary); }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
-   renewal badges). Blue = individual, burgundy = business, green = nonprofit, amber = trust. */
+   renewal badges). Blue = individual, burgundy = business, green = nonprofit, neutral ink = trust. */
 .k-et { font: 700 12px var(--font-sans); background: none; color: var(--color-accent); padding: 0; margin-left: var(--space-2); white-space: nowrap; }
 .k-et--me, .k-et--person { color: var(--color-accent); }
 .k-et--biz { color: var(--color-company); }
 .k-et--np { color: var(--color-ok); }
-.k-et--trust { color: var(--color-warn); }
+.k-et--trust { color: var(--color-text-primary); }
 .k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-3); }
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
@@ -256,7 +256,7 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-ownrow__pct { margin-left: auto; flex: none; font: 800 12.5px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 4px 12px; border-radius: var(--radius-pill); font-variant-numeric: tabular-nums; }
 .k-ownrow--me .k-ownrow__pct, .k-ownrow--person .k-ownrow__pct { color: var(--color-accent); background: var(--color-accent-light); }
 .k-ownrow--biz .k-ownrow__pct { color: var(--color-company); background: var(--color-company-bg); }
-.k-ownrow--trust .k-ownrow__pct { color: var(--color-warn); background: #FBEBCF; }
+.k-ownrow--trust .k-ownrow__pct { color: var(--color-text-primary); background: #E6E8EF; }
 .k-ownrow--np .k-ownrow__pct { color: var(--color-ok); background: #DFF3EA; }
 
 /* ── Entity page: two-column split (entity info | assets grouped) ────────────── */
@@ -335,7 +335,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-etile__bar { position: absolute; top: 0; left: 0; bottom: 0; width: 4px; background: var(--color-border); }
 .k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: #9DBCFF; }
 .k-etile--biz .k-etile__bar { background: #C08497; }
-.k-etile--trust .k-etile__bar { background: #F0C879; }
+.k-etile--trust .k-etile__bar { background: #9AA1AE; }
 .k-etile--np .k-etile__bar { background: #7FD4A8; }
 .k-etile .k-bigav { width: 40px; height: 40px; border-radius: 12px; margin: 0; font-size: 15px; flex: none; }
 .k-etile .k-bigav .icon { width: 28px; height: 28px; }
