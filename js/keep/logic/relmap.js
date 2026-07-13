@@ -38,11 +38,14 @@ export function controlsByEntity(edges) {
 // waypoints. Cross-axis (x) placement is left to the caller, which owns pixels.
 // `bandOf(node)` is optional: when given, it fixes each node's layer (used by the
 // "by type" view to layer by category); when omitted, layers come from longest-path
-// ownership depth. Either way, edges that span >1 layer — in EITHER direction — get
+// ownership depth. `floorOf(id)` is an optional per-node minimum band, applied only
+// in the depth path — layer = max(ownership depth, floor) — so a category can be
+// pinned to a tier (individuals < trusts < businesses) while descendants still nest
+// deeper. Either way, edges that span >1 layer — in EITHER direction — get
 // dummies through every intervening layer, so the renderer can keep them out of the
 // cards. Returns { order, rows (real + dummy ids per layer, ordered), layerOf, dummy
 // (id -> layer), edgePath (from>to -> [dummyId...] ordered), up, down }.
-export function orchestrate(nodes, edges, bandOf) {
+export function orchestrate(nodes, edges, bandOf, floorOf) {
   const ids = new Set(nodes.map((n) => n.id));
   const E = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
   const layer = {};
@@ -52,11 +55,14 @@ export function orchestrate(nodes, edges, bandOf) {
     const incoming = {};
     nodes.forEach((n) => { incoming[n.id] = []; });
     E.forEach((e) => incoming[e.to].push(e.from));
+    // Longest-path depth, but never above the node's optional category floor —
+    // so a caller can pin a whole category (e.g. trusts, then businesses) to a
+    // minimum band while still letting ownership depth push descendants deeper.
     const visit = (id, seen) => {
       if (layer[id] != null) return layer[id];
       if (seen.has(id)) return 0;
       seen.add(id);
-      let m = 0;
+      let m = floorOf ? floorOf(id) : 0;
       for (const p of incoming[id]) m = Math.max(m, visit(p, seen) + 1);
       return (layer[id] = m);
     };
