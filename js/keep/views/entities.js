@@ -211,7 +211,7 @@ function enableCardDrag(grid, saveRoot) {
 // Businesses, then Trusts. Each row scrolls horizontally if it overflows.
 const CARD_GROUPS = [
   { title: "Individuals", match: (e) => e.kind === "personal" || e.kind === "person" },
-  { title: "Companies", match: (e) => e.kind === "business" },
+  { title: "Businesses", match: (e) => e.kind === "business" },
   { title: "Trusts", match: (e) => e.kind === "trust" },
 ];
 
@@ -241,14 +241,14 @@ async function renderEntityCollection(layout) {
   }
 
   // Summary stats across all entities (same treatment as the Assets table).
-  const companies = entities.filter((e) => entityCategory(e) === "Company").length;
+  const businesses = entities.filter((e) => entityCategory(e) === "Business").length;
   const individuals = entities.filter((e) => entityCategory(e) === "Individual").length;
   const trusts = entities.filter((e) => entityCategory(e) === "Trust").length;
   const ubos = entities.filter((e) => entityCategory(e) === "UBO").length; // the account holder(s)
   const totalAssets = entities.reduce((s, e) => s + e.assets.length, 0);
   const totalGaps = entities.reduce((s, e) => s + entitySummary(e, settings).gaps, 0);
   const totalValue = entities.reduce((s, e) => s + entityValue(e), 0);
-  const mix = [companies ? `${companies} ${companies === 1 ? "company" : "companies"}` : null,
+  const mix = [businesses ? `${businesses} ${businesses === 1 ? "business" : "businesses"}` : null,
     individuals ? `${individuals} individual${individuals === 1 ? "" : "s"}` : null,
     trusts ? `${trusts} trust${trusts === 1 ? "" : "s"}` : null,
     ubos ? `${ubos} UBO` : null].filter(Boolean).join(" · ");
@@ -262,7 +262,7 @@ async function renderEntityCollection(layout) {
   const view = page("list", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
-    el("p", { class: "k-sub", text: "You, your companies, and your trusts — the owners of the assets in your account." }),
+    el("p", { class: "k-sub", text: "You, your businesses, and your trusts — the owners of the assets in your account." }),
     entitiesToggle(layout),
     entitiesPrivacyRow(),
     entities.length ? el("div", {}, [stats, body]) : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
@@ -282,7 +282,7 @@ export function renderKeepEntities() {
   const view = page("list", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
-    el("p", { class: "k-sub", text: "You, your companies, and your trusts — the owners of the assets in your account." }),
+    el("p", { class: "k-sub", text: "You, your businesses, and your trusts — the owners of the assets in your account." }),
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     tools,

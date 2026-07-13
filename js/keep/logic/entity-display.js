@@ -10,9 +10,9 @@ import { isNonprofitType } from "./entity-types.js";
 // Broad category shown as the Type pill. Derived purely from `kind`:
 //   personal → UBO (the account holder / ultimate beneficial owner)
 //   person   → Individual (spouse, partners, other people)
-//   business → Company · trust → Trust
+//   business → Business · trust → Trust
 export function entityCategory(entity) {
-  if (entity.kind === "business") return "Company";
+  if (entity.kind === "business") return "Business";
   if (entity.kind === "trust") return "Trust";
   if (entity.kind === "personal") return "UBO";
   return "Individual";
