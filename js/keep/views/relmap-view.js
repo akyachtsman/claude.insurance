@@ -31,15 +31,15 @@ function assetInitials(name) {
 const REL_STYLE = {
   me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
   person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
-  biz: { fill: "#fff", avFill: "#fbe0e1", avText: "#c42b30", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
+  biz: { fill: "#fff", avFill: "#EFE7FB", avText: "#6D28D9", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   np: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   trust: { fill: "#fff", avFill: "#fff1de", avText: "#b5660a", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
 };
 // Owner-type colours for ownership edges and cap-table segments — the project's
-// original palette (blue = people, red = business, amber = trust, green =
-// nonprofit), so a colour on the map always reads as an entity type, not a
-// per-owner rainbow. Matches the accent/danger/warn/ok tokens in tokens.css.
-const REL_TYPE_COLOR = { me: "#1F52D6", person: "#3F6FD8", biz: "#C42B30", trust: "#B5660A", np: "#0E8E66" };
+// palette (blue = people, violet = business, amber = trust, green = nonprofit),
+// so a colour on the map always reads as an entity type, not a per-owner
+// rainbow. Mirrors the accent/company/warn/ok tokens in tokens.css.
+const REL_TYPE_COLOR = { me: "#1F52D6", person: "#3F6FD8", biz: "#6D28D9", trust: "#B5660A", np: "#0E8E66" };
 // Band order for the "by type" perspective: people, trusts, businesses.
 const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // View controls for the Relationships map — held across in-view re-renders so the
