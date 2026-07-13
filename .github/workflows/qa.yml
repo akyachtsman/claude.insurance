@@ -72,7 +72,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'  # html-validate 11.x needs Node >= 22 (fs.globSync)
 
       # Pure-logic unit tests (node:test) — no browser/backend needed, so these
       # are a deterministic, blocking gate. Explicit file list keeps discovery
