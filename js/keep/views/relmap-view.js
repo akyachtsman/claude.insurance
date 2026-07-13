@@ -6,21 +6,13 @@
 // Public interface: relationshipMap() + relToolbar(drawMap, host).
 import { el } from "../../dom.js";
 import { s } from "../../svg.js";
+import { icon } from "../../icons.js";
 import { getMapData } from "../../supabase.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityRelStyleKey as relStyleKey, entityMapSub } from "../logic/entity-display.js";
 import { capTablesByEntity, controlsByEntity, orchestrate } from "../logic/relmap.js";
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
-
-// Two-letter initials for an asset name: first letters of the first two words
-// that contain a letter (so "123 Marina Way" → "MW", "Ghost Van" → "GV").
-function assetInitials(name) {
-  const words = String(name || "").trim().split(/\s+/).filter((w) => /[a-z]/i.test(w));
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (String(name || "").replace(/\s/g, "").slice(0, 2) || "?").toUpperCase();
-}
 
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
@@ -29,7 +21,7 @@ function assetInitials(name) {
 // and control-only links (a trustee with no stake) are dashed and role-labelled.
 // Nodes for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
-  me: { fill: "url(#relme)", avFill: "rgba(255,255,255,.25)", avText: "#fff", nameFill: "#fff", subFill: "rgba(255,255,255,.85)", stroke: null },
+  me: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   person: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   biz: { fill: "#fff", avFill: "#F3E1E5", avText: "#800020", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
   np: { fill: "#fff", avFill: "#defaef", avText: "#0e8e66", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
@@ -47,8 +39,9 @@ const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // ownership (by depth) | type (by category) · focus: entity id or null · chips /
 // trustees: declutter toggles.
 const relView = { orient: "vertical", mode: "ownership", focus: null, chips: true, trustees: true };
-// DB entity node → REL_STYLE key. Personal renders as the gradient "me" node;
-// nonprofit businesses (green) split from for-profit businesses (red) by subtype.
+// DB entity node → REL_STYLE key. Personal ("me") renders like the other
+// individuals — white with a blue outline — distinguished by its "You" subtitle;
+// nonprofit businesses (green) split from for-profit businesses by subtype.
 // Node geometry and layout spacing. The map lays out top-down by ownership depth
 // (owners above what they own) — see keep/relmap.js orchestrate — and sizes the
 // canvas to the busiest row and the depth of the deepest chain, so boxes never
@@ -492,9 +485,6 @@ function relationshipMap() {
 
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "Ownership map of your entities", class: "k-relsvg" });
   svg.appendChild(s("defs", {}, [
-    s("linearGradient", { id: "relme", x1: "0", y1: "0", x2: "1", y2: "1" }, [
-      s("stop", { offset: "0", "stop-color": "#6F9BFF" }), s("stop", { offset: "1", "stop-color": "#2F6AF6" }),
-    ]),
     // Arrowhead pointing from an owner to the entity it owns.
     s("marker", { id: "rel-arrow", viewBox: "0 0 10 10", refX: "8.5", refY: "5", markerWidth: "9", markerHeight: "9", orient: "auto", markerUnits: "userSpaceOnUse" }, [
       // Inherit the edge's own colour so each arrowhead matches (and darkens with) its line.
@@ -646,26 +636,29 @@ function relationshipMap() {
     g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
     g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
-    // Asset chips: little circles for what this entity holds — initials inside,
-    // full name on hover. Overflow collapses to a "+N" chip.
+    // Asset markers: the red type icon for each asset this entity holds — no
+    // circle backdrop — with the full name on hover. Overflow collapses to "+N".
     const owned = relView.chips ? (n.assetNames || []) : [];
+    const ownedIcons = n.assetIcons || [];
     if (owned.length) {
-      const dark = n.sk === "me";
-      const cFill = dark ? "rgba(255,255,255,.22)" : "#EEF2FB";
-      const cText = dark ? "#ffffff" : "#3A4A6B";
-      const cStroke = dark ? "rgba(255,255,255,.4)" : "#DCE4F4";
       const MAX = 6, shown = owned.length > MAX ? 5 : owned.length;
+      const cy = top + 66 + yoff, sz = 19;
       let cx = n.x + 24;
-      const chip = (label, tip) => {
+      for (let i = 0; i < shown; i++) {
         const grp = s("g", {});
-        grp.appendChild(s("circle", { cx, cy: top + 66 + yoff, r: 9, fill: cFill, stroke: cStroke, "stroke-width": "1" }));
-        grp.appendChild(svgText(label, { x: cx, y: top + 69 + yoff, "text-anchor": "middle", "font-size": "8", "font-weight": "800", fill: cText, "font-family": FS }));
-        if (tip) { const ti = s("title", {}); ti.textContent = tip; grp.appendChild(ti); }
+        const ic = icon(ownedIcons[i] || "shield", { size: sz, class: "k-relassetic" });
+        ic.setAttribute("x", cx - sz / 2);
+        ic.setAttribute("y", cy - sz / 2);
+        const ti = s("title", {}); ti.textContent = owned[i]; grp.appendChild(ic); grp.appendChild(ti);
         g.appendChild(grp);
-        cx += 21;
-      };
-      for (let i = 0; i < shown; i++) chip(assetInitials(owned[i]), owned[i]);
-      if (owned.length > MAX) chip("+" + (owned.length - 5), owned.slice(5).join(", "));
+        cx += 23;
+      }
+      if (owned.length > MAX) {
+        const grp = s("g", {});
+        grp.appendChild(svgText("+" + (owned.length - 5), { x: cx, y: cy + 4, "text-anchor": "middle", "font-size": "11", "font-weight": "800", "font-family": FS, class: "k-relassetmore" }));
+        const ti = s("title", {}); ti.textContent = owned.slice(5).join(", "); grp.appendChild(ti);
+        g.appendChild(grp);
+      }
     }
 
     // Cap-table bar: the entity's ownership split as one bar summing to 100%, each

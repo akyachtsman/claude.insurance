@@ -272,8 +272,11 @@ export function getMapData() {
       // Raw record fields only — the view derives the display sub-label via the
       // single entity-display source (getMapData stays a thin data adapter).
       sub: e.subtype || e.label || "",
-      initials: e.initials,
+      // Personal shows real initials on the map (e.g. "JM"), consistent with the
+      // other individual nodes — not the "ME" marker used in the entity views.
+      initials: e.kind === "personal" ? initialsOf(e.name) : e.initials,
       assetNames: (e.assets || []).map((a) => a.name),
+      assetIcons: (e.assets || []).map((a) => (ASSET_META[a.type] || {}).icon || "shield"),
       href: e._managed ? `#/keep/entity/${e.id}` : null,
     };
   }).filter(Boolean);
