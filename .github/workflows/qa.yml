@@ -60,6 +60,29 @@ jobs:
             exit 1
           fi
 
+  unit-tests:
+    name: Unit Tests + HTML Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Pure-logic unit tests (node:test) — no browser/backend needed, so these
+      # are a deterministic, blocking gate. Explicit file list keeps discovery
+      # off the Playwright specs and node_modules under .github/scripts.
+      - name: Unit tests
+        run: node --test $(find js -name '*.test.mjs')
+
+      - name: Validate HTML
+        run: npx --yes html-validate@11.5.6 index.html
+
   ui-changes:
     name: Detect UI-relevant changes
     runs-on: ubuntu-latest
