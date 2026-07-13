@@ -13,6 +13,7 @@ import { ASSET_META } from "./data.js";
 import { policyKind, policyType, REMINDER_SCHEDULE } from "./policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "./search.js";
 import { buildPdf, docLines, docName } from "./docfile.js";
+import { REQUEST_STAGES, stageInfo } from "./requests.js";
 import { entityColorSuffix as colorSuffix, entityAvatarIcon } from "./entity-display.js";
 import { getUser, getEntities, getEntity, getPrefs, savePrefs, signOut } from "../supabase.js";
 
@@ -676,10 +677,34 @@ function statTile(label, value, sub) {
   ]);
 }
 
+
+// Horizontal progress tracker for a request's lifecycle (Submitted → Broker
+// review → Underwriting → Approved). Declined renders as a single off-track step.
+function requestStepper(status) {
+  const info = stageInfo(status);
+  if (info.declined) {
+    return el("div", { class: "k-steps k-steps--declined" }, [
+      el("div", { class: "k-step is-declined" }, [
+        el("span", { class: "k-step__dot" }, [icon("x", { size: 13 })]),
+        el("span", { class: "k-step__lbl", text: "Declined" }),
+      ]),
+    ]);
+  }
+  return el("div", { class: "k-steps" }, REQUEST_STAGES.map((s, i) => {
+    const n = i + 1;
+    const cls = n < info.step ? "is-done" : (n === info.step ? "is-current" : "");
+    return el("div", { class: `k-step ${cls}` }, [
+      el("span", { class: "k-step__dot" }, [n < info.step ? icon("check", { size: 13 }) : el("span", { text: String(n) })]),
+      el("span", { class: "k-step__lbl", text: s.track }),
+    ]);
+  }));
+}
+
+
 export {
   BROKER_NAME, sep, loadCardOrder, saveCardOrder, activeSchedule, buildReminderSettings,
   money, downloadButton, docItem, docDownloadMenu, ribbon, landingCommand, page,
   originHref, backLink, originBackRow, cic, assetTypeLabel, assetTypeIcon, policyTypeIcon,
   coveragePill, dateFromDays, dateShort, expiryBadge, policiesSection, primaryEntity,
-  entityAvatar, signOutButton, sortableTable, statTile,
+  entityAvatar, signOutButton, sortableTable, statTile, requestStepper,
 };
