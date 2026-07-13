@@ -49,10 +49,10 @@ already read the specific type from `subtype`.
 
 ## Completed normalizations
 
-- **`policies.premium` → numeric** (migration `policies_premium_numeric`).
-  Added `premium_amount` + `premium_period` ('yr'|'mo'), backfilled from the
-  legacy text. `annualPremium` reads the numeric source; `formatPremium` renders
-  the display string. The `premium` text column is kept as a display fallback.
+- **`policies.premium` → numeric** (migrations `policies_premium_numeric`,
+  `policies_drop_premium_text`). `premium_amount` + `premium_period` ('yr'|'mo')
+  are the source of truth; `annualPremium` reads them and `formatPremium` renders
+  the display string. The legacy `premium` text column has been dropped.
 - **`policies.documents` → typed records** (migration `policies_documents_typed`).
   Each document is now `{ name, kind }` instead of a bare string. Read through
   `docName`/`docKind` (js/keep/docfile.js), which accept either shape.
