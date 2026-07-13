@@ -638,7 +638,7 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-dep-hold { color: var(--color-text-secondary); }
 /* Policies table reuses the Assets condensed-row + leading-icon treatment
    (.k-atable); it just needs more width for its extra columns. */
-.k-ptable .k-itable { min-width: 980px; }
+.k-ptable .k-itable { min-width: 1180px; }
 /* Asset detail — value & depreciation (ACV) schedule */
 .k-deptable { margin-top: 2px; }
 .k-deptable .k-itable { min-width: 0; }
@@ -650,8 +650,13 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-depnote .k-cic { color: var(--color-accent); flex: none; }
 .k-depnote p { margin: 0; font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 .k-depfoot { margin: var(--space-3) 0 0; font: 600 12px var(--font-sans); color: var(--color-text-secondary); }
-.k-idocs { display: flex; flex-direction: column; gap: 6px; }
-.k-idocs .k-doclink { margin: 0; white-space: nowrap; }
+/* Documents column: two compact chips side by side, then wrap. The min-width
+   forces the table to give the column enough room (a cell min-width isn't
+   honoured under auto table-layout). */
+.k-idocs { display: flex; flex-flow: row wrap; gap: 6px; min-width: 320px; }
+.k-idocs .k-docrow { gap: 3px; }
+.k-idocs .k-doclink { margin: 0; white-space: nowrap; padding: 5px 9px; font-size: 12px; }
+.k-idocs .k-dl { width: 26px; height: 26px; }
 
 /* ── Top-nav search box ─────────────────────────────────────────────────────── */
 .k-search { position: relative; display: flex; align-items: center; }
