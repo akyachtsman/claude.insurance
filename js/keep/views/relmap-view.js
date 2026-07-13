@@ -31,7 +31,7 @@ const REL_STYLE = {
 // palette (blue = people, burgundy = business, neutral ink = trust, green =
 // nonprofit), so a colour on the map always reads as an entity type, not a
 // per-owner rainbow. Mirrors the accent/company/text-primary/ok tokens.
-const REL_TYPE_COLOR = { me: "#1F52D6", person: "#3F6FD8", biz: "#800020", trust: "#1B2540", np: "#0E8E66" };
+const REL_TYPE_COLOR = { me: "#3F6FD8", person: "#3F6FD8", biz: "#800020", trust: "#1B2540", np: "#0E8E66" };
 // Band order for the "by type" perspective: people, trusts, businesses.
 const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // View controls for the Relationships map — held across in-view re-renders so the
@@ -307,7 +307,7 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
   const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
   const MAX_K = 1.25;                              // don't over-zoom a tiny graph
   svg.style.transformOrigin = "0 0";               // predictable translate/scale from the top-left
-  let k = 1, tx = 0, ty = 0, fitted = false, avClamped = false;
+  let k = 1, tx = 0, ty = 0, fitted = false;
   // Real node-cluster bounds in user units, measured from the actual rendered
   // nodes (below). The declared canvas / getBBox include edge-routing overshoot,
   // which would sit the graph off to the side — measuring the nodes avoids that.
@@ -336,22 +336,25 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
     tx = Math.min(vw - M - bx * k, Math.max(M - (bx + bw) * k, tx));
     ty = Math.min(vh - M - by * k, Math.max(M - (by + bh) * k, ty));
   };
+  // Guarantee avatar initials never spill the r-17 circle: reset any prior clamp,
+  // then squeeze only those whose rendered width exceeds the circle's usable width
+  // (normal 2-letter initials are untouched). Re-run on every fit AND once the
+  // webfonts finish loading — Quicksand can load *after* the first fit, widening
+  // glyphs that measured narrow under the fallback font, so a one-shot clamp at
+  // first paint silently misses them (why "MF" spilled again live).
+  const clampAvatars = () => {
+    svg.querySelectorAll(".k-relav").forEach((t) => {
+      t.removeAttribute("textLength"); t.removeAttribute("lengthAdjust");
+      if (t.getComputedTextLength() > 27) { t.setAttribute("textLength", "27"); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+    });
+  };
   // First paint (and every resize): measure the nodes, scale to fill the width,
   // hug the content height (no dead space), and centre the node box on both axes —
   // so it opens centred every single time.
   const fit = () => {
     const vw = wrap.clientWidth || 0;
     if (!vw || !measureNodes()) return;
-    // Guarantee avatar initials never spill the r-17 circle: once laid out, any
-    // that measure wider than the circle's usable width are squeezed to fit
-    // (only the too-wide ones — normal 2-letter initials are untouched). Belt to
-    // the slice(0,2) braces: covers wide glyphs / display fonts, not just length.
-    if (!avClamped) {
-      svg.querySelectorAll(".k-relav").forEach((t) => {
-        if (t.getComputedTextLength() > 27) { t.setAttribute("textLength", "27"); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
-      });
-      avClamped = true;
-    }
+    clampAvatars();
     k = Math.max(MIN_K, Math.min(vw / bw, MAX_K));
     const ch = bh * k;
     const viewH = (typeof window !== "undefined" ? window.innerHeight : 800);
@@ -368,6 +371,11 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
       fit();                                              // recompute fit scale + re-centre on every resize
     });
     ro.observe(wrap);
+  }
+  // Webfonts can finish loading after the first fit — re-clamp avatar initials then
+  // so late-widening glyphs (e.g. "MF" in Quicksand) can't spill their circle.
+  if (typeof document !== "undefined" && document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { if (wrap.isConnected) clampAvatars(); });
   }
   // Manual zoom: scale to `nk`, keeping the content point under the focal point
   // (fx, fy — viewport-relative) fixed, then re-clamp the pan.
