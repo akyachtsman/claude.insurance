@@ -24,7 +24,7 @@ import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, n
 import { buildPdf, docLines, docName } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
-import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityRelStyleKey as relStyleKey, entityAvatarIcon, entityMapSub } from "../keep/entity-display.js";
+import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityRelStyleKey as relStyleKey, entityAvatarIcon, entityMapSub, entityIndustry } from "../keep/entity-display.js";
 import { capTablesByEntity, controlsByEntity, orchestrate } from "../keep/relmap.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
@@ -2112,7 +2112,10 @@ export async function renderKeepEntity(params, id) {
         el("h1", { text: entity.name }),
         el("span", { class: `k-et k-et--${suffix}`, text: entityCategory(entity) }),
       ]),
-      subtype !== "—" ? el("div", { class: "k-eband__sub", text: subtype }) : null,
+      (() => {
+        const line = [subtype !== "—" ? subtype : null, entityIndustry(entity)].filter(Boolean).join(" · ");
+        return line ? el("div", { class: "k-eband__sub", text: line }) : null;
+      })(),
     ]),
     el("div", { class: "k-eband__hero" }, [
       el("div", { class: "k-eband__herok", text: "Insured value" }),

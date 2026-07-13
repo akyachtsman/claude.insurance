@@ -30,24 +30,22 @@ caused the "You · personal" (map) vs "UBO" (table) divergence.
   category (not "Individual"), so it isn't double-counted, and its map node reads
   "You · UBO" — computed in one place, so it agrees everywhere.
 
-## `entities.label` is overloaded (real data, not stale)
+## `entities.label` was overloaded — now split (migration `entities_split_label_overload`)
 
-A read of live data corrected an earlier assumption: `label` is **not** junk — it
-carries different meaning per kind, distinct from `subtype` (the legal structure):
+`label` used to carry three different things by kind. It's been split so each
+lands in a proper column and `subtype` consistently means "the specific type":
 
-| kind | `label` holds | `subtype` holds |
+| kind | before (`label`) | now |
 |---|---|---|
-| business | **industry** ("Media", "Real estate", "Holding company") | legal structure ("LLC", "C-Corp") |
-| person | **relationship role** ("Spouse", "Child", "Business partner") | often generic "Individual" |
-| trust | **specific trust type** ("Revocable trust", "Irrevocable trust") | generic "Trust" |
-| personal | *(was "You · personal" — cleared)* | null |
+| business | industry ("Media", "Real estate") | → `industry` column · `subtype` = legal structure ("LLC", "C-Corp") |
+| person | relationship role ("Spouse", "Child") | → `subtype` ("Spouse") · was generic "Individual" |
+| trust | specific trust type ("Revocable trust") | → `subtype` ("Revocable trust") · was generic "Trust" |
+| personal | "You · personal" | cleared earlier |
 
-`entitySubtype` deliberately surfaces `label` when `subtype` is generic (so a
-person shows their role, a trust its specific type). **Do not blanket-clear
-`label`** — it would lose the industry/role/trust-type. Only the stale personal
-identity string was removed (migration `clear_stale_personal_entity_label`). A
-proper tidy would split business industry into its own column — deliberate schema
-work, not an automated cleanup.
+`label` is now fully retired (null everywhere). `subtype` holds the specific
+type; businesses carry `industry` separately (surfaced on the entity detail as
+"LLC · Media" via `entityIndustry`). The migration was output-neutral — the app
+already read the specific type from `subtype`.
 
 ## Completed normalizations
 
@@ -59,8 +57,9 @@ work, not an automated cleanup.
   Each document is now `{ name, kind }` instead of a bare string. Read through
   `docName`/`docKind` (js/keep/docfile.js), which accept either shape.
 - **Stale personal `label` cleared** (migration `clear_stale_personal_entity_label`).
+- **`entities.label` overload split** (migration `entities_split_label_overload`) —
+  business industry → `industry`, person role & trust type → `subtype`, `label` retired.
 
 ## Known follow-ups (still open)
 
-- `entities.label` overload (industry vs role vs trust-type) → a dedicated
-  `industry` column for businesses would be cleaner than the shared field.
+- None outstanding at the data-model level.
