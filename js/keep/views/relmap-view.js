@@ -214,7 +214,11 @@ function relHopPath(pts, crossers, horiz) {
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
-  const edges = relView.trustees ? data.edges : data.edges.filter((e) => parsePct(e.stake) != null);
+  // The layout layers by OWNERSHIP only. Control links (Trustee etc.) are never
+  // fed to orchestration, so toggling "Control links" can't re-nest a box — they
+  // are overlaid on top of this fixed layout by the renderer instead.
+  const edges = data.edges.filter((e) => parsePct(e.stake) != null);
+  const ctrlEdges = data.edges.filter((e) => parsePct(e.stake) == null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
@@ -306,7 +310,7 @@ function relLayout() {
 
   const waypoints = {};
   for (const key in edgePath) waypoints[key] = edgePath[key].map((d) => { const c = centerOf(d); return { x: Math.round(c.x), y: Math.round(c.y) }; });
-  return { nodes, edges, W, H, waypoints, horiz };
+  return { nodes, edges, ctrlEdges, showCtrl: relView.trustees, W, H, waypoints, horiz };
 }
 
 // The map is a fixed-size viewport you pan in 2D: the whole chart translates under
@@ -476,17 +480,17 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
 
 function relationshipMap() {
   const NODE_W = REL_NODE_W, NODE_H = REL_NODE_H, FS = "Nunito, sans-serif", FD = "Quicksand, sans-serif";
-  const { nodes, edges, W, H, waypoints, horiz } = relLayout();
+  const { nodes, edges, ctrlEdges, showCtrl, W, H, waypoints, horiz } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
-  const ctrls = controlsByEntity(edges);
+  const ctrls = showCtrl ? controlsByEntity(ctrlEdges) : {};
   // Focus perspective: when an entity is chosen, highlight it plus its direct
   // owners and holdings and dim the rest. focusSet holds the ids kept bright.
   const focusId = relView.focus && byId.has(relView.focus) ? relView.focus : null;
   let focusSet = null;
   if (focusId) {
     focusSet = new Set([focusId]);
-    edges.forEach((e) => { if (e.from === focusId) focusSet.add(e.to); else if (e.to === focusId) focusSet.add(e.from); });
+    [...edges, ...(showCtrl ? ctrlEdges : [])].forEach((e) => { if (e.from === focusId) focusSet.add(e.to); else if (e.to === focusId) focusSet.add(e.from); });
   }
   const nodeDim = (id) => focusSet && !focusSet.has(id) ? "0.14" : null;
   const edgeDim = (e) => focusSet && e.from !== focusId && e.to !== focusId;
@@ -546,6 +550,31 @@ function relationshipMap() {
     svg.appendChild(path);
     return { ...e, stake, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
+  // Control links (Trustee, manager …) overlay ON TOP of the ownership layout —
+  // they never enter orchestration, so toggling them never moves a box. Each routes
+  // out of its controller onto a clear lane just past the outer edge of every card,
+  // across, then into the controlled entity — so it can't run behind a card; one
+  // controller's links share a lane (a bus). Static, so drawn once here.
+  if (showCtrl && ctrlEdges.length) {
+    const half = (horiz ? NODE_W : NODE_H) / 2;
+    const mainOf = (id) => (horiz ? center(id).x : center(id).y);
+    const outer = Math.min(...nodes.map((n) => mainOf(n.id))) - half - 14;
+    const controllers = [...new Set(ctrlEdges.map((e) => e.from))].filter((id) => byId.has(id));
+    const laneOf = new Map(controllers.map((id, i) => [id, i]));
+    ctrlEdges.forEach((e) => {
+      if (!byId.has(e.from) || !byId.has(e.to)) return;
+      const a = center(e.from), b = center(e.to);
+      const lane = outer - (laneOf.get(e.from) || 0) * 8;
+      const d = horiz
+        ? `M ${a.x - half} ${a.y} L ${lane} ${a.y} L ${lane} ${b.y} L ${b.x - half} ${b.y}`
+        : `M ${a.x} ${a.y - half} L ${a.x} ${lane} L ${b.x} ${lane} L ${b.x} ${b.y - half}`;
+      const path = s("path", { d, fill: "none", stroke: "#7C90B8", "stroke-width": "1.75", "stroke-linecap": "round", "stroke-linejoin": "round", "marker-end": "url(#rel-arrow)", opacity: edgeDim(e) ? "0.12" : "0.8", "stroke-dasharray": "1 6" });
+      const ow = byId.get(e.from), tw = byId.get(e.to), ti = s("title", {});
+      ti.textContent = `${ow ? ow.name : "Someone"} — ${e.role}${tw ? " of " + tw.name : ""}`;
+      path.appendChild(ti);
+      svg.appendChild(path);
+    });
+  }
   // Fan each owner's downward "bus" onto its own lane within the row gap. Without
   // this every edge crossing a gap runs along the same centre line, so different
   // owners' runs overlap into one line and a crossing looks like a join. Group the
