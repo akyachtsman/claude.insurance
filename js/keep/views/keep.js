@@ -341,7 +341,7 @@ export function renderKeepAddEntity() {
 
   const form = el("form", {}, [
     el("h1", { class: "k-h1", text: "Add a business entity" }),
-    el("p", { class: "k-sub", text: "Create a company or trust to organize its assets and coverage." }),
+    el("p", { class: "k-sub", text: "Create a business or trust to organize its assets and coverage." }),
     el("label", { class: "k-fld" }, [el("span", { text: "Name" }), nameInput]),
     el("label", { class: "k-fld" }, [el("span", { text: "Type" }), typeSelect]),
     ownership,

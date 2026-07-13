@@ -14,7 +14,7 @@ test("entityIndustry returns the business industry, empty otherwise", () => {
 test("entityCategory: the account holder is UBO, other people are Individual", () => {
   assert.equal(entityCategory({ kind: "personal" }), "UBO");
   assert.equal(entityCategory({ kind: "person" }), "Individual");
-  assert.equal(entityCategory({ kind: "business" }), "Company");
+  assert.equal(entityCategory({ kind: "business" }), "Business");
   assert.equal(entityCategory({ kind: "trust" }), "Trust");
 });
 

@@ -197,7 +197,7 @@ export async function renderKeepAsset(params, id) {
 // Asset choices grouped by section. `type` is the underlying category that
 // drives icon + coverage analysis (home/auto/watercraft/valuables/commercial-*/
 // other); `label` is the specific kind stored on the asset and shown in lists.
-// `entity: true` diverts to the add-entity flow (a company is an entity).
+// `entity: true` diverts to the add-entity flow (a business is an entity).
 const ASSET_GROUPS = [
   { title: "Property", items: [
     { type: "home", label: "Home", sub: "Single-family you own & live in", icon: "home" },
@@ -297,10 +297,10 @@ export function renderKeepAddAsset(preselectEntityId) {
       el("h1", { class: "k-h1", text: "What would you like to add?" }),
       el("p", { class: "k-sub", text: "Pick a type and we'll ask only what's needed, then analyze the coverage it should carry." }),
       ...groups,
-      // A company/LLC is the legal entity that holds assets; the operating
+      // A business/LLC is the legal entity that holds assets; the operating
       // business itself (restaurant, shop…) is one of those assets.
       el("p", { class: "k-choicenote" }, [
-        el("span", { text: "A company or LLC is a legal " }),
+        el("span", { text: "A business or LLC is a legal " }),
         el("a", { attrs: { href: "#/keep/add-entity" }, text: "entity" }),
         el("span", { text: " — create it first, then add its operating business and assets to it." }),
       ]),
