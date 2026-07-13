@@ -83,11 +83,16 @@ export function policyType(policy) {
   return { key: f.key, label: f.label, icon: f.icon };
 }
 
-// Best-effort annual premium as a number, parsed from the policy's premium field
-// (a preformatted string like "$2,260 / yr" or a raw number). Monthly premiums
-// are annualised (×12). Returns null when nothing numeric can be read.
+// Annual premium as a number. Prefers the numeric source of truth
+// (premiumAmount + premiumPeriod); falls back to parsing the legacy `premium`
+// text ("$2,260 / yr") for any row not yet migrated. Monthly is annualised (×12).
 export function annualPremium(policy) {
-  const raw = policy == null ? null : policy.premium;
+  if (policy == null) return null;
+  if (policy.premiumAmount != null && isFinite(policy.premiumAmount)) {
+    const amt = Math.round(policy.premiumAmount);
+    return /mo|month/i.test(policy.premiumPeriod || "") ? amt * 12 : amt;
+  }
+  const raw = policy.premium;
   if (raw == null) return null;
   if (typeof raw === "number") return isFinite(raw) ? Math.round(raw) : null;
   const m = String(raw).replace(/,/g, "").match(/-?[\d.]+/);
@@ -95,6 +100,15 @@ export function annualPremium(policy) {
   const amt = parseFloat(m[0]);
   if (!isFinite(amt)) return null;
   return Math.round(/\/\s*mo|month/i.test(raw) ? amt * 12 : amt);
+}
+
+// Display string for a premium ("$2,260 / yr"), formatted from the numeric
+// source when present, else the legacy text, else "—".
+export function formatPremium(policy) {
+  if (policy && policy.premiumAmount != null && isFinite(policy.premiumAmount)) {
+    return `$${Math.round(policy.premiumAmount).toLocaleString("en-US")} / ${policy.premiumPeriod || "yr"}`;
+  }
+  return (policy && policy.premium) || "—";
 }
 
 // Which reminders have already fired and which is next, for a given lead-time

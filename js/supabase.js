@@ -197,6 +197,8 @@ function adaptPolicy(row) {
     agent: row.agent,
     agentContact: row.agent_contact,
     premium: row.premium,
+    premiumAmount: row.premium_amount != null ? Number(row.premium_amount) : null,
+    premiumPeriod: row.premium_period || null,
     paymentPlan: row.payment_plan,
     billingStatus: row.billing_status,
     coverages: row.coverages || [],

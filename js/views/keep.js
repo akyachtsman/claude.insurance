@@ -18,7 +18,7 @@ import {
 } from "../supabase.js";
 import { analyzeAsset, assetStatus, entitySummary } from "../keep/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../keep/depreciation.js";
-import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE, policyType, annualPremium } from "../keep/policies.js";
+import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE, policyType, annualPremium, formatPremium } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
 import { buildPdf, docLines } from "../keep/docfile.js";
@@ -875,7 +875,7 @@ export function renderKeepInsurance() {
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Carrier", get: (r) => r.policy.carrier || "", cell: (r) => el("span", { text: r.policy.carrier || "—" }) },
     { label: "Renewal", get: (r) => r.policy.renewalInDays, cell: (r) => expiryBadge(r.policy.renewalInDays) },
-    { label: "Premium", get: (r) => annualPremium(r.policy) || 0, cell: (r) => el("span", { text: r.policy.premium || "—" }) },
+    { label: "Premium", get: (r) => annualPremium(r.policy) || 0, cell: (r) => el("span", { text: formatPremium(r.policy) }) },
     { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
   ];
 
@@ -2635,7 +2635,7 @@ export function renderKeepPolicy(params, id) {
     sections.push(grp("flood", "Deductibles", pg(policy.deductibles)));
   }
 
-  const billInner = el("div", {}, [pg([["Annual premium", policy.premium], ["Payment plan", policy.paymentPlan], ["Billing status", policy.billingStatus]])]);
+  const billInner = el("div", {}, [pg([["Annual premium", formatPremium(policy)], ["Payment plan", policy.paymentPlan], ["Billing status", policy.billingStatus]])]);
   if (policy.discounts && policy.discounts.length) {
     billInner.appendChild(el("div", { class: "k-grp__h mt" }, [icon("spark", { size: 15 }), el("span", { text: "Discounts applied" })]));
     billInner.appendChild(chips(policy.discounts));
