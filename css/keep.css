@@ -191,7 +191,7 @@ body.in-keep { background: var(--color-bg); }
 .k-panel--me, .k-panel--person, .k-panel--biz, .k-panel--np, .k-panel--trust { background: var(--color-surface); }
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
    icon in the type colour (transparent framing). Colour cues, shared with the
-   type label + Relationships map: individual = red · business = violet ·
+   type label + Relationships map: individual = red · business = burgundy ·
    nonprofit = green · trust = neutral ink (a trust is a legal arrangement that
    holds assets, not an entity, so it's set apart). */
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-danger); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
@@ -200,7 +200,7 @@ body.in-keep { background: var(--color-bg); }
 .k-bigav--biz { color: var(--color-company); }
 .k-bigav--trust { color: var(--color-text-primary); }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
-   renewal badges). Blue = individual, violet = business, green = nonprofit, amber = trust. */
+   renewal badges). Blue = individual, burgundy = business, green = nonprofit, amber = trust. */
 .k-et { font: 700 12px var(--font-sans); background: none; color: var(--color-accent); padding: 0; margin-left: var(--space-2); white-space: nowrap; }
 .k-et--me, .k-et--person { color: var(--color-accent); }
 .k-et--biz { color: var(--color-company); }
@@ -335,7 +335,7 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-relcaption--top { margin: 0 0 var(--space-4); }
 .k-etile__bar { position: absolute; top: 0; left: 0; bottom: 0; width: 4px; background: var(--color-border); }
 .k-etile--me .k-etile__bar, .k-etile--person .k-etile__bar { background: #9DBCFF; }
-.k-etile--biz .k-etile__bar { background: #BFA3EC; }
+.k-etile--biz .k-etile__bar { background: #C08497; }
 .k-etile--trust .k-etile__bar { background: #F0C879; }
 .k-etile--np .k-etile__bar { background: #7FD4A8; }
 .k-etile .k-bigav { width: 40px; height: 40px; border-radius: 12px; margin: 0; font-size: 15px; flex: none; }

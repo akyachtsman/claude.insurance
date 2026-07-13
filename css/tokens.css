@@ -80,8 +80,8 @@
   --color-gap-bg: #FFE6EA;
   --color-warn: #B5660A;
   --color-warn-bg: #FFF1DE;
-  /* Company/business type accent (violet) — distinct from the danger red now
-     used for entity icons. ~7:1 on white, meets WCAG AA for label text. */
-  --color-company: #6D28D9;
-  --color-company-bg: #EFE7FB;
+  /* Business type accent (burgundy) — distinct from the brighter danger red used
+     for individual entity icons. ~10:1 on white, meets WCAG AA for label text. */
+  --color-company: #800020;
+  --color-company-bg: #F3E1E5;
 }
