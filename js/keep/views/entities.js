@@ -262,6 +262,7 @@ async function renderEntityCollection(layout) {
   const view = page("list", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
+    el("p", { class: "k-sub", text: "You, your companies, and your trusts — the owners of the assets in your account." }),
     entitiesToggle(layout),
     entitiesPrivacyRow(),
     entities.length ? el("div", {}, [stats, body]) : el("div", { class: "k-empty", text: "No entities yet — use New entity to add one." }),
@@ -281,6 +282,7 @@ export function renderKeepEntities() {
   const view = page("list", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Entities" }),
+    el("p", { class: "k-sub", text: "You, your companies, and your trusts — the owners of the assets in your account." }),
     entitiesToggle("map"),
     entitiesPrivacyRow(),
     tools,
