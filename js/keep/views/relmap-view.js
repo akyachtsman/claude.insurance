@@ -220,11 +220,10 @@ function relLayout() {
 
   // Both modes use the same orchestration (crossing-minimized, waypoint-routed) so
   // every edge is routed through the row gaps and never runs behind a card. Ownership
-  // layers by depth but with a codified category floor — individuals, then trusts,
-  // then businesses — so a type never sits above the one before it while ownership
-  // depth still nests owned entities deeper. "By type" layers strictly by category,
-  // compacting the present bands to dense indices so an absent category leaves no
-  // empty row.
+  // keeps individuals as the fixed top tier and lays everything else out by true
+  // ownership depth just below them (see the floor below). "By type" layers strictly
+  // by category (individuals / trusts / businesses), compacting the present bands to
+  // dense indices so an absent category leaves no empty row.
   let order, rows, dummy, edgePath, up, down;
   if (relView.mode === "type") {
     const bandVal = (n) => REL_BAND[n.sk] ?? 2;
@@ -232,9 +231,12 @@ function relLayout() {
     const dense = new Map(present.map((v, i) => [v, i]));
     ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, (n) => dense.get(bandVal(n))));
   } else {
-    // Individuals (0) → trusts (1) → businesses/nonprofits (2), with ownership depth
-    // pushing owned entities deeper than their owner from there.
-    const floorOf = (id) => REL_BAND[(byId.get(id) || {}).sk] ?? 2;
+    // Individuals are the only fixed tier (row 0); every other type is floored to
+    // row 1 (just below the individuals) and then laid out by true ownership depth —
+    // so a business owned directly by an individual sits one row below it, and depth
+    // nests owned entities deeper from there. Ownership depth persists for all
+    // layers except the individual layer.
+    const floorOf = (id) => { const sk = (byId.get(id) || {}).sk; return (sk === "me" || sk === "person") ? 0 : 1; };
     ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, undefined, floorOf));
   }
   const bandIndex = {};
