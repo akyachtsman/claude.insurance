@@ -165,6 +165,44 @@ function docItem(doc, href, context, dataDoc) {
   return row;
 }
 
+// A single Download control per policy that opens a menu of its documents to
+// pick from — keeps rows compact when a policy carries several documents.
+// Uses the shared .k-pop popover (closes on outside-click / Escape / scroll);
+// the menu is fixed-positioned so the table's overflow container can't clip it.
+function docDownloadMenu(policy, asset, entity) {
+  const docs = policy.documents || [];
+  const context = [policy.line, asset.name, entity.name];
+  const caret = el("span", { class: "k-dd__caret" }, [icon("chevron-down", { size: 14 })]);
+  const trigger = el("button", {
+    class: "k-dd__btn",
+    attrs: { type: "button", "aria-haspopup": "menu", "aria-expanded": "false", title: "Download a document" },
+  }, [icon("download", { size: 15 }), el("span", { text: `${docs.length} document${docs.length === 1 ? "" : "s"}` }), caret]);
+
+  const menu = el("div", { class: "k-dd__menu", attrs: { role: "menu" } }, docs.map((d) => {
+    const name = docName(d);
+    const item = el("button", { class: "k-dd__item", attrs: { type: "button", role: "menuitem" } }, [
+      icon("doc", { size: 15 }), el("span", { class: "k-dd__itxt", text: name }), icon("download", { size: 14 }),
+    ]);
+    item.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); downloadDocument(name, context); closeKeepMenus(); });
+    return item;
+  }));
+
+  const pop = el("div", { class: "k-pop k-dd" }, [trigger, menu]);
+  const place = () => {
+    const r = trigger.getBoundingClientRect();
+    menu.style.left = `${Math.round(Math.min(r.left, window.innerWidth - menu.offsetWidth - 12))}px`;
+    const below = r.bottom + 6, mh = menu.offsetHeight;
+    menu.style.top = `${Math.round(below + mh > window.innerHeight - 8 ? r.top - 6 - mh : below)}px`;
+  };
+  trigger.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const isOpen = pop.classList.contains("is-open");
+    closeKeepMenus();
+    if (!isOpen) { pop.classList.add("is-open"); trigger.setAttribute("aria-expanded", "true"); place(); }
+  });
+  return pop;
+}
+
 function ribbon() {
   return el("div", { class: "k-ribbon" }, [
     icon("lock", { size: 15 }),
@@ -192,6 +230,9 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
     if (!e.target.closest(".k-cmd")) document.querySelectorAll(".k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeKeepMenus(); closeKeepSearch(); } });
+  // Fixed-positioned popovers (e.g. the Documents download menu inside a scroll
+  // container) don't follow their trigger on scroll — close them instead.
+  window.addEventListener("scroll", () => closeKeepMenus(), true);
 }
 
 // ── Search / command dropdowns ───────────────────────────────────────────────
@@ -862,8 +903,7 @@ export function renderKeepInsurance() {
   function docCell(policy, asset, entity) {
     const docs = policy.documents || [];
     if (!docs.length) return el("span", { class: "k-imuted", text: "—" });
-    return el("div", { class: "k-idocs" }, docs.map((d) =>
-      docItem(d, `#/keep/policy/${policy.id}`, [policy.line, asset.name, entity.name])));
+    return docDownloadMenu(policy, asset, entity);
   }
 
   const columns = [
