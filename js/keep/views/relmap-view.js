@@ -314,7 +314,7 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
   const MIN_K = REL_MIN_NODE_PX / REL_NODE_W;      // scale at which a node is exactly the floor width
   const MAX_K = 1.25;                              // don't over-zoom a tiny graph
   svg.style.transformOrigin = "0 0";               // predictable translate/scale from the top-left
-  let k = 1, tx = 0, ty = 0, fitted = false;
+  let k = 1, tx = 0, ty = 0, fitted = false, avClamped = false;
   // Real node-cluster bounds in user units, measured from the actual rendered
   // nodes (below). The declared canvas / getBBox include edge-routing overshoot,
   // which would sit the graph off to the side — measuring the nodes avoids that.
@@ -349,6 +349,16 @@ function setupRelViewport(wrap, svg, W, H, bounds) {
   const fit = () => {
     const vw = wrap.clientWidth || 0;
     if (!vw || !measureNodes()) return;
+    // Guarantee avatar initials never spill the r-17 circle: once laid out, any
+    // that measure wider than the circle's usable width are squeezed to fit
+    // (only the too-wide ones — normal 2-letter initials are untouched). Belt to
+    // the slice(0,2) braces: covers wide glyphs / display fonts, not just length.
+    if (!avClamped) {
+      svg.querySelectorAll(".k-relav").forEach((t) => {
+        if (t.getComputedTextLength() > 27) { t.setAttribute("textLength", "27"); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+      });
+      avClamped = true;
+    }
     k = Math.max(MIN_K, Math.min(vw / bw, MAX_K));
     const ch = bh * k;
     const viewH = (typeof window !== "undefined" ? window.innerHeight : 800);
@@ -632,7 +642,7 @@ function relationshipMap() {
     const yoff = hasOwn ? 26 : 0;
     const ax = n.x + 34, avy = top + 30 + yoff;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
-    g.appendChild(svgText(n.initials, { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD }));
+    g.appendChild(svgText((n.initials || "").slice(0, 2), { x: ax, y: avy + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "800", fill: o.avText, "font-family": FD, class: "k-relav" }));
     g.appendChild(svgText(n.name, { x: ax + 28, y: top + 26 + yoff, "font-size": "13", "font-weight": "700", fill: o.nameFill, "font-family": FD }));
     g.appendChild(svgText(entityMapSub(n), { x: ax + 28, y: top + 41 + yoff, "font-size": "11", "font-weight": "600", fill: o.subFill, "font-family": FS }));
 
