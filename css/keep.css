@@ -552,6 +552,20 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-dl { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1.5px solid var(--color-accent-light); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-accent); cursor: pointer; transition: background .14s, border-color .14s; }
 .k-dl:hover { background: var(--color-accent-light); border-color: var(--color-accent); }
 .k-dl .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* Documents column: one Download control per row → a menu of the policy's docs. */
+.k-dd { position: relative; display: inline-block; }
+.k-dd__btn { display: inline-flex; align-items: center; gap: 6px; font: 700 12px var(--font-sans); color: var(--color-accent); background: var(--color-surface); border: 1.5px solid var(--color-accent-light); border-radius: var(--radius-md); padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.k-dd__btn:hover { background: var(--color-accent-light); border-color: var(--color-accent); }
+.k-dd__btn .icon, .k-dd__item .icon:last-child { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.k-dd__caret { display: inline-flex; transition: transform .15s; }
+.k-dd.is-open .k-dd__caret { transform: rotate(180deg); }
+.k-dd__menu { position: fixed; display: none; z-index: 200; min-width: 220px; max-width: 340px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: 6px; }
+.k-dd.is-open .k-dd__menu { display: block; }
+.k-dd__item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: none; border-radius: var(--radius-md); font: 700 13px var(--font-sans); color: var(--color-accent); cursor: pointer; }
+.k-dd__item:hover { background: var(--color-accent-light); }
+.k-dd__itxt { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-dd__item .icon:first-child { flex: none; color: var(--color-text-secondary); }
+.k-dd__item .icon:last-child { flex: none; color: var(--color-accent); }
 .k-note { font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 10px; }
 .k-note b { color: var(--color-text-primary); font-weight: 800; }
 
