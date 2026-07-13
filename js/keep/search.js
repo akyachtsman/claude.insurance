@@ -2,6 +2,7 @@
 // No DOM, no globals: takes data in, returns ranked results. Unit-tested
 // (js/keep/search.test.mjs). Powers both the top-nav search box and the
 // "what would you like to accomplish?" command input on the landing page.
+import { docName } from "./docfile.js";
 
 // Action catalogue — the "intelligent" command box maps free text to one of
 // these. `keywords` are the phrases we match against; `href` is where it goes.
@@ -84,8 +85,10 @@ export function searchRecords(query, entities, limit = 8) {
       for (const p of a.policies || []) {
         const pScore = Math.max(scoreText(p.line, q), scoreText(p.carrier, q), scoreText(p.number, q));
         push("policy", p.line, `${a.name}${p.carrier ? ` · ${p.carrier}` : ""}`, `#/keep/policy/${p.id}`, "shield", pScore);
-        for (const d of p.documents || [])
-          push("document", d, `${p.line} · document`, `#/keep/policy/${p.id}`, "doc", scoreText(d, q));
+        for (const d of p.documents || []) {
+          const dn = docName(d);
+          push("document", dn, `${p.line} · document`, `#/keep/policy/${p.id}`, "doc", scoreText(dn, q));
+        }
       }
     }
   }

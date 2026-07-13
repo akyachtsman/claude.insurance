@@ -1,7 +1,16 @@
 // node --test js/keep/docfile.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPdf, docLines } from "./docfile.js";
+import { buildPdf, docLines, docName, docKind } from "./docfile.js";
+
+test("docName / docKind read both legacy strings and typed { name, kind } records", () => {
+  assert.equal(docName("Declarations page"), "Declarations page");
+  assert.equal(docKind("Declarations page"), "");
+  assert.equal(docName({ name: "Full policy", kind: "policy" }), "Full policy");
+  assert.equal(docKind({ name: "Full policy", kind: "policy" }), "policy");
+  assert.equal(docName(null), "");
+  assert.equal(docName({}), "");
+});
 
 test("buildPdf: produces a structurally valid minimal PDF", () => {
   const pdf = buildPdf(["Declarations page", "Personal auto"]);
