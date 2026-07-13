@@ -591,10 +591,95 @@ function entityAvatar(entity) {
 }
 
 
+
+// Shared sortable table. Sorting is driven by clicking the column headers: click
+// a header to sort by it (ascending), click again to flip to descending. The
+// active column shows a ▲/▼ caret. Columns without a `get` are not sortable.
+//   columns: [{ label, get?(row), cell(row) -> node|[nodes], tdClass? }]
+//   opts:    { defaultIdx, defaultDir (1 asc / -1 desc), rowClass(row) }
+// Returns { wrap, entries } — entries [{ row, tr }] so callers can filter (search).
+function sortableTable(columns, rows, opts = {}) {
+  const entries = rows.map((row) => {
+    // Optional whole-row link: clicking anywhere on the row (except an inner
+    // link/button) navigates to opts.rowHref(row). The row keeps its per-cell
+    // anchor for keyboard focus + middle-click; this just widens the hit target.
+    const href = opts.rowHref ? opts.rowHref(row) : null;
+    const cls = [opts.rowClass ? opts.rowClass(row) : "", href ? "k-row--link" : ""].filter(Boolean).join(" ");
+    return {
+      row, href,
+      tr: el("tr", { class: cls },
+        columns.map((c) => el("td", c.tdClass ? { class: c.tdClass } : {}, [].concat(c.cell(row)).filter(Boolean)))),
+    };
+  });
+  const tbody = el("tbody", {}, entries.map((e) => e.tr));
+
+  // Delegated row navigation: a plain click on a linked row opens it, but clicks
+  // on an inner <a>/<button> are left to the native element.
+  if (opts.rowHref) {
+    tbody.addEventListener("click", (ev) => {
+      if (ev.target.closest("a, button")) return;
+      const tr = ev.target.closest("tr");
+      const entry = entries.find((e) => e.tr === tr);
+      if (entry && entry.href) location.hash = entry.href;
+    });
+  }
+
+  const firstSortable = columns.findIndex((c) => c.get);
+  const state = { idx: opts.defaultIdx != null ? opts.defaultIdx : Math.max(0, firstSortable), dir: opts.defaultDir || 1 };
+
+  const ths = columns.map((c, i) => {
+    if (!c.get) return el("th", { text: c.label });
+    const caret = el("span", { class: "k-th__caret" });
+    const th = el("th", { class: "k-th--sort", attrs: { role: "button", tabindex: "0", title: `Sort by ${c.label}` } }, [el("span", { text: c.label }), caret]);
+    const activate = () => {
+      if (state.idx === i) state.dir = -state.dir; else { state.idx = i; state.dir = 1; }
+      apply();
+    };
+    th.addEventListener("click", activate);
+    th.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(); } });
+    th._caret = caret; th._colIdx = i;
+    return th;
+  });
+
+  function apply() {
+    const col = columns[state.idx];
+    if (col && col.get) {
+      [...entries].sort((A, B) => {
+        const av = col.get(A.row), bv = col.get(B.row);
+        const d = (typeof av === "number" && typeof bv === "number")
+          ? av - bv
+          : String(av == null ? "" : av).localeCompare(String(bv == null ? "" : bv));
+        return d * state.dir;
+      }).forEach((e) => tbody.appendChild(e.tr));
+    }
+    ths.forEach((th) => {
+      if (!th._caret) return;
+      const on = th._colIdx === state.idx;
+      th.classList.toggle("is-sorted", on);
+      th.setAttribute("aria-sort", on ? (state.dir === 1 ? "ascending" : "descending") : "none");
+      th._caret.textContent = on ? (state.dir === 1 ? "▲" : "▼") : "";
+    });
+  }
+  apply();
+
+  const wrap = el("div", { class: "k-itable-wrap" }, [
+    el("table", { class: "k-itable" }, [el("thead", {}, [el("tr", {}, ths)]), tbody]),
+  ]);
+  return { wrap, entries };
+}
+
+function statTile(label, value, sub) {
+  return el("div", { class: "k-stat" }, [
+    el("div", { class: "k-stat__v", text: String(value) }),
+    el("div", { class: "k-stat__l", text: label }),
+    sub ? el("div", { class: "k-stat__s", text: sub }) : null,
+  ]);
+}
+
 export {
   BROKER_NAME, sep, loadCardOrder, saveCardOrder, activeSchedule, buildReminderSettings,
   money, downloadButton, docItem, docDownloadMenu, ribbon, landingCommand, page,
   originHref, backLink, originBackRow, cic, assetTypeLabel, assetTypeIcon, policyTypeIcon,
   coveragePill, dateFromDays, dateShort, expiryBadge, policiesSection, primaryEntity,
-  entityAvatar, signOutButton,
+  entityAvatar, signOutButton, sortableTable, statTile,
 };
