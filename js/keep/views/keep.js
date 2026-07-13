@@ -3,31 +3,31 @@
 // and the asset coverage-analysis page. Reads/writes live Supabase data (loaded
 // by the route guard in main.js); RLS scopes everything to the signed-in client.
 
-import { el, mount } from "../dom.js";
-import { go } from "../main.js";
-import { icon } from "../icons.js";
-import { s } from "../svg.js";
-import { getRuleDefaults } from "../content.js";
+import { el, mount } from "../../dom.js";
+import { go } from "../../main.js";
+import { icon } from "../../icons.js";
+import { s } from "../../svg.js";
+import { getRuleDefaults } from "../../content.js";
 import {
   getUser, getEntities, signIn, addEntity,
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
-} from "../supabase.js";
-import { entitySummary } from "../keep/analysis.js";
-import { policyKind, renewalBand, annualPremium, formatPremium } from "../keep/policies.js";
-import { statusDisplay, stageInfo, isPending } from "../keep/requests.js";
-import { docName } from "../keep/docfile.js";
-import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
-import { ENTITY_TYPE_GROUPS, kindForType } from "../keep/entity-types.js";
-import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity } from "../keep/keep-entities.js";
+} from "../../supabase.js";
+import { entitySummary } from "../logic/analysis.js";
+import { policyKind, renewalBand, annualPremium, formatPremium } from "../logic/policies.js";
+import { statusDisplay, stageInfo, isPending } from "../logic/requests.js";
+import { docName } from "../logic/docfile.js";
+import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../logic/ownership.js";
+import { ENTITY_TYPE_GROUPS, kindForType } from "../logic/entity-types.js";
+import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity } from "./entities.js";
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
-export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "../keep/keep-assets.js";
-export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "../keep/keep-policies.js";
+export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
+export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "./policies-view.js";
 import {
   BROKER_NAME, buildReminderSettings,
   money, downloadButton, docDownloadMenu, ribbon, landingCommand, page,
   backLink, cic, policyTypeIcon, dateShort, expiryBadge, signOutButton,
   sortableTable, statTile, requestStepper,
-} from "../keep/shell.js";
+} from "./shell.js";
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {

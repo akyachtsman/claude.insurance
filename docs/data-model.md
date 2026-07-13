@@ -18,9 +18,9 @@ caused the "You · personal" (map) vs "UBO" (table) divergence.
 
 | Domain | Canonical field | Single source module | Produces |
 |---|---|---|---|
-| Entity | `kind` (+ `subtype`) | `js/keep/entity-display.js` | category (UBO / Individual / Company / Trust), subtype text, colour, avatar icon, map sub-label |
-| Asset | `type` | `js/keep/data.js` `ASSET_META` | label, icon, colour · (+ `depreciation.js` for ACV) |
-| Policy | `line` | `js/keep/policies.js` `policyPresentation` | type label, table icon, card icon, tile colour |
+| Entity | `kind` (+ `subtype`) | `js/keep/logic/entity-display.js` | category (UBO / Individual / Company / Trust), subtype text, colour, avatar icon, map sub-label |
+| Asset | `type` | `js/keep/logic/data.js` `ASSET_META` | label, icon, colour · (+ `depreciation.js` for ACV) |
+| Policy | `line` | `js/keep/logic/policies.js` `policyPresentation` | type label, table icon, card icon, tile colour |
 
 - `js/supabase.js` is a **thin adapter**: it maps DB rows to the view shape and
   reads the same source modules (e.g. `policyPresentation` for a policy's card
@@ -55,7 +55,7 @@ already read the specific type from `subtype`.
   the display string. The legacy `premium` text column has been dropped.
 - **`policies.documents` → typed records** (migration `policies_documents_typed`).
   Each document is now `{ name, kind }` instead of a bare string. Read through
-  `docName`/`docKind` (js/keep/docfile.js), which accept either shape.
+  `docName`/`docKind` (js/keep/logic/docfile.js), which accept either shape.
 - **Stale personal `label` cleared** (migration `clear_stale_personal_entity_label`).
 - **`entities.label` overload split** (migration `entities_split_label_overload`) —
   business industry → `industry`, person role & trust type → `subtype`, `label` retired.

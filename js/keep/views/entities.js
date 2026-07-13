@@ -3,16 +3,16 @@
 // entity detail page, plus the entity table/tile builders and the drag-and-drop
 // card-reorder subsystem. Extracted from views/keep.js; hangs in the shared
 // chrome from shell.js. Public: renderKeepEntityList/Grid/Entities/Entity.
-import { el, mount } from "../dom.js";
-import { go } from "../main.js";
-import { icon } from "../icons.js";
-import { s } from "../svg.js";
-import { getRuleDefaults } from "../content.js";
-import { assetStatus, entitySummary } from "./analysis.js";
-import { parsePct } from "./ownership.js";
-import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityIndustry } from "./entity-display.js";
+import { el, mount } from "../../dom.js";
+import { go } from "../../main.js";
+import { icon } from "../../icons.js";
+import { s } from "../../svg.js";
+import { getRuleDefaults } from "../../content.js";
+import { assetStatus, entitySummary } from "../logic/analysis.js";
+import { parsePct } from "../logic/ownership.js";
+import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityIndustry } from "../logic/entity-display.js";
 import { relationshipMap, relToolbar } from "./relmap-view.js";
-import { getEntities, getEntity, getMapData } from "../supabase.js";
+import { getEntities, getEntity, getMapData } from "../../supabase.js";
 import {
   money, cic, page, backLink, originBackRow, sortableTable, statTile, sep,
   entityAvatar, primaryEntity, saveCardOrder, loadCardOrder,

@@ -13,7 +13,7 @@ import {
   renderKeepAsset, renderKeepAddAsset, renderKeepAddEntity, renderKeepPolicy, renderKeepAssets,
   renderKeepRequest, renderKeepRequests,
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
-} from "./views/keep.js";
+} from "./keep/views/keep.js";
 import { getSession, ensureData } from "./supabase.js";
 import { createNavStack } from "./nav.js";
 

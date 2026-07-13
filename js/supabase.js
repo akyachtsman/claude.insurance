@@ -6,8 +6,8 @@
 // RLS (owner = auth.uid()). The service-role key is NEVER used in the browser.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { ASSET_META } from "./keep/data.js";
-import { policyPresentation } from "./keep/policies.js";
+import { ASSET_META } from "./keep/logic/data.js";
+import { policyPresentation } from "./keep/logic/policies.js";
 
 const CONFIG = {
   url: "https://bdsegmjcgfmgzuxwiplj.supabase.co",
