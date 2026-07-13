@@ -548,7 +548,6 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-docrow { display: inline-flex; align-items: center; gap: 4px; margin: 0 8px 8px 0; }
 .k-docrow .k-doclink { margin: 0; }
 .k-doclist { display: flex; flex-wrap: wrap; }
-.k-idocs .k-docrow { margin: 0; }
 .k-dl { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1.5px solid var(--color-accent-light); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-accent); cursor: pointer; transition: background .14s, border-color .14s; }
 .k-dl:hover { background: var(--color-accent-light); border-color: var(--color-accent); }
 .k-dl .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -652,7 +651,7 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-dep-hold { color: var(--color-text-secondary); }
 /* Policies table reuses the Assets condensed-row + leading-icon treatment
    (.k-atable); it just needs more width for its extra columns. */
-.k-ptable .k-itable { min-width: 1180px; }
+.k-ptable .k-itable { min-width: 1040px; }
 /* Asset detail — value & depreciation (ACV) schedule */
 .k-deptable { margin-top: 2px; }
 .k-deptable .k-itable { min-width: 0; }
@@ -664,13 +663,6 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-depnote .k-cic { color: var(--color-accent); flex: none; }
 .k-depnote p { margin: 0; font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 .k-depfoot { margin: var(--space-3) 0 0; font: 600 12px var(--font-sans); color: var(--color-text-secondary); }
-/* Documents column: two compact chips side by side, then wrap. The min-width
-   forces the table to give the column enough room (a cell min-width isn't
-   honoured under auto table-layout). */
-.k-idocs { display: flex; flex-flow: row wrap; gap: 6px; min-width: 320px; }
-.k-idocs .k-docrow { gap: 3px; }
-.k-idocs .k-doclink { margin: 0; white-space: nowrap; padding: 5px 9px; font-size: 12px; }
-.k-idocs .k-dl { width: 26px; height: 26px; }
 
 /* ── Top-nav search box ─────────────────────────────────────────────────────── */
 .k-search { position: relative; display: flex; align-items: center; }
