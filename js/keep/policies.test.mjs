@@ -2,7 +2,7 @@
 // Run: node --test js/keep/policies.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { policyKind, reminderInfo, renewalBand, policyType, annualPremium, policyPresentation } from "./policies.js";
+import { policyKind, reminderInfo, renewalBand, policyType, annualPremium, policyPresentation, formatPremium } from "./policies.js";
 import { findPolicy } from "./data.js";
 
 test("policyKind classifies active / expiring / expired", () => {
@@ -84,14 +84,25 @@ test("policyPresentation is the single source: policyType projects from it", () 
   assert.equal(other.color, "home");
 });
 
-test("annualPremium parses strings, annualises monthly, handles missing", () => {
-  assert.equal(annualPremium({ premium: "$2,260 / yr" }), 2260);
+test("annualPremium prefers the numeric source, annualises monthly", () => {
+  // Numeric columns are the source of truth.
+  assert.equal(annualPremium({ premiumAmount: 2260, premiumPeriod: "yr" }), 2260);
+  assert.equal(annualPremium({ premiumAmount: 150, premiumPeriod: "mo" }), 1800); // ×12
+  // Falls back to parsing the legacy text when no numeric is present.
   assert.equal(annualPremium({ premium: "$1,180 / yr" }), 1180);
-  assert.equal(annualPremium({ premium: "$150 / mo" }), 1800);   // ×12
+  assert.equal(annualPremium({ premium: "$150 / mo" }), 1800);
   assert.equal(annualPremium({ premium: 4260 }), 4260);
   assert.equal(annualPremium({ premium: null }), null);
   assert.equal(annualPremium({}), null);
   assert.equal(annualPremium({ premium: "—" }), null);
+});
+
+test("formatPremium renders from the numeric source, else the text", () => {
+  assert.equal(formatPremium({ premiumAmount: 2260, premiumPeriod: "yr" }), "$2,260 / yr");
+  assert.equal(formatPremium({ premiumAmount: 410, premiumPeriod: "yr" }), "$410 / yr");
+  assert.equal(formatPremium({ premiumAmount: 150, premiumPeriod: "mo" }), "$150 / mo");
+  assert.equal(formatPremium({ premium: "$1,180 / yr" }), "$1,180 / yr"); // legacy fallback
+  assert.equal(formatPremium({}), "—");
 });
 
 test("sample policies are reachable and carry standard fields", () => {
