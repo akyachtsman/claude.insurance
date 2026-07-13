@@ -6,8 +6,9 @@
 #   ui-changes    — diffs the PR against its base and decides whether the
 #                   browser job is needed. Non-PR events (push to main)
 #                   always run UI tests.
-#   ui-tests      — Playwright against a local server; runs only when
-#                   UI-relevant paths changed. Non-blocking here (the
+#   ui-tests      — Playwright against a local server; runs only when an
+#                   index.html exists and UI-relevant paths changed (so the
+#                   scaffold/bootstrap PR stays clean). Non-blocking here (the
 #                   backend is unreachable on CI runners); qa-live.yml is
 #                   the authoritative UI gate.
 #
@@ -60,6 +61,12 @@ jobs:
             exit 1
           fi
 
+      # ── Contrast guardrail ───────────────────────────────────────────────────
+      # WCAG AA check against css/tokens.css (this project's design tokens).
+      # Exits with a notice (no failure) if css/tokens.css is ever absent.
+      - name: Contrast guardrail (WCAG AA)
+        run: node .github/scripts/check-contrast.js
+
   unit-tests:
     name: Unit Tests + HTML Validation
     runs-on: ubuntu-latest
@@ -104,6 +111,13 @@ jobs:
           # Per-project: paths whose changes warrant a browser run.
           UI_PATHS: '^(index\.html$|\.github/scripts/ui-tests/|\.github/workflows/qa\.yml$)'
         run: |
+          # No app yet (no index.html in the repo) → nothing to browser-test.
+          # Keeps the scaffold/bootstrap PR clean: skip until the app exists.
+          if [ ! -f index.html ]; then
+            echo "ui=false" >> "$GITHUB_OUTPUT"
+            echo "No index.html yet — skipping browser job."
+            exit 0
+          fi
           # Non-PR events (push to main) always run UI tests unconditionally.
           if [ "$EVENT" != "pull_request" ]; then
             echo "ui=true" >> "$GITHUB_OUTPUT"
@@ -149,9 +163,13 @@ jobs:
 
       # ── Start local server ─────────────────────────────────────────────────
       # Adjust '.' to your build output directory if needed (e.g. dist, public).
+      # http-server is a pinned devDependency installed in UI_TESTS_DIR (above). Invoke
+      # its binary by path while staying at the repo root, so '.' still serves the app
+      # root AND nothing is fetched at runtime (works under locked egress). `npx
+      # --no-install` from the root would fail — the bin lives under UI_TESTS_DIR, not root.
       - name: Start local server
         run: |
-          npx http-server . -p 8080 --silent &
+          "./$UI_TESTS_DIR/node_modules/.bin/http-server" . -p 8080 --silent &
           sleep 2
 
       # UI Tests against the local server are non-blocking: the backend API is
