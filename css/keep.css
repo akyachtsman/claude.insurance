@@ -30,7 +30,7 @@ body.in-keep { background: var(--color-bg); }
 .k-bar__rt { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
 .k-iconbtn { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); position: relative; cursor: pointer; }
 .k-iconbtn .k-dot { position: absolute; top: 10px; right: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-gap); }
-.k-av { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg,#6F9BFF,#2F6AF6); color: #fff; display: grid; place-items: center; font: 800 14px var(--font-display); }
+.k-av { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg,#6F9BFF,var(--color-accent)); color: #fff; display: grid; place-items: center; font: 800 14px var(--font-display); }
 .k-av--btn { border: none; padding: 0; cursor: pointer; font-family: var(--font-display); }
 
 /* ── App-bar popover menus (notifications + account) ─────────────────────────── */
@@ -95,16 +95,6 @@ body.in-keep { background: var(--color-bg); }
 .k-relbtn { min-height: 42px; margin-left: auto; align-self: flex-end; padding: 0 var(--space-4); font: 700 14px var(--font-sans); color: var(--color-accent); background: var(--color-accent-light); border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer; }
 .k-relbtn:hover, .k-relbtn:focus-visible { background: var(--color-accent); color: #fff; outline: none; }
 
-/* ── Entities index ─────────────────────────────────────────────────────────── */
-.k-ent-grid { display: grid; gap: 14px; margin-bottom: 14px; }
-.k-entcard { display: flex; align-items: center; gap: 18px; background: var(--color-surface); border-radius: var(--radius-lg); padding: 20px 22px; box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
-a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
-.k-entcard .k-bigav { width: 60px; height: 60px; border-radius: 18px; font-size: 20px; }
-.k-entcard__main { flex: 1; min-width: 0; }
-.k-entcard__name { font: 700 19px var(--font-display); margin-right: 8px; }
-.k-entcard__meta { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: 4px; }
-.k-entcard__open { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); font: 800 13px var(--font-sans); white-space: nowrap; }
-
 /* ── Entities view switch (List ⇄ Relationships) ────────────────────────────── */
 .k-seg { display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 var(--space-5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); box-shadow: var(--shadow-sm); }
 .k-seg__btn { display: inline-flex; align-items: center; gap: 7px; font: 800 14px var(--font-sans); color: var(--color-text-secondary); padding: 9px 20px; min-height: 42px; border-radius: var(--radius-pill); transition: background .14s, color .14s; }
@@ -121,20 +111,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* ── Documents (Entity -> Asset -> Policy -> docs) ──────────────────────────── */
 .k-docsearch { width: 100%; min-height: 48px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 16px; font: 600 15px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; margin-bottom: var(--space-5); }
 .k-docsearch:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
-.k-doc-entity { margin-bottom: var(--space-6); }
-.k-doc-entity__h { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .k-bigav--sm { width: 42px; height: 42px; border-radius: 13px; font-size: 15px; }
-.k-doc-entity__name { font: 700 18px var(--font-display); }
-.k-doc-entity__meta { font: 600 12px var(--font-sans); color: var(--color-text-secondary); }
-.k-doc-asset { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 18px 20px; margin-bottom: 12px; }
-.k-doc-asset__h { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-.k-doc-asset__h .k-cic { width: 42px; height: 42px; border-radius: 13px; }
-.k-doc-asset__name { font: 700 16px var(--font-display); }
-.k-doc-asset__meta { font: 600 12px var(--font-sans); color: var(--color-text-secondary); }
-.k-doc-policy { padding-top: 12px; border-top: 1px dashed var(--color-border); margin-top: 12px; }
-.k-doc-policy:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
-.k-doc-policy__name { font: 800 12px var(--font-sans); text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-secondary); margin-bottom: 8px; }
-.k-doc-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .k-docs-empty { text-align: center; color: var(--color-text-secondary); font: 600 14px var(--font-sans); padding: var(--space-8); }
 
 /* ── Settings controls (reminder preferences) ───────────────────────────────── */
@@ -165,7 +142,7 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 
 /* ── Security & privacy page ────────────────────────────────────────────────── */
 .shero { display: flex; align-items: center; gap: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: 24px 28px; box-shadow: var(--shadow-md); margin-bottom: var(--space-5); }
-.shero .k-cic { width: 72px; height: 72px; border-radius: 22px; background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); color: #fff; }
+.shero .k-cic { width: 72px; height: 72px; border-radius: 22px; background: linear-gradient(135deg,#6F9BFF,var(--color-accent) 60%,#46c2ff); color: #fff; }
 .shero h1 { font: 700 27px var(--font-display); }
 .shero p { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: 4px; }
 .twofa { display: flex; align-items: center; gap: var(--space-4); background: var(--color-surface); border: 2px solid var(--color-accent-light); border-radius: var(--radius-xl); padding: 22px 26px; margin-bottom: var(--space-3); flex-wrap: wrap; }
@@ -212,7 +189,6 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 /* Panels are plain white surfaces; entity type is signalled by the avatar and
    type chip, not a background tint. */
 .k-panel--me, .k-panel--person, .k-panel--biz, .k-panel--np, .k-panel--trust { background: var(--color-surface); }
-.k-ehead { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-6); flex-wrap: wrap; }
 /* Entity colours — soft pastel tints with a coloured icon/initials + text
    (Individual = blue · Business = light red · Nonprofit = light green ·
    Trust = light orange). */
@@ -222,19 +198,14 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-text-primary); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
 .k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .k-bigav--person, .k-bigav--biz, .k-bigav--np, .k-bigav--trust { color: var(--color-text-primary); }
-.k-ehead h1 { font: 700 27px var(--font-display); letter-spacing: -.01em; display: inline; }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
    renewal badges). Blue = individual, red = company, green = nonprofit, amber = trust. */
-.k-et { font: 700 12px var(--font-sans); background: none; color: #2F6AF6; padding: 0; margin-left: var(--space-2); white-space: nowrap; }
-.k-et--me, .k-et--person { color: #2F6AF6; }
+.k-et { font: 700 12px var(--font-sans); background: none; color: var(--color-accent); padding: 0; margin-left: var(--space-2); white-space: nowrap; }
+.k-et--me, .k-et--person { color: var(--color-accent); }
 .k-et--biz { color: #D6333A; }
-.k-et--np { color: #0E8E66; }
-.k-et--trust { color: #B5660A; }
-.k-emeta { font: 600 15px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-2); }
-.k-emeta b { color: var(--color-text-primary); font-weight: 800; }
-.k-ehead .k-btn { margin-left: auto; }
+.k-et--np { color: var(--color-ok); }
+.k-et--trust { color: var(--color-warn); }
 .k-lbl { font: 800 13px var(--font-sans); text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-secondary); margin-bottom: var(--space-3); }
-.k-grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 
 /* ── Entity detail — compact header + parameter blocks + assets ─────────────── */
 .k-epanel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5) var(--space-6); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
@@ -269,8 +240,6 @@ a.k-entcard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); c
 .k-edot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; }
 .k-edot--ok { background: var(--color-accent); }
 .k-edot--gap { background: var(--color-gap); }
-.k-eassets { margin-bottom: var(--space-6); }
-.k-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: var(--space-3); }
 
 /* ── Entities owned (holdings list, inside the overview panel) ───────────────── */
 /* Divided from the coverage bar by a rule so the entity and its holdings read as
@@ -287,8 +256,8 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 .k-ownrow__pct { margin-left: auto; flex: none; font: 800 12.5px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 4px 12px; border-radius: var(--radius-pill); font-variant-numeric: tabular-nums; }
 .k-ownrow--me .k-ownrow__pct, .k-ownrow--person .k-ownrow__pct { color: var(--color-accent); background: var(--color-accent-light); }
 .k-ownrow--biz .k-ownrow__pct { color: #D6333A; background: #FBE9E9; }
-.k-ownrow--trust .k-ownrow__pct { color: #B5660A; background: #FBEBCF; }
-.k-ownrow--np .k-ownrow__pct { color: #0E8E66; background: #DFF3EA; }
+.k-ownrow--trust .k-ownrow__pct { color: var(--color-warn); background: #FBEBCF; }
+.k-ownrow--np .k-ownrow__pct { color: var(--color-ok); background: #DFF3EA; }
 
 /* ── Entity page: two-column split (entity info | assets grouped) ────────────── */
 /* Entity information keeps the majority of the width; a single assets frame beside
@@ -344,7 +313,6 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-etsub { font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 
 /* ── Entities · Cards layout (Option B) ─────────────────────────────────────── */
-.k-etiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; position: relative; }
 .k-etile { position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; text-align: left; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 11px 14px 11px 17px; transition: transform .14s, box-shadow .14s; }
 .k-etile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
 /* Cards grouped into type rows (Individuals · Businesses · Trusts); each row
@@ -402,9 +370,6 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-pill--warn{ background: var(--color-warn-bg);color: var(--color-warn); }
 .k-pill--rec { background: var(--color-accent-light); color: var(--color-accent); }
 
-.k-addtile { display: flex; align-items: center; justify-content: center; gap: var(--space-2); border: 2px dashed var(--color-border-hover); border-radius: var(--radius-lg); color: var(--color-accent); font: 700 16px var(--font-sans); background: transparent; min-height: 98px; cursor: pointer; width: 100%; }
-.k-addtile:hover { border-color: var(--color-accent); background: var(--color-accent-light); }
-
 /* ── Coverage analysis ──────────────────────────────────────────────────────── */
 .k-ahero { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-6) var(--space-8); display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-5); box-shadow: var(--shadow-md); }
 .k-ahero .k-cic { width: 72px; height: 72px; border-radius: 22px; }
@@ -429,7 +394,6 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-crow__why { font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: 2px; }
 .k-crow__why b { color: var(--color-text-primary); }
 .k-crow__r { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); white-space: nowrap; }
-.k-linklike { font: 800 13px var(--font-sans); color: var(--color-accent); cursor: pointer; }
 .k-disc { background: var(--color-accent-light); border-radius: var(--radius-md); padding: var(--space-4) var(--space-5); font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
 .k-disc b { color: var(--color-text-primary); font-weight: 800; }
 
@@ -455,21 +419,15 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-choice__label { flex: 1; min-width: 0; font: 700 14px var(--font-display); }
 .k-choice__label small { display: block; font: 600 12px var(--font-sans); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .k-choice__arrow { display: none; }
-.k-donerow { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: 72px; padding: var(--space-4) var(--space-5); border: 2px solid var(--color-ok); background: var(--color-ok-bg); border-radius: var(--radius-lg); }
-.k-donerow .k-cic { width: 50px; height: 50px; border-radius: 16px; background: #fff; color: var(--color-ok); }
-.k-donerow__label { flex: 1; font: 700 18px var(--font-display); }
 
 /* ── Auth ───────────────────────────────────────────────────────────────────── */
 .k-authwrap { min-height: calc(100vh - 33px); display: grid; place-items: center; padding: var(--space-12) var(--space-6); }
 .k-authcard { width: 100%; max-width: 440px; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-xl); padding: var(--space-10); }
-.k-bigshield { width: 72px; height: 72px; border-radius: 24px; background: linear-gradient(135deg,#6F9BFF,#2F6AF6 60%,#46c2ff); color: #fff; display: grid; place-items: center; margin: 0 auto var(--space-5); box-shadow: var(--shadow-md); }
+.k-bigshield { width: 72px; height: 72px; border-radius: 24px; background: linear-gradient(135deg,#6F9BFF,var(--color-accent) 60%,#46c2ff); color: #fff; display: grid; place-items: center; margin: 0 auto var(--space-5); box-shadow: var(--shadow-md); }
 .k-abrand { display: flex; align-items: center; gap: var(--space-2); justify-content: center; font: 700 19px var(--font-display); margin-bottom: var(--space-2); }
 .k-abrand .k-mark { color: var(--color-accent); }
 .k-atitle { font: 700 28px var(--font-display); text-align: center; }
 .k-asub { font: 600 15px var(--font-sans); color: var(--color-text-secondary); text-align: center; margin-top: var(--space-1); margin-bottom: var(--space-6); }
-.k-invited { display: flex; align-items: center; gap: var(--space-3); background: var(--color-accent-light); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
-.k-invited b { color: var(--color-text-primary); }
-.k-invited span { font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
 .k-fld { display: block; margin-bottom: var(--space-4); }
 .k-fld > span { display: block; font: 800 13px var(--font-sans); margin-bottom: 6px; }
 .k-fld input { width: 100%; min-height: 54px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; }
@@ -490,7 +448,6 @@ a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color:
 .k-own__total { font: 800 13px var(--font-sans); color: var(--color-text-secondary); }
 .k-own__total.over { color: var(--color-gap); }
 @media (max-width: 560px) { .k-own__row { grid-template-columns: 1fr 1fr; } .k-own__row .k-own__rm { grid-column: 2; justify-self: end; width: 46px; } }
-.k-locked { display: flex; align-items: center; gap: var(--space-2); background: var(--color-bg); border: 2px solid var(--color-border); border-radius: var(--radius-md); min-height: 54px; padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-secondary); }
 .k-ameta { text-align: center; font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-5); }
 .k-ameta a { color: var(--color-accent); font-weight: 800; cursor: pointer; }
 .k-secure { display: flex; align-items: center; justify-content: center; gap: 7px; font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-5); }
@@ -749,12 +706,10 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
-  .k-grid2 { grid-template-columns: 1fr; }
   .k-pg { grid-template-columns: 1fr 1fr; }
   .k-nav { display: none; }
   .k-banner .k-btn { margin-left: 0; }
   .k-stats { grid-template-columns: 1fr 1fr; }
-  .k-agrid { grid-template-columns: 1fr; }
   .k-eband__who { flex-basis: 100%; }
   .k-eband__hero { text-align: left; }
   .k-search__in { width: 160px; }

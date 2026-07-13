@@ -7,9 +7,18 @@
 -- meanings; once split into industry/subtype it cannot be re-merged unambiguously.
 alter table public.entities add column if not exists industry text;
 
--- business: label held the industry ("Media", "Real estate") — skip generic labels.
+-- business: label held the industry ("Media", "Real estate") — skip generic
+-- labels. Some legacy labels are composite "<legal type> · <industry>"
+-- (e.g. "LLC · real estate"); when the leading token repeats the row's subtype
+-- we keep only the industry part, so the header doesn't render "LLC · LLC · …".
 update public.entities
-set industry = label
+set industry = btrim(
+  case
+    when position('·' in label) > 0
+      and lower(btrim(split_part(label, '·', 1))) = lower(btrim(coalesce(subtype, '')))
+    then substr(label, position('·' in label) + 1)
+    else label
+  end)
 where kind = 'business'
   and label is not null
   and lower(btrim(label)) not in ('business', 'company', 'llc', '');

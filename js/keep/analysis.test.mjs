@@ -33,6 +33,14 @@ test("a suggestion-only asset reports a recommendation, not a gap", () => {
   assert.equal(s.label, "1 recommendation");
 });
 
+test("an asset type with no catalog entry reports Not analyzed, not a false Protected", () => {
+  // Uncatalogued type → analyzeAsset yields empty mustHave/recommended. We must
+  // not claim it's Protected (green) when we can't assess it.
+  const s = assetStatus({ id: "x", type: "spaceship", held: [] }, SETTINGS);
+  assert.equal(s.label, "Not analyzed");
+  assert.notEqual(s.cls, "ok");
+});
+
 test("thresholds are read from settings — raising the umbrella floor drops that gap", () => {
   const { asset } = findAsset("home-marina");
   const lifted = { ...SETTINGS, residential: { ...SETTINGS.residential, umbrellaHomeValue: 1000000 } };
