@@ -424,7 +424,7 @@ function appBar(active) {
 
 function page(active, contentChildren, opts = {}) {
   const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : opts.mid ? " k-wrap--mid" : opts.split ? " k-wrap--split" : ""}`;
-  return el("div", {}, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
+  return el("div", { class: `k-page k-page--${active}` }, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
 }
 
 // Friendly labels for the Keep's static routes (dynamic entity/asset routes
