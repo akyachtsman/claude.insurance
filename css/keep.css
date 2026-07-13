@@ -190,14 +190,13 @@ body.in-keep { background: var(--color-bg); }
    type chip, not a background tint. */
 .k-panel--me, .k-panel--person, .k-panel--biz, .k-panel--np, .k-panel--trust { background: var(--color-surface); }
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
-   icon in the type colour (transparent framing). Colour cues, shared with the
-   type label + Relationships map: individual = red · business = burgundy ·
-   nonprofit = green · trust = neutral ink (a trust is a legal arrangement that
-   holds assets, not an entity, so it's set apart). */
+   icon (transparent framing). All entity icons render red — the per-type colour
+   cue lives on the type label + Relationships map, not the icon — with one
+   permanent exception: a trust icon is neutral ink, because a trust is a legal
+   arrangement that holds assets, not an entity, so it's set apart. */
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-danger); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
 .k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.k-bigav--person, .k-bigav--np { color: var(--color-danger); }
-.k-bigav--biz { color: var(--color-company); }
+.k-bigav--person, .k-bigav--biz, .k-bigav--np { color: var(--color-danger); }
 .k-bigav--trust { color: var(--color-text-primary); }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
    renewal badges). Blue = individual, burgundy = business, green = nonprofit, amber = trust. */
