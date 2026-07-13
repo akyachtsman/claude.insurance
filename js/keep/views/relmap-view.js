@@ -10,15 +10,15 @@ import { icon } from "../../icons.js";
 import { getMapData } from "../../supabase.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityRelStyleKey as relStyleKey, entityMapSub } from "../logic/entity-display.js";
-import { capTablesByEntity, controlsByEntity, orchestrate } from "../logic/relmap.js";
+import { capTablesByEntity, orchestrate } from "../logic/relmap.js";
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
 
 // Inline-SVG relationship graph, built live from the entity_relationships table.
 // Owners sit above what they own (top-down layered layout — see keep/relmap.js
-// orchestrate); each owned entity shows its ownership split as a cap-table bar,
-// and control-only links (a trustee with no stake) are dashed and role-labelled.
+// orchestrate); each owned entity shows its ownership split as a cap-table bar.
+// The map is ownership-only — control-only links (trustee/manager) are not shown.
 // Nodes for entities you manage are keyboard-focusable and open their detail.
 const REL_STYLE = {
   me: { fill: "#fff", avFill: "#E7EFFE", avText: "#2F6AF6", nameFill: "#1B2540", subFill: "#55607F", stroke: "#E3EBFA" },
@@ -47,9 +47,9 @@ const relPill = (sk) => REL_PILL[sk] || { bg: "#EAEDF4", fg: "#55607F" };
 const REL_BAND = { me: 0, person: 0, trust: 1, biz: 2, np: 2 };
 // View controls for the Relationships map — held across in-view re-renders so the
 // toolbar and the chart stay in sync. orient: vertical|horizontal · mode:
-// ownership (by depth) | type (by category) · focus: entity id or null · chips /
-// trustees: declutter toggles.
-const relView = { orient: "vertical", mode: "ownership", focus: null, chips: true, trustees: true };
+// ownership (by depth) | type (by category) · focus: entity id or null · chips:
+// asset-marker declutter toggle.
+const relView = { orient: "vertical", mode: "ownership", focus: null, chips: true };
 // DB entity node → REL_STYLE key. Personal ("me") renders like the other
 // individuals — white with a blue outline — distinguished by its "You" subtitle;
 // nonprofit businesses (green) split from for-profit businesses by subtype.
@@ -66,8 +66,7 @@ const REL_ZOOM_MIN = 0.3, REL_ZOOM_MAX = 2.4, REL_ZOOM_STEP = 1.25;
 // Lay the graph out per the current relView. Bands (ownership layers, or type
 // groups) stack along one axis; members spread along the other. Orientation swaps
 // which axis is which — vertical stacks bands top-down, horizontal stacks them
-// left-to-right (spreading deep chains across the width). Trustee links are
-// dropped from the graph when that declutter toggle is off.
+// left-to-right (spreading deep chains across the width).
 // Cross-axis placement (Brandes–Köpf). A simple barycenter relaxation drifts and
 // never straightens single-child chains (a deep A→B→C hangs out as a staircase).
 // Instead: (1) align each node under the median of its owners, chaining nodes into
@@ -214,7 +213,8 @@ function relHopPath(pts, crossers, horiz) {
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
-  const edges = relView.trustees ? data.edges : data.edges.filter((e) => parsePct(e.stake) != null);
+  // Ownership-only map: control-only links (trustee/manager, no stake) are excluded.
+  const edges = data.edges.filter((e) => parsePct(e.stake) != null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
@@ -479,7 +479,6 @@ function relationshipMap() {
   const { nodes, edges, W, H, waypoints, horiz } = relLayout();
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const caps = capTablesByEntity(edges);
-  const ctrls = controlsByEntity(edges);
   // Focus perspective: when an entity is chosen, highlight it plus its direct
   // owners and holdings and dim the rest. focusSet holds the ids kept bright.
   const focusId = relView.focus && byId.has(relView.focus) ? relView.focus : null;
@@ -532,19 +531,15 @@ function relationshipMap() {
     ]),
   ]));
 
-  // Edges under the nodes. A stake edge is tinted with its owner's type colour
-  // (matching that owner's segment in the owned entity's cap-table bar); a
-  // control-only link (Trustee, no stake) is a dashed grey line. Neither carries a
-  // label — the stake lives on the owned entity's cap-table bar and the control role
-  // lives on a pill inside the controlled entity's box.
+  // Edges under the nodes. Each ownership edge is tinted with its owner's type
+  // colour (matching that owner's segment in the owned entity's cap-table bar) and
+  // carries no label — the stake lives on the owned entity's cap-table bar.
   const edgeRefs = edges.map((e) => {
-    const stake = parsePct(e.stake) != null;
     const owner = byId.get(e.from);
-    const color = stake ? (REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#c3b2f0") : "#c7d0e4";
-    const op = edgeDim(e) ? "0.08" : (stake ? "0.85" : "0.7");
-    const path = s("path", { fill: "none", stroke: color, "stroke-width": stake ? "2.5" : "2", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: op, "stroke-dasharray": stake ? "" : "1 6" });
+    const color = REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#c3b2f0";
+    const path = s("path", { fill: "none", stroke: color, "stroke-width": "2.5", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: edgeDim(e) ? "0.08" : "0.85" });
     svg.appendChild(path);
-    return { ...e, stake, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
+    return { ...e, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
   });
   // Fan each owner's downward "bus" onto its own lane within the row gap. Without
   // this every edge crossing a gap runs along the same centre line, so different
@@ -648,15 +643,11 @@ function relationshipMap() {
     const top = n.cy - NODE_H / 2;
     const interactive = Boolean(n.href);
     const cap = caps[n.id];
-    const ctrl = ctrls[n.id];
-    // Speak the ownership split + control roles to assistive tech — otherwise only in
-    // hover <title>s, which never fire on touch (iPad Safari).
-    const ownDesc = (cap && cap.length
+    // Speak the ownership split to assistive tech — otherwise only in hover
+    // <title>s, which never fire on touch (iPad Safari).
+    const ownDesc = cap && cap.length
       ? " Owned by " + cap.map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "an owner"} ${c.pct}%`; }).join(", ") + "."
-      : "")
-      + (ctrl && ctrl.length
-        ? " " + ctrl.map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} ${c.role}`; }).join(", ") + "."
-        : "");
+      : "";
     const g = s("g", interactive
       ? { class: "k-relnode k-relnode--link", tabindex: "0", role: "link", "aria-label": `Open ${n.name}.${ownDesc}` }
       : { class: "k-relnode k-relnode--static", role: "img", "aria-label": `${n.name} (sample).${ownDesc}` });
@@ -668,7 +659,7 @@ function relationshipMap() {
     // own identity down. A root (nothing points at it) has no header, so it keeps its
     // identity at the top; layer 0 is all roots and every deeper layer is owned, so a
     // row stays vertically consistent.
-    const hasOwn = Boolean((cap && cap.length) || (ctrl && ctrl.length));
+    const hasOwn = Boolean(cap && cap.length);
     const yoff = hasOwn ? 26 : 0;
     const ax = n.x + 34, avy = top + 30 + yoff;
     g.appendChild(s("circle", { cx: ax, cy: avy, r: 17, fill: o.avFill }));
@@ -738,35 +729,6 @@ function relationshipMap() {
         if (label) barG.appendChild(svgText(label, { x: sg.center, y: barY + 11, "text-anchor": "middle", "font-size": wide ? "9.5" : "9", "font-weight": "800", fill: pill.fg, "font-family": FS }));
       });
       g.appendChild(barG);
-    }
-
-    // Control-only relationships (a trustee, a manager with no equity) show as a
-    // pill inside the controlled entity's box — "<initials> <role>", coloured by the
-    // controller's type. It sits in the header just under the arrow (below the cap
-    // bar in the rare case an entity has both a stake and a control link).
-    if (ctrl && ctrl.length) {
-      const py = (cap && cap.length) ? top + 30 : top + 9;
-      const shownC = ctrl.length > 2 ? 1 : ctrl.length;
-      const items = [];
-      for (let i = 0; i < shownC; i++) {
-        const c = ctrl[i], ow = byId.get(c.ownerId), pill = relPill(ow ? ow.sk : "person");
-        items.push({ label: `${ow ? ow.initials : "?"} ${c.role}`, bg: pill.bg, fg: pill.fg, tip: `${ow ? ow.name : "Someone"} — ${c.role}` });
-      }
-      if (ctrl.length > shownC) {
-        items.push({ label: `+${ctrl.length - shownC}`, bg: "#EAEDF4", fg: "#55607F", tip: ctrl.slice(shownC).map((c) => { const ow = byId.get(c.ownerId); return `${ow ? ow.name : "Someone"} — ${c.role}`; }).join(", ") });
-      }
-      const ws = items.map((it) => Math.min(it.label.length * 5.7 + 16, NODE_W - 32));
-      const totalW = ws.reduce((a, b) => a + b, 0) + (items.length - 1) * 6;
-      let px = n.x + (NODE_W - totalW) / 2;                 // centre the group under the arrow
-      items.forEach((it, i) => {
-        const w = ws[i];
-        const grp = s("g", {});
-        grp.appendChild(s("rect", { x: px, y: py, width: w, height: 18, rx: 9, fill: it.bg }));
-        grp.appendChild(svgText(it.label, { x: px + w / 2, y: py + 12.5, "text-anchor": "middle", "font-size": "9.5", "font-weight": "800", fill: it.fg, "font-family": FS }));
-        if (it.tip) { const ti = s("title", {}); ti.textContent = it.tip; grp.appendChild(ti); }
-        g.appendChild(grp);
-        px += w + 6;
-      });
     }
 
     // Opening: a tap/click is resolved by the viewport pan controller via data-href
@@ -862,7 +824,6 @@ function relToolbar(drawMap, host) {
     group("Focus", sel),
     group("Show", el("div", { class: "k-relchks" }, [
       relCheck("Assets", relView.chips, (v) => set({ chips: v })),
-      relCheck("Control links", relView.trustees, (v) => set({ trustees: v })),
     ])),
     fit,
   ]);
