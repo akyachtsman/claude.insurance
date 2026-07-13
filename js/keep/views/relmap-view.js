@@ -213,14 +213,19 @@ function relHopPath(pts, crossers, horiz) {
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
-  // Ownership-only map: control-only links (trustee/manager, no stake) are excluded.
+  // Only ownership edges are DRAWN (and drive the cap-tables). Control-only links
+  // (trustee, no stake) are never rendered — but they DO shape the layout: a
+  // trustee link nests its trust one band below the individual trustee, so trusts
+  // sit below the individuals (the arrangement) without any control-link line.
   const edges = data.edges.filter((e) => parsePct(e.stake) != null);
+  const layoutEdges = data.edges;
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
   // Both modes use the same orchestration (crossing-minimized, waypoint-routed) so
   // every edge is routed through the row gaps and never runs behind a card. Ownership
-  // layers by depth; "by type" layers by category (people / trusts / businesses),
+  // layers by depth (with control links folded in only to push trusts below their
+  // individual); "by type" layers by category (people / trusts / businesses),
   // compacting the present bands to dense indices so an absent category leaves no
   // empty row.
   let order, rows, dummy, edgePath, up, down;
@@ -230,7 +235,7 @@ function relLayout() {
     const dense = new Map(present.map((v, i) => [v, i]));
     ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, (n) => dense.get(bandVal(n))));
   } else {
-    ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges));
+    ({ order, rows, dummy, edgePath, up, down } = orchestrate(nodes, layoutEdges));
   }
   const bandIndex = {};
   order.forEach((b, bi) => rows[b].forEach((id) => { bandIndex[id] = bi; }));
