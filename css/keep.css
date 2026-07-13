@@ -544,6 +544,10 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-report__count { font: 700 13px var(--font-sans); color: var(--color-text-secondary); white-space: nowrap; }
 .k-report__list { display: grid; gap: 8px; }
 .k-report__empty { text-align: center; color: var(--color-text-secondary); font: 600 14px var(--font-sans); padding: var(--space-4); }
+/* Home: put the lower report frames side by side rather than stacked. */
+.k-home-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); align-items: start; }
+.k-home-cols > .k-report { margin-bottom: 0; }
+@media (max-width: 860px) { .k-home-cols { grid-template-columns: 1fr; } }
 .k-rb { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: var(--radius-lg); background: var(--color-bg); border-left: 5px solid var(--color-border-hover); color: inherit; transition: transform .12s, box-shadow .12s; }
 a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: inherit; }
 .k-rb__ic { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--color-surface); color: var(--color-text-secondary); }

@@ -184,14 +184,16 @@ export async function renderKeepLanding() {
         statTile("Lapsed", lapsed, lapsed ? "action needed" : "none"),
       ]),
     ]),
-    el("section", { class: "k-report" }, [
-      el("div", { class: "k-report__h" }, [
-        el("h2", {}, [icon("bell", { size: 18 }), el("span", { text: "Renewals coming up" })]),
-        el("span", { class: "k-report__count", text: renewals.length ? `${renewals.length} within 60 days` : "All clear" }),
+    el("div", { class: "k-home-cols" }, [
+      el("section", { class: "k-report" }, [
+        el("div", { class: "k-report__h" }, [
+          el("h2", {}, [icon("bell", { size: 18 }), el("span", { text: "Renewals coming up" })]),
+          el("span", { class: "k-report__count", text: renewals.length ? `${renewals.length} within 60 days` : "All clear" }),
+        ]),
+        el("div", { class: "k-report__list" }, renewalRows),
       ]),
-      el("div", { class: "k-report__list" }, renewalRows),
+      pendingRequestsReport(requests, role),
     ]),
-    pendingRequestsReport(requests, role),
   ]);
   mount(view);
 }
