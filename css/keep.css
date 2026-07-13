@@ -531,8 +531,10 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 
 /* ── Landing (home) ─────────────────────────────────────────────────────────── */
 /* Home is a compact dashboard — narrower than the wide data pages, and with the
-   shared page padding trimmed here only. */
+   shared page padding trimmed here only. Keep clear vertical rhythm between blocks
+   so the panels don't butt together. */
 .k-page--home .k-wrap { max-width: 1040px; padding-top: var(--space-5); padding-bottom: var(--space-10); }
+.k-page--home .k-wrap > section, .k-page--home .k-wrap > .k-home-cols { margin-bottom: var(--space-6); }
 .k-welcome { margin-bottom: var(--space-5); }
 .k-welcome__h { font: 700 23px var(--font-display); letter-spacing: -.01em; }
 .k-welcome__p { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin: 2px 0 var(--space-3); }
@@ -545,7 +547,7 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-report__list { display: grid; gap: 8px; }
 .k-report__empty { text-align: center; color: var(--color-text-secondary); font: 600 14px var(--font-sans); padding: var(--space-4); }
 /* Home: put the lower report frames side by side rather than stacked. */
-.k-home-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); align-items: start; }
+.k-home-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); align-items: start; }
 .k-home-cols > .k-report { margin-bottom: 0; }
 @media (max-width: 860px) { .k-home-cols { grid-template-columns: 1fr; } }
 .k-rb { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: var(--radius-lg); background: var(--color-bg); border-left: 5px solid var(--color-border-hover); color: inherit; transition: transform .12s, box-shadow .12s; }
