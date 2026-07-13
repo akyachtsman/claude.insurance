@@ -194,10 +194,13 @@ body.in-keep { background: var(--color-bg); }
    Trust = light orange). */
 /* Entity avatars are the bare detailed line drawing — no badge/frame, just the
    icon in the type colour (transparent framing). */
-/* Entity avatars — all rendered in black (was type-tinted). */
+/* Entity avatar icons are red; a trust is not itself an entity (it's a legal
+   arrangement holding assets), so its icon is rendered in neutral ink to set it
+   apart from the true entities. */
 .k-bigav { width: 78px; height: 78px; border-radius: 24px; background: transparent; color: var(--color-danger); display: grid; place-items: center; font: 800 27px var(--font-display); flex: none; }
 .k-bigav .icon { width: 92%; height: 92%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.k-bigav--person, .k-bigav--biz, .k-bigav--np, .k-bigav--trust { color: var(--color-danger); }
+.k-bigav--person, .k-bigav--biz, .k-bigav--np { color: var(--color-danger); }
+.k-bigav--trust { color: var(--color-text-primary); }
 /* Entity type — subtle, no filled pills: just colour-cued text (matches the
    renewal badges). Blue = individual, red = company, green = nonprofit, amber = trust. */
 .k-et { font: 700 12px var(--font-sans); background: none; color: var(--color-accent); padding: 0; margin-left: var(--space-2); white-space: nowrap; }
