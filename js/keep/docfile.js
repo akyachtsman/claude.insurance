@@ -44,6 +44,16 @@ export function buildPdf(lines) {
   return pdf;
 }
 
+// A policy document is either a plain name string (legacy) or a typed record
+// { name, kind }. These readers accept both so views never care which shape a
+// row is in — the single place document identity is read from.
+export function docName(doc) {
+  return typeof doc === "string" ? doc : (doc && doc.name) || "";
+}
+export function docKind(doc) {
+  return typeof doc === "string" ? "" : (doc && doc.kind) || "";
+}
+
 // Body lines for a document placeholder, given its name + context (policy, asset…).
 export function docLines(name, context) {
   return [

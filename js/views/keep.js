@@ -21,7 +21,7 @@ import { depreciationFor, depreciationMilestones } from "../keep/depreciation.js
 import { policyKind, reminderInfo, renewalBand, REMINDER_SCHEDULE, policyType, annualPremium, formatPremium } from "../keep/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../keep/search.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, isPending, nextStage, REQUEST_STAGES } from "../keep/requests.js";
-import { buildPdf, docLines } from "../keep/docfile.js";
+import { buildPdf, docLines, docName } from "../keep/docfile.js";
 import { OWNERSHIP_ROLES, parsePct, totalStake, validateOwnership, stakeLabel } from "../keep/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType, isNonprofitType } from "../keep/entity-types.js";
 import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityRelStyleKey as relStyleKey, entityAvatarIcon, entityMapSub } from "../keep/entity-display.js";
@@ -146,7 +146,8 @@ function downloadDocument(name, context) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function downloadButton(name, context) {
+function downloadButton(doc, context) {
+  const name = docName(doc); // accepts a string or a { name, kind } record
   const b = el("button", { class: "k-dl", attrs: { type: "button", title: `Download ${name}`, "aria-label": `Download ${name}` } }, [icon("download", { size: 15 })]);
   b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); downloadDocument(name, context); });
   return b;
@@ -154,11 +155,12 @@ function downloadButton(name, context) {
 
 // A document row: the document (optionally linking to its policy) plus a
 // download button. `context` lines are embedded in the generated PDF.
-function docItem(name, href, context, dataDoc) {
+function docItem(doc, href, context, dataDoc) {
+  const name = docName(doc); // accepts a string or a { name, kind } record
   const label = href
     ? el("a", { class: "k-doclink", attrs: { href } }, [icon("doc", { size: 15 }), el("span", { text: name })])
     : el("span", { class: "k-doclink" }, [icon("doc", { size: 15 }), el("span", { text: name })]);
-  const row = el("div", { class: "k-docrow" }, [label, downloadButton(name, context)]);
+  const row = el("div", { class: "k-docrow" }, [label, downloadButton(doc, context)]);
   if (dataDoc) row.setAttribute("data-doc", dataDoc);
   return row;
 }
@@ -2800,7 +2802,7 @@ function collectDocuments() {
     for (const a of ent.assets)
       for (const p of (a.policies || []))
         for (const d of (p.documents || []))
-          out.push({ doc: d, entity: ent, asset: a, policy: p, hay: `${d} ${p.line} ${a.name} ${ent.name}`.toLowerCase() });
+          out.push({ doc: d, entity: ent, asset: a, policy: p, hay: `${docName(d)} ${p.line} ${a.name} ${ent.name}`.toLowerCase() });
   return out;
 }
 
@@ -2810,9 +2812,9 @@ export function renderKeepDocuments() {
   const rows = collectDocuments();
 
   const columns = [
-    { label: "Document", get: (r) => r.doc, cell: (r) => [
+    { label: "Document", get: (r) => docName(r.doc), cell: (r) => [
       el("span", { class: "k-doc-ic" }, [icon("doc", { size: 15 })]),
-      el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: r.doc }),
+      el("a", { class: "k-ilink", attrs: { href: `#/keep/policy/${r.policy.id}` }, text: docName(r.doc) }),
     ] },
     { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
