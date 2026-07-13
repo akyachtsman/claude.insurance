@@ -530,8 +530,9 @@ a.k-pcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); col
 .k-note b { color: var(--color-text-primary); font-weight: 800; }
 
 /* ── Landing (home) ─────────────────────────────────────────────────────────── */
-/* Home is a compact dashboard — trim the shared page padding here only. */
-.k-page--home .k-wrap { padding-top: var(--space-5); padding-bottom: var(--space-10); }
+/* Home is a compact dashboard — narrower than the wide data pages, and with the
+   shared page padding trimmed here only. */
+.k-page--home .k-wrap { max-width: 1040px; padding-top: var(--space-5); padding-bottom: var(--space-10); }
 .k-welcome { margin-bottom: var(--space-5); }
 .k-welcome__h { font: 700 23px var(--font-display); letter-spacing: -.01em; }
 .k-welcome__p { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin: 2px 0 var(--space-3); }
@@ -567,8 +568,12 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-rb--low .k-rb__ic { background: var(--color-accent-light); color: var(--color-accent); }
 
 /* At-a-glance stat tiles */
-.k-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.k-stat { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 11px 14px; }
+/* One merged panel: six stat cells share a single surface, divided by hairlines
+   (no gaps, no per-card shadows) so the row reads as one tidy strip. */
+.k-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+.k-stat { padding: 12px 16px; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.k-stat:nth-child(3n) { border-right: 0; }
+.k-stat:nth-child(n+4) { border-bottom: 0; }
 .k-stat__v { font: 800 22px var(--font-display); color: var(--color-accent); letter-spacing: -.02em; }
 .k-stat__l { font: 700 12.5px var(--font-sans); color: var(--color-text-primary); margin-top: 2px; }
 .k-stat__s { font: 600 11.5px var(--font-sans); color: var(--color-text-secondary); margin-top: 1px; }
