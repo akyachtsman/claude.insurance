@@ -57,6 +57,7 @@
   --maxw-content: 720px;
   --maxw-wide: 1120px;
   --maxw-prose: 640px;
+  --maxw-keep: 1320px; /* the Keep is a data app — a wider frame than the marketing site */
 }
 
 [data-theme="harbor"] {
