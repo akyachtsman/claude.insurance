@@ -56,11 +56,14 @@ const POLICY_LINE_FALLBACK = [
   [/errors|omission|\be&o\b|professional liab/, { key: "eo", label: "Errors & omissions (E&O)", icon: "as-shield", card: "general-liability", color: "cp" }],
   [/worker|comp\b/, { key: "workers", label: "Workers' comp", icon: "as-commercial", card: "general-liability", color: "cp" }],
   [/umbrella/, { key: "umbrella", label: "Umbrella insurance", icon: "as-shield", card: "umbrella", color: "cp" }],
+  // Auto lines are more specific than bare "liability" — a "commercial auto
+  // liability" policy must match auto, not the general-liability catch-all
+  // below. commercial-auto stays ahead of plain auto (it contains "auto").
+  [/commercial auto/, { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck", card: "commercial-auto", color: "auto" }],
+  [/\bauto\b|vehicle|motor/, { key: "auto", label: "Auto insurance", icon: "as-auto", card: "auto", color: "auto" }],
   [/liability/, { key: "liability", label: "Liability insurance", icon: "as-shield", card: "general-liability", color: "cp" }],
   [/renter/, { key: "renters", label: "Renters insurance", icon: "as-home", card: "home", color: "home" }],
   [/condo/, { key: "condo", label: "Condo insurance", icon: "as-home", card: "home", color: "home" }],
-  [/commercial auto/, { key: "commercial-auto", label: "Commercial auto insurance", icon: "as-truck", card: "commercial-auto", color: "auto" }],
-  [/\bauto\b|vehicle|motor/, { key: "auto", label: "Auto insurance", icon: "as-auto", card: "auto", color: "auto" }],
   [/watercraft|boat|marine|yacht/, { key: "watercraft", label: "Watercraft insurance", icon: "as-boat", card: "boat", color: "boat" }],
   [/jewel|scheduled|valuab|fine art|collect/, { key: "valuables", label: "Valuables insurance", icon: "as-gem", card: "gem", color: "gem" }],
   [/business|\bbop\b|commercial|general/, { key: "business", label: "Business insurance", icon: "as-commercial", card: "general-liability", color: "cp" }],

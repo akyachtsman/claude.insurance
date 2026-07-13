@@ -526,10 +526,6 @@ function policyTypeIcon(policy) {
   return el("span", { class: "k-aicon" }, [icon(policyType(policy).icon, { size: 30 })]);
 }
 
-function statusPill(st) {
-  return el("span", { class: `k-pill k-pill--${st.cls}` }, [icon(st.icon, { size: 15 }), el("span", { text: st.label })]);
-}
-
 function coveragePill(status) {
   if (status === "in-place") return el("span", { class: "k-pill k-pill--ok" }, [icon("check", { size: 15 }), el("span", { text: "In place" })]);
   if (status === "gap") return el("span", { class: "k-pill k-pill--gap" }, [icon("alert", { size: 15 }), el("span", { text: "Gap" })]);
@@ -589,24 +585,6 @@ function policiesSection(asset) {
     ...items,
   ]);
 }
-
-function assetCard(asset, settings) {
-  const st = assetStatus(asset, settings);
-  return el("a", { class: "k-cc", attrs: { href: `#/keep/asset/${asset.id}` } }, [
-    cic(asset),
-    el("div", { class: "k-cc__main" }, [
-      el("div", { class: "k-cc__name", text: asset.name }),
-      el("div", { class: "k-cc__meta", text: asset.meta }),
-      statusPill(st),
-    ]),
-    el("div", { class: "k-cc__val", text: money(asset.value) }),
-  ]);
-}
-
-// Entity category / colour / subtype / avatar all live in one place —
-// js/keep/entity-display.js — so no two views can label the same entity
-// differently. Imported above; callers below use them unchanged.
-function panelVariant(entity) { return `k-panel--${colorSuffix(entity)}`; }
 
 // The client's own "Me" entity (kind personal) — the default landing for the
 // Entities tab, which opens straight onto this detail view. Falls back to the

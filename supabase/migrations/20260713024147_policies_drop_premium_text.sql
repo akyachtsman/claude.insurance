@@ -1,0 +1,12 @@
+-- Drop the legacy free-text policies.premium column. premium_amount +
+-- premium_period (added in policies_premium_numeric) are now the source of
+-- truth, read by annualPremium and rendered by formatPremium. Run only after
+-- the numeric backfill has been verified.
+-- revert:
+--   alter table public.policies add column if not exists premium text;
+--   -- best-effort re-derivation from the structured fields:
+--   update public.policies
+--   set premium = '$' || to_char(premium_amount, 'FM999,999,990') ||
+--                 ' / ' || coalesce(premium_period, 'yr')
+--   where premium_amount is not null;
+alter table public.policies drop column if exists premium;

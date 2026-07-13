@@ -113,10 +113,14 @@ export function analyzeAsset(asset, settings) {
 // Roll an asset's analysis into one card status.
 export function assetStatus(asset, settings) {
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
+  // No catalog entry for this asset type — we can't assess coverage, so don't
+  // claim it's "Protected" (a false green). Surface it as unassessed instead.
+  if (!mustHave.length && !recommended.length) return { cls: "rec", icon: "spark", label: "Not analyzed", gaps: 0 };
   const mustGaps = mustHave.filter((c) => c.status === "gap").length;
   if (mustHave.length && mustGaps === mustHave.length) return { cls: "gap", icon: "alert", label: "Not insured", gaps };
   if (gaps > 0) return { cls: "gap", icon: "alert", label: `${gaps} gap${gaps > 1 ? "s" : ""} found`, gaps };
-  if (recommended.some((c) => c.status === "suggested")) return { cls: "rec", icon: "spark", label: "1 recommendation", gaps: 0 };
+  const recs = recommended.filter((c) => c.status === "suggested").length;
+  if (recs > 0) return { cls: "rec", icon: "spark", label: `${recs} recommendation${recs > 1 ? "s" : ""}`, gaps: 0 };
   return { cls: "ok", icon: "check", label: "Protected", gaps: 0 };
 }
 

@@ -1,7 +1,7 @@
 // Tests for keep/relmap.js — run: node --test js/keep/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, controlsByEntity, layeredLayout, fitPlan, typeBands, orchestrate } from "./relmap.js";
+import { capTablesByEntity, controlsByEntity, fitPlan, orchestrate } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -31,37 +31,6 @@ test("capTablesByEntity ties each stake to its owner", () => {
   const caps = capTablesByEntity(EDGES);
   const byOwner = Object.fromEntries(caps.cafe.map((c) => [c.ownerId, c.pct]));
   assert.deepEqual(byOwner, { me: 50, spouse: 40, trustA: 10 });
-});
-
-test("layeredLayout places owners above what they own (longest-path layers)", () => {
-  const { layerOf } = layeredLayout(NODES, EDGES);
-  assert.equal(layerOf.me, 0);
-  assert.equal(layerOf.spouse, 0);
-  assert.equal(layerOf.trustA, 1);          // owned by me
-  assert.equal(layerOf.cafe, 2);            // deepest owner is trustA (layer 1)
-  assert.equal(layerOf.sub1, 3);
-  assert.equal(layerOf.sub2, 4);
-});
-
-test("layeredLayout groups every node into exactly one row", () => {
-  const { order, rows } = layeredLayout(NODES, EDGES);
-  const all = order.flatMap((r) => rows[r]);
-  assert.equal(all.length, NODES.length);
-  assert.deepEqual([...all].sort(), NODES.map((n) => n.id).sort());
-});
-
-test("layeredLayout is deterministic", () => {
-  const a = layeredLayout(NODES, EDGES);
-  const b = layeredLayout(NODES, EDGES);
-  assert.deepEqual(a.rows, b.rows);
-});
-
-test("layeredLayout tolerates a cycle without infinite recursion", () => {
-  const cyc = layeredLayout(
-    [{ id: "a" }, { id: "b" }],
-    [{ from: "a", to: "b", stake: "50%" }, { from: "b", to: "a", stake: "50%" }],
-  );
-  assert.equal(cyc.order.length >= 1, true);
 });
 
 test("orchestrate inserts a dummy waypoint for an edge that spans a layer", () => {
@@ -148,22 +117,6 @@ test("fitPlan pans once boxes would drop below the minimum", () => {
   assert.equal(plan.renderW, 1500);
 });
 
-test("typeBands groups nodes into bands and preserves within-band order", () => {
-  const ns = [
-    { id: "me", band: 0 }, { id: "spouse", band: 0 },
-    { id: "trustA", band: 1 },
-    { id: "cafe", band: 2 }, { id: "holdco", band: 2 },
-  ];
-  const { order, rows } = typeBands(ns, (n) => n.band);
-  assert.deepEqual(order, [0, 1, 2]);
-  assert.deepEqual(rows, { 0: ["me", "spouse"], 1: ["trustA"], 2: ["cafe", "holdco"] });
-});
-
-test("typeBands omits empty bands from order", () => {
-  const { order } = typeBands([{ id: "a", band: 2 }, { id: "b", band: 2 }], (n) => n.band);
-  assert.deepEqual(order, [2]);
-});
-
 test("fitPlan is safe with no container width", () => {
   const plan = fitPlan({ contentW: 700, containerW: 0, nodeW: 200, minNodePx: 150 });
   assert.equal(plan.mode, "fit");
@@ -173,19 +126,6 @@ test("fitPlan is safe with no container width", () => {
 test("fitPlan is safe with zero content width", () => {
   const plan = fitPlan({ contentW: 0, containerW: 900, nodeW: 200, minNodePx: 150 });
   assert.equal(plan.mode, "fit");
-});
-
-test("layeredLayout handles an empty graph", () => {
-  const { order, rows } = layeredLayout([], []);
-  assert.deepEqual(order, []);
-  assert.deepEqual(rows, {});
-});
-
-test("layeredLayout handles a single unlinked node", () => {
-  const { order, rows, layerOf } = layeredLayout([{ id: "me" }], []);
-  assert.deepEqual(order, [0]);
-  assert.deepEqual(rows, { 0: ["me"] });
-  assert.equal(layerOf.me, 0);
 });
 
 test("capTablesByEntity returns an empty object for no edges", () => {
