@@ -148,6 +148,7 @@ function adaptEntity(row, assets) {
     // "S Corporation", "Revocable Trust", "Estate"). Coloured by `kind`.
     label: row.label,
     subtype: row.subtype || undefined,
+    industry: row.industry || undefined,
     meta: row.meta || undefined,
     icon: row.kind === "business" ? "briefcase" : (row.kind === "trust" ? "doc" : undefined),
     initials: row.kind === "personal" ? "ME" : initialsOf(row.name),

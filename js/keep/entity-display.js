@@ -43,6 +43,12 @@ export function entitySubtype(entity) {
   return entity.kind === "personal" ? "You" : "—";
 }
 
+// Business industry ("Media", "Real estate", …). Its own record column now,
+// distinct from `subtype` (the legal structure). Empty for non-businesses.
+export function entityIndustry(entity) {
+  return entity && entity.industry ? entity.industry : "";
+}
+
 // Sprite glyph for the entity avatar (frame-less line icon), by kind.
 export function entityAvatarIcon(entity) {
   return entity.kind === "business" ? "ent-company" : (entity.kind === "trust" ? "ent-trust" : "ent-person");

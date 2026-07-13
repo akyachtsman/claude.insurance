@@ -2,7 +2,14 @@
 // Run: node --test js/keep/entity-display.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { entityCategory, entitySubtype, entityColorSuffix, entityRelStyleKey, entityAvatarIcon, entityMapSub } from "./entity-display.js";
+import { entityCategory, entitySubtype, entityColorSuffix, entityRelStyleKey, entityAvatarIcon, entityMapSub, entityIndustry } from "./entity-display.js";
+
+test("entityIndustry returns the business industry, empty otherwise", () => {
+  assert.equal(entityIndustry({ kind: "business", subtype: "LLC", industry: "Media" }), "Media");
+  assert.equal(entityIndustry({ kind: "business", subtype: "LLC" }), "");
+  assert.equal(entityIndustry({ kind: "person", subtype: "Spouse" }), "");
+  assert.equal(entityIndustry(null), "");
+});
 
 test("entityCategory: the account holder is UBO, other people are Individual", () => {
   assert.equal(entityCategory({ kind: "personal" }), "UBO");
