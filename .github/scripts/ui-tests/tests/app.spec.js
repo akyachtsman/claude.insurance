@@ -459,3 +459,85 @@ test('S8: contact step requires a name and a contact method', async ({ page }) =
   await expect(page.locator('.error')).toContainText(/email or phone/i);
   await expect(page.locator('#contact-name')).toBeVisible(); // still on the step
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO 9 — The Keep auth gate
+// Source: CLAUDE.md § Project-Specific Test Scenarios (S9)
+//
+// Live-only. The gate is real Supabase Auth, which the local qa.yml server
+// cannot reach, so this self-skips there and is covered by qa-live.
+//
+// It needs NO TEST_AUTH_CREDENTIAL. The login form ships prefilled from
+// DEMO_CREDENTIAL (js/supabase.js), so the happy path is "submit what the form
+// already holds", and the bad-password path reads the prefilled value back
+// before overwriting it — which is why no credential is hardcoded here.
+//
+// The dashboard assertion targets .k-welcome__h and NOT the bare text
+// "Welcome back": the login card's own title (.k-atitle) is also "Welcome
+// back", so matching on that text alone would pass while still sitting on the
+// login screen — a vacuous green for the exact thing this scenario guards.
+// ─────────────────────────────────────────────────────────────────────────────
+const KEEP_LIVE_TARGET = !/localhost|127\.0\.0\.1/.test(process.env.APP_URL ?? '');
+
+test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, and admits the demo user', async ({ page }) => {
+  test.skip(!KEEP_LIVE_TARGET, 'The Keep gate is real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
+  test.setTimeout(90_000);
+
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+
+  const authcard = page.locator('.k-authcard');
+  const dashboard = page.locator('.k-welcome__h');
+
+  // 1. Deep-link the Keep while signed out → the guard must land on login,
+  //    not the dashboard. Asserting the dashboard's ABSENCE is the real
+  //    outcome; a visible login form alone would not prove the guard ran.
+  await page.goto('./#/keep');
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await expect(authcard, 'Signed-out #/keep did not land on the login form').toBeVisible();
+  await expect(dashboard, 'Signed-out #/keep reached the dashboard — the auth gate is open').toHaveCount(0);
+
+  // 2. A wrong password is rejected and does not advance.
+  const pwField = authcard.locator('input[type="password"]');
+  const prefilled = await pwField.inputValue();
+  expect(prefilled, 'Login form is not prefilled — S9 assumes the demo credential ships in the form').not.toBe('');
+  await pwField.fill('definitely-not-the-password');
+  await authcard.getByRole('button', { name: /log in/i }).click();
+  await expect(authcard.locator('.k-error'), 'A wrong password produced no error').not.toBeEmpty();
+  await expect(dashboard, 'A wrong password still reached the dashboard').toHaveCount(0);
+
+  // Discard console noise from the rejected login HERE, scoped to this step,
+  // rather than text-filtering at the end. A global /400|401/ filter would also
+  // swallow a genuine 400/401 from a later dashboard or sign-out request — and
+  // would match any error text that merely contains those digits. Everything
+  // logged after this line is asserted strictly.
+  consoleErrors.length = 0;
+
+  // 3. Restore the credential the form shipped with → the dashboard opens.
+  await pwField.fill(prefilled);
+  await authcard.getByRole('button', { name: /log in/i }).click();
+  await expect(dashboard, 'The prefilled demo credential did not reach the dashboard').toBeVisible({ timeout: 30_000 });
+  await expect(dashboard).toHaveText(/welcome back,/i);
+  await expect(authcard, 'The login form is still present after a successful sign-in').toHaveCount(0);
+
+  // 4. Sign-out is DELIBERATELY NOT EXERCISED HERE. js/supabase.js calls
+  //    supabase.auth.signOut() with no scope, and supabase-js v2 defaults to
+  //    GLOBAL scope — it revokes every refresh token for that identity, not
+  //    just this browser's. Against the shared prefilled demo account that
+  //    means each live run would sign out real visitors, and would sign out
+  //    the OTHER Playwright project running this same spec concurrently
+  //    (the suite runs 2 workers), making the pair fight each other.
+  //
+  //    Covering sign-out safely needs one of: signOut({ scope: 'local' }) in
+  //    the app, or a dedicated test identity distinct from the demo account.
+  //    Until one exists, S9 covers the gate itself — block, reject, admit —
+  //    and claims nothing about sign-out. See PR #240.
+
+  // Console-error gate: no uncaught page errors at any point, and no console
+  // errors after the deliberate bad-password step (whose noise was cleared
+  // above, scoped to that step).
+  expect(pageErrors, `Uncaught page errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+  expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join('; ')}`).toHaveLength(0);
+});
