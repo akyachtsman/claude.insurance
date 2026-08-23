@@ -479,7 +479,7 @@ test('S8: contact step requires a name and a contact method', async ({ page }) =
 // ─────────────────────────────────────────────────────────────────────────────
 const KEEP_LIVE_TARGET = !/localhost|127\.0\.0\.1/.test(process.env.APP_URL ?? '');
 
-test('S9: Keep auth gate blocks, rejects a bad password, admits the demo user, and releases on sign-out', async ({ page }) => {
+test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, and admits the demo user', async ({ page }) => {
   test.skip(!KEEP_LIVE_TARGET, 'The Keep gate is real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
   test.setTimeout(90_000);
 
@@ -522,20 +522,18 @@ test('S9: Keep auth gate blocks, rejects a bad password, admits the demo user, a
   await expect(dashboard).toHaveText(/welcome back,/i);
   await expect(authcard, 'The login form is still present after a successful sign-in').toHaveCount(0);
 
-  // 4. Sign out must release the SESSION, not merely render the login page.
-  await page.goto('./#/keep/account');
-  await page.getByRole('button', { name: /sign out/i }).click();
-  await expect(authcard, 'Sign-out did not return to the login form').toBeVisible({ timeout: 30_000 });
-
-  // Landing on the login page proves nothing on its own: signOutButton()
-  // navigates to #/keep/login unconditionally after awaiting signOut(), so a
-  // failed or no-op sign-out renders exactly the same screen. Re-enter a
-  // protected route and make the guard answer — if the session survived,
-  // #/keep serves the dashboard and this fails.
-  await page.goto('./#/keep');
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await expect(dashboard, 'Session survived sign-out — #/keep still reached the dashboard').toHaveCount(0);
-  await expect(authcard, 'Signed-out #/keep did not land on the login form').toBeVisible({ timeout: 30_000 });
+  // 4. Sign-out is DELIBERATELY NOT EXERCISED HERE. js/supabase.js calls
+  //    supabase.auth.signOut() with no scope, and supabase-js v2 defaults to
+  //    GLOBAL scope — it revokes every refresh token for that identity, not
+  //    just this browser's. Against the shared prefilled demo account that
+  //    means each live run would sign out real visitors, and would sign out
+  //    the OTHER Playwright project running this same spec concurrently
+  //    (the suite runs 2 workers), making the pair fight each other.
+  //
+  //    Covering sign-out safely needs one of: signOut({ scope: 'local' }) in
+  //    the app, or a dedicated test identity distinct from the demo account.
+  //    Until one exists, S9 covers the gate itself — block, reject, admit —
+  //    and claims nothing about sign-out. See PR #240.
 
   // Console-error gate: no uncaught page errors at any point, and no console
   // errors after the deliberate bad-password step (whose noise was cleared
