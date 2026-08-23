@@ -508,6 +508,13 @@ test('S9: Keep auth gate blocks, rejects a bad password, admits the demo user, a
   await expect(authcard.locator('.k-error'), 'A wrong password produced no error').not.toBeEmpty();
   await expect(dashboard, 'A wrong password still reached the dashboard').toHaveCount(0);
 
+  // Discard console noise from the rejected login HERE, scoped to this step,
+  // rather than text-filtering at the end. A global /400|401/ filter would also
+  // swallow a genuine 400/401 from a later dashboard or sign-out request — and
+  // would match any error text that merely contains those digits. Everything
+  // logged after this line is asserted strictly.
+  consoleErrors.length = 0;
+
   // 3. Restore the credential the form shipped with → the dashboard opens.
   await pwField.fill(prefilled);
   await authcard.getByRole('button', { name: /log in/i }).click();
@@ -515,17 +522,24 @@ test('S9: Keep auth gate blocks, rejects a bad password, admits the demo user, a
   await expect(dashboard).toHaveText(/welcome back,/i);
   await expect(authcard, 'The login form is still present after a successful sign-in').toHaveCount(0);
 
-  // 4. Sign out releases the session and returns to login.
+  // 4. Sign out must release the SESSION, not merely render the login page.
   await page.goto('./#/keep/account');
   await page.getByRole('button', { name: /sign out/i }).click();
   await expect(authcard, 'Sign-out did not return to the login form').toBeVisible({ timeout: 30_000 });
 
-  // Console-error gate. Uncaught page errors are never acceptable. Console
-  // errors are filtered for ONE written reason: step 2 deliberately submits a
-  // bad password, and the auth call logs the resulting 400/401 to the console.
-  // Everything else still fails.
-  const expectedAuthNoise = /400|401|invalid login credentials|invalid_grant/i;
-  const unexpected = consoleErrors.filter(t => !expectedAuthNoise.test(t));
+  // Landing on the login page proves nothing on its own: signOutButton()
+  // navigates to #/keep/login unconditionally after awaiting signOut(), so a
+  // failed or no-op sign-out renders exactly the same screen. Re-enter a
+  // protected route and make the guard answer — if the session survived,
+  // #/keep serves the dashboard and this fails.
+  await page.goto('./#/keep');
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await expect(dashboard, 'Session survived sign-out — #/keep still reached the dashboard').toHaveCount(0);
+  await expect(authcard, 'Signed-out #/keep did not land on the login form').toBeVisible({ timeout: 30_000 });
+
+  // Console-error gate: no uncaught page errors at any point, and no console
+  // errors after the deliberate bad-password step (whose noise was cleared
+  // above, scoped to that step).
   expect(pageErrors, `Uncaught page errors: ${pageErrors.join('; ')}`).toHaveLength(0);
-  expect(unexpected, `Unexpected console errors: ${unexpected.join('; ')}`).toHaveLength(0);
+  expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join('; ')}`).toHaveLength(0);
 });
