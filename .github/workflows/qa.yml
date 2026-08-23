@@ -180,7 +180,7 @@ jobs:
         env:
           APP_URL: http://localhost:8080
           TEST_AUTH_CREDENTIAL: ${{ secrets.TEST_AUTH_CREDENTIAL }}
-        run: npx playwright test --reporter=list
+        run: npx playwright test
         working-directory: ${{ env.UI_TESTS_DIR }}
 
       - name: Upload test results
