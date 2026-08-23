@@ -2,15 +2,16 @@
 # Copy to .github/workflows/qa.yml in your project.
 #
 # Jobs:
-#   static-checks — secret scan; the blocking gate, runs on every trigger.
+#   static-checks — secret scan; a blocking gate, runs on every trigger.
 #   ui-changes    — diffs the PR against its base and decides whether the
 #                   browser job is needed. Non-PR events (push to main)
 #                   always run UI tests.
 #   ui-tests      — Playwright against a local server; runs only when an
 #                   index.html exists and UI-relevant paths changed (so the
-#                   scaffold/bootstrap PR stays clean). Non-blocking here (the
-#                   backend is unreachable on CI runners); qa-live.yml is
-#                   the authoritative UI gate.
+#                   scaffold/bootstrap PR stays clean). BLOCKING. It serves
+#                   static files and never renders the Keep, so qa-live.yml
+#                   stays the authoritative gate for layout; this one covers
+#                   the public flows.
 #
 # Required setup:
 #   - Add TEST_AUTH_CREDENTIAL as a repository secret (value from CLAUDE.md)
@@ -190,11 +191,30 @@ jobs:
           "./$UI_TESTS_DIR/node_modules/.bin/http-server" . -p 8080 --silent &
           sleep 2
 
-      # UI Tests against the local server are non-blocking: the backend API is
-      # unreachable on CI runners, so API-dependent scenarios fail with
-      # "API status: no call" by design. The authoritative UI gate is qa-live.yml.
+      # BLOCKING — deliberately. This step carried `continue-on-error: true`.
+      #
+      # The old justification was that the backend is unreachable on CI
+      # runners, so API-dependent scenarios failed with "API status: no call"
+      # and the job had to be allowed to fail. That reason no longer exists.
+      # The reachability split made S2/S3/S9 skip on LIVE_TARGET — is the
+      # target a live host? — rather than on credential-absence, so an
+      # unreachable backend now SKIPS those scenarios instead of failing them.
+      # Removing that coupling is what makes this tier safe to gate on.
+      #
+      # Why the flag had to go: continue-on-error rewrites a failed step's
+      # conclusion to success, so the job reported green regardless of what
+      # the tests did. Its real result could only be learned by a person
+      # opening the log, on every run, forever — a check whose failure is
+      # invisible proves nothing while looking like coverage. Verified green
+      # from the logs (not the conclusions) of 02797ce and 7597322 —
+      # 24 passed / 12 skipped / 0 failed on each — before flipping.
+      #
+      # CAVEAT, do not lose this: the local tier serves static files and never
+      # renders the Keep, and css/keep.css holds all four tablet-band
+      # breakpoints (1040/900/880/860). Green here is NOT coverage proof for
+      # the viewport matrix — qa-live.yml is the gate that proves layout.
+      # This gate is narrow. It just reports honestly.
       - name: Run Playwright tests
-        continue-on-error: true
         env:
           APP_URL: http://localhost:8080
           TEST_AUTH_CREDENTIAL: ${{ secrets.TEST_AUTH_CREDENTIAL }}
