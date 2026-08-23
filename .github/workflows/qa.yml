@@ -53,7 +53,7 @@ jobs:
       - name: Secret scan
         run: |
           # Canonical secret-scan pattern — keep identical to global.md and qa-response.yml.
-          if grep -rE \
+          if grep -rlE \
             'pat[A-Za-z0-9]{14}\.[A-Za-z0-9]{40,}|pat[A-Za-z0-9]{17}\.[a-f0-9]{64}|pat[lr]_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9]{20,}|xoxb[-]' \
             --include="*.js" --include="*.html" --include="*.css" --include="*.json" \
             --exclude-dir=node_modules --exclude-dir=.git .; then

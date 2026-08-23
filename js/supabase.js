@@ -69,7 +69,13 @@ export async function signIn(email, password) {
 }
 
 export async function signOut() {
-  await supabase.auth.signOut();
+  // scope: 'local' — sign out THIS browser only. supabase-js v2 defaults to
+  // 'global', which revokes every refresh token for the identity, so signing
+  // out on one device silently ended the session on all the others. It also
+  // made the demo account untestable: an automated sign-out would have logged
+  // out real visitors and any concurrently running test worker.
+  // A dedicated test identity is the proper end state; this removes the hazard.
+  await supabase.auth.signOut({ scope: "local" });
   invalidate();
 }
 
