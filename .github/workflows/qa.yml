@@ -137,7 +137,25 @@ jobs:
     needs: [static-checks, ui-changes]
     if: needs.ui-changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 60, deliberately generous — an INFRASTRUCTURE backstop, not a test-duration
+    # bound. Measured on this repo (run 32655105739, the run that landed this
+    # line): the whole job takes 2m30s, of which the browser install is 45s and
+    # the 36-test Playwright run is 1m24s. So 20 was NOT below the observed path
+    # — do not repeat that claim, it was imported from an upstream measurement
+    # and is false here.
+    #
+    # What 20 does not cover is the tail. This job has no actions/cache for
+    # ~/.cache/ms-playwright (unlike the ui-suite composite qa-live uses), so it
+    # re-downloads ~215 MiB of chromium + webkit on EVERY run, and the identical
+    # command was measured at 21m25s upstream on a degraded CDN path
+    # (claude.directives #290). Nothing here is immune to that — same command,
+    # same CDN, same runner class. A job cancelled on its bound reads as
+    # inconclusive rather than red, so that tail would go unchased.
+    #
+    # Per-test hangs are already caught by playwright.config.js `timeout: 30_000`;
+    # this ceiling exists only for the install tail. If you lower it, measure the
+    # COLD path on a bad day — a warm timing says nothing about the exposure.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
