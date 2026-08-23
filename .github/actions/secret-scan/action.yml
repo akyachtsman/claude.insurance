@@ -22,7 +22,7 @@ runs:
         # `|| rc=$?` is required: the step runs under `bash -eo pipefail`, where a
         # bare grep exiting 1 (clean — no match) would abort the step.
         rc=0
-        grep -rE \
+        grep -rlE \
           'pat[A-Za-z0-9]{14}\.[A-Za-z0-9]{40,}|pat[A-Za-z0-9]{17}\.[a-f0-9]{64}|pat[lr]_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9]{20,}|xoxb[-]' \
           --include="*.js" --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.html" --include="*.css" --include="*.json" --include="*.md" --include="*.sh" --include="*.yml" --include="*.yaml" \
           --exclude-dir=node_modules --exclude-dir=.git . || rc=$?

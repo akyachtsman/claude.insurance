@@ -21,10 +21,18 @@ function readCredentialFromClaude() {
   try {
     const root = resolve(process.cwd(), '../../..'); // up from .github/scripts/ui-tests
     const claude = readFileSync(resolve(root, 'CLAUDE.md'), 'utf8');
-    // Matches all of:
-    //   Test PIN: 0100        Valid PIN: 0100
-    //   TEST_AUTH_CREDENTIAL: 0100
-    //   | Valid test PIN | `0100` |   (table format)
+    // Username/password PAIR form, tried first:
+    //   | Keep credential (valid) | `user` / `keep-demo-2026` … |
+    // Captures the SECOND token deliberately. detectAndAuth fills the password
+    // field, and this app's login ships the username prefilled — matching the
+    // first token would type the username into the password box and fail.
+    const pair = claude.match(
+      /credential[^|\n]*\|\s*`?[\w.@+-]+`?\s*\/\s*`?([\w.@!#$%^&*+-]{2,})`?/i
+    );
+    if (pair?.[1]) return pair[1].trim();
+
+    // Single-token form: "Test PIN: 0100", "TEST_AUTH_CREDENTIAL: 0100",
+    // "| Valid test PIN | `0100` |".
     const match = claude.match(
       /(?:valid\s+(?:test\s+)?pin|test\s+(?:pin|credential|password)|TEST_AUTH_CREDENTIAL)\s*[:|]\s*`?([0-9a-zA-Z!@#$%^&*]{2,})`?/i
     );
@@ -37,6 +45,20 @@ function readCredentialFromClaude() {
 // Falls back to null if neither env var nor CLAUDE.md has a credential.
 // Auth-dependent tests skip gracefully rather than failing when null.
 const AUTH_CREDENTIAL = process.env.TEST_AUTH_CREDENTIAL ?? readCredentialFromClaude() ?? null;
+
+// Backend reachability, kept SEPARATE from credential availability.
+//
+// The credential-absent skip exists so a project with no auth is not forced to
+// invent one. It was never meant to double as "the backend is unreachable" —
+// but that is what it had become here, because the local tier serves the app
+// from a bundled static server while the app's data layer is remote. Conflating
+// the two makes the auth secret un-settable: supplying it would un-skip the
+// auth scenarios on the local tier too, where they can only fail. So the secret
+// stays withheld, and the live coverage it buys never arrives.
+//
+// Splitting the conditions makes the secret a plain chore: auth scenarios run
+// live, and skip locally for the reason that is actually true there.
+const LIVE_TARGET = !/localhost|127\.0\.0\.1/.test(process.env.APP_URL ?? '');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API CALL CAPTURE — must wrap fetch before page load via addInitScript
@@ -193,6 +215,7 @@ test('S1: page loads without JS errors', async ({ page }) => {
 // SCENARIO 2 — Auth Discovery & Login (with API diagnostics)
 // ─────────────────────────────────────────────────────────────────────────────
 test('S2: auth gate discovered and credential accepted', async ({ page }) => {
+  test.skip(!LIVE_TARGET, 'Local tier serves the app statically and cannot reach the backend — qa-live is the authoritative gate for auth flows.');
   if (!AUTH_CREDENTIAL) test.skip(true, 'No auth credential found in CLAUDE.md or TEST_AUTH_CREDENTIAL env var — skipping auth test');
   const consoleErrors = [];
   page.on('pageerror', e => consoleErrors.push(e.message));
@@ -250,6 +273,7 @@ test('S3: interactive elements discovered and exercised without errors', async (
   // navigation waits) and cannot fit the 30s global timeout on element-rich
   // apps or mobile-emulated projects.
   test.setTimeout(240_000);
+  test.skip(!LIVE_TARGET, 'Local tier serves the app statically and cannot reach the backend — qa-live is the authoritative gate for the interaction sweep.');
   if (!AUTH_CREDENTIAL) test.skip(true, 'No auth credential — skipping interaction sweep (auth required to reach app content)');
   const consoleErrors = [];
   const apiAnomalies  = [];
@@ -477,10 +501,9 @@ test('S8: contact step requires a name and a contact method', async ({ page }) =
 // back", so matching on that text alone would pass while still sitting on the
 // login screen — a vacuous green for the exact thing this scenario guards.
 // ─────────────────────────────────────────────────────────────────────────────
-const KEEP_LIVE_TARGET = !/localhost|127\.0\.0\.1/.test(process.env.APP_URL ?? '');
 
-test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, and admits the demo user', async ({ page }) => {
-  test.skip(!KEEP_LIVE_TARGET, 'The Keep gate is real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
+test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, admits the demo user, and releases the session on sign-out', async ({ page }) => {
+  test.skip(!LIVE_TARGET, 'The Keep gate is real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
   test.setTimeout(90_000);
 
   const pageErrors = [];
@@ -522,18 +545,23 @@ test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, 
   await expect(dashboard).toHaveText(/welcome back,/i);
   await expect(authcard, 'The login form is still present after a successful sign-in').toHaveCount(0);
 
-  // 4. Sign-out is DELIBERATELY NOT EXERCISED HERE. js/supabase.js calls
-  //    supabase.auth.signOut() with no scope, and supabase-js v2 defaults to
-  //    GLOBAL scope — it revokes every refresh token for that identity, not
-  //    just this browser's. Against the shared prefilled demo account that
-  //    means each live run would sign out real visitors, and would sign out
-  //    the OTHER Playwright project running this same spec concurrently
-  //    (the suite runs 2 workers), making the pair fight each other.
-  //
-  //    Covering sign-out safely needs one of: signOut({ scope: 'local' }) in
-  //    the app, or a dedicated test identity distinct from the demo account.
-  //    Until one exists, S9 covers the gate itself — block, reject, admit —
-  //    and claims nothing about sign-out. See PR #240.
+  // 4. Sign out must release the SESSION, not merely render the login page.
+  //    Safe to exercise now: js/supabase.js signs out with scope: 'local', so
+  //    this revokes only this browser's session. Under the previous global
+  //    default it would have signed out real visitors on the shared demo
+  //    identity and the other worker running this same spec.
+  await page.goto('./#/keep/account');
+  await page.getByRole('button', { name: /sign out/i }).click();
+  await expect(authcard, 'Sign-out did not return to the login form').toBeVisible({ timeout: 30_000 });
+
+  //    Landing on the login page proves nothing on its own: signOutButton()
+  //    navigates to #/keep/login unconditionally after awaiting signOut(), so a
+  //    failed or no-op sign-out renders exactly the same screen. Re-enter a
+  //    protected route and make the guard answer.
+  await page.goto('./#/keep');
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await expect(dashboard, 'Session survived sign-out — #/keep still reached the dashboard').toHaveCount(0);
+  await expect(authcard, 'Signed-out #/keep did not land on the login form').toBeVisible({ timeout: 30_000 });
 
   // Console-error gate: no uncaught page errors at any point, and no console
   // errors after the deliberate bad-password step (whose noise was cleared
