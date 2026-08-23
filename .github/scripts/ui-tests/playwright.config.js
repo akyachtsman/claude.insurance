@@ -31,8 +31,18 @@ export default defineConfig({
       // Tablet is its own class, not an interpolation between the two: global.md
       // requires laptop, tablet AND phone, and Pixel 5 + iPhone 12 are both phone
       // profiles, so a tablet-only breakpoint regression was invisible.
+      //
+      // PORTRAIT (810 wide), deliberately — NOT the landscape variant, which is
+      // 1080 wide. This project's widest breakpoint is max-width: 900px, so a
+      // 1080-wide project clears every media query it has and renders the same
+      // layout as `desktop` — a project named tablet that tests nothing, which
+      // is worse than no tablet project because it looks like coverage.
+      // 810 sits inside the band: it picks up the 900px and 860px rules and
+      // misses 760px and below, so it is genuinely distinct from both
+      // neighbours. Verify the WIDTH against this project's breakpoints when
+      // changing this — the device name is a convenience, not the fact.
       name: 'tablet',
-      use: { ...devices['iPad (gen 7) landscape'] },
+      use: { ...devices['iPad (gen 7)'] },
     },
     {
       name: 'mobile-chrome',
