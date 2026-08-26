@@ -31,7 +31,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `data` (offline fixture + `ASSET_META`).
 - **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/logic/data.js` is now the **offline test fixture + `ASSET_META`** (not the app's data source); `js/keep/logic/analysis.js` (asset → coverage analysis; reuses `rules.js`; tests `js/keep/logic/analysis.test.mjs`); `js/keep/logic/depreciation.js` (pure per-asset-type actual-cash-value depreciation engine; straight-line ACV to a per-type salvage floor, non-depreciating for property/land/valuables; surfaced as an Assets-table column + a "Value & depreciation" schedule on the asset detail page; tests `js/keep/logic/depreciation.test.mjs`); `css/keep.css` (Direction C portal styles, `k-` prefixed). Reachable by URL, unlinked from the public nav. A demo ribbon marks it as the seeded demo account.
 - `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
-- `js/supabase.js` — live data client (`@supabase/supabase-js` from esm.sh): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; `js/keep/logic/data.js` remains as the offline test fixture + `ASSET_META`. Service-role key never shipped. **No mocked/hard-coded data path ships:** the app *always* reads/writes real Supabase. A stubbed `supabase.js` exists only in the offline Playwright harness (a scratchpad-only overlay, never committed) so UI geometry/render can be checked without network or auth; it is not part of the repo or the deployed app.
+- `js/supabase.js` — live data client (`@supabase/supabase-js`, **vendored** at `js/vendor/supabase-js.js` — see that directory's README): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; `js/keep/logic/data.js` remains as the offline test fixture + `ASSET_META`. Service-role key never shipped. **No mocked/hard-coded data path ships:** the app *always* reads/writes real Supabase. A stubbed `supabase.js` exists only in the offline Playwright harness (a scratchpad-only overlay, never committed) so UI geometry/render can be checked without network or auth; it is not part of the repo or the deployed app.
 - `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
 - `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) and `desk-ask` are deployed and ACTIVE; the `notify-lead` / `notify-renewal` functions are still to come.
@@ -54,15 +54,41 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 
-**Local Playwright ceiling.** Only S1/S4 on chromium can pass in an agent
-sandbox: the webkit profiles (`tablet`, `iphone`) have no browser installed, and
-S5-S8 need `esm.sh`, which is blocked there — `js/supabase.js` imports the
-Supabase client from it at runtime, so the module graph never loads and the
-questionnaire never renders. Neither is a code fault; CI reaches both. Do not
-"fix" a local S5-S8 failure.
+**Local Playwright ceiling.** In an agent sandbox **S1/S4/S7/S8 pass on
+chromium; S5/S6 cannot; the webkit profiles cannot run at all.** Two causes,
+both environmental — never "fix" a local failure from either.
+
+- **No webkit or firefox anywhere in the fleet's sandbox image** (verified
+  across three sandboxes, 2026-08-26): it ships chromium only, so `tablet` and
+  `iphone` fail at launch in ~3ms. Installing webkit is not the fix; CI has it.
+- **The bundled browser has no working HTTPS path to any external host through
+  the proxy**, so S5/S6 cannot load `rule_settings` and compute a `.need`.
+  Confirmed with the one-command discriminator: `curl` to the Supabase REST
+  endpoint returns **200 with the real settings**, while chromium fetching the
+  *same URL* throws `Failed to fetch`. A 200 from curl beside a browser failure
+  is proof of environment.
+
+Vendoring the Supabase client (2026-08-26) fixed the *module-load* half of this
+and recovered S7/S8 — the app now boots offline. It does **not** fix the
+*runtime-XHR* half, which is why S5/S6 still cannot pass here.
+
+**Failure duration classifies these before you open a log:** ~3ms and uniform =
+the browser never launched; times out at the action budget with a 200 page = the
+app cannot fetch; real elapsed time with real DOM and a named assertion = an
+actual defect, treat it as one.
 
 ## Project-Specific Security Constraints
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
+- **No third-party code on the render path (2026-08-26).** The Supabase client
+  is **vendored** (`js/vendor/supabase-js.js`, pinned 2.112.4) rather than
+  imported from `https://esm.sh/@supabase/supabase-js@2`. That import put a
+  third party on the critical path of every render including the authenticated
+  Keep, at a **floating major**, and an ES module import cannot carry an
+  integrity hash — so an esm.sh outage took the app down and a compromised build
+  there would have executed holding a user's session. **Accepted cost:** a
+  pinned bundle does not self-update; `js/vendor/README.md` carries the
+  regenerate command, the sha256 and the revisit trigger (any client security
+  advisory, and every `/refresh-repo`).
 - **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
 - **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
@@ -124,7 +150,6 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
-| `pages-retry.yml` held at `page_build` | Upstream moved this to `workflow_run: [pages-build-deployment]`. **Not adopted:** changing a workflow trigger is a stop-and-ask gate, and this repo is branch-source (its deploy runs as the managed `pages build and deployment`), so `page_build` fires correctly today. Revisit only with owner sign-off. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
 **Threshold values.** Never cache an upstream threshold — record the pointer.
