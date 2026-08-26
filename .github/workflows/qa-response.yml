@@ -79,7 +79,7 @@ jobs:
     # bound below the work it bounds does not protect anything; it fails on a
     # schedule. Warm runs finish in ~5 minutes, so this ceiling only ever applies
     # to the cold path it exists to survive.
-    timeout-minutes: 40
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
