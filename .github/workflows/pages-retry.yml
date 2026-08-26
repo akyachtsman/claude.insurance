@@ -50,6 +50,24 @@ on:
 permissions:
   actions: write
   contents: read
+
+# ── LOCAL DIVERGENCE from claude.directives (restored 2026-08-26, #249) ────────
+# Absent upstream. This existed in this repo's previous pages-retry.yml and was
+# dropped when the template was adopted verbatim; Codex caught the regression.
+#
+# WHY IT MATTERS: each job re-runs the ORIGINAL SHA of the run it was triggered
+# by. Two managed Pages runs failing in one outage therefore start two
+# INDEPENDENT retry jobs, and the long API backoff inside them can let the newer
+# one be re-triggered before the older — at which point the older job redeploys
+# STALE CONTENT OVER THE NEWER COMMIT. Serializing makes the retries strictly
+# ordered, so the last deploy is always the newest.
+#
+# cancel-in-progress is false ON PURPOSE: a retry that is already re-running a
+# failed deploy must be allowed to finish. Cancelling it would leave the site on
+# the failed build, which is the state this workflow exists to escape.
+concurrency:
+  group: pages-retry
+  cancel-in-progress: false
 jobs:
   retry:
     # Only when the Pages deploy failed, and only for the first few attempts.
