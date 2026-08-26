@@ -11,6 +11,13 @@
 // replace with vh.
 
 import { test, expect } from '@playwright/test';
+// LOCAL, absent upstream (which is env-only for credentials): readCredentialFromClaude()
+// below needs these. Dropped once by a graft that replaced this header wholesale — the
+// resulting ReferenceError was swallowed by that function's own catch, so the fallback
+// silently returned null and local runs skipped credential-dependent coverage while
+// looking healthy. Keep these next to the function that needs them.
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CREDENTIAL — environment only
