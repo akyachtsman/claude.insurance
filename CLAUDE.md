@@ -17,10 +17,10 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 
 ## Design Theme
 Project identity is **"Direction C" (Soft consumer)** — Quicksand (display) +
-Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
+Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii. Self-hosted OFL fonts in
 `css/fonts/`. Set via `data-theme="harbor"` on root `<html>`; tokens in
 `css/tokens.css`. Marketing site and the Keep portal share this one identity.
-- **Design Theme:** `harbor` (Direction C — violet/soft)
+- **Design Theme:** `harbor` (Direction C — blue/soft)
 
 ## Application Architecture
 - `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
@@ -48,6 +48,18 @@ Nunito (body), violet accent, soft tints, large radii. Self-hosted OFL fonts in
 |---|---|
 | Validate HTML | `npx html-validate index.html` |
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
+| Unit tests | `node --test $(find js -name '*.test.mjs')` |
+| Contrast guardrail | `node .github/scripts/check-contrast.js` |
+| Job bounds guard | `python3 .github/scripts/check-job-bounds.py` |
+| Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
+| Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
+
+**Local Playwright ceiling.** Only S1/S4 on chromium can pass in an agent
+sandbox: the webkit profiles (`tablet`, `iphone`) have no browser installed, and
+S5-S8 need `esm.sh`, which is blocked there — `js/supabase.js` imports the
+Supabase client from it at runtime, so the module graph never loads and the
+questionnaire never renders. Neither is a code fault; CI reaches both. Do not
+"fix" a local S5-S8 failure.
 
 ## Project-Specific Security Constraints
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
@@ -98,7 +110,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
-Synced from `claude.directives` @ `ce2140a`. These are **intentional** local
+Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
 departures from the templates. A refresh that silently restores any of them
 breaks this repo; each is listed so the next session diffs rather than "fixes".
 
@@ -108,13 +120,18 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `readCredentialFromClaude()` | Upstream is env-only (`ce2140a`). Kept so local runs work without the secret; the credential is already in this file's UI Test Configuration table, so reading it here exposes nothing new. |
 | S5–S9 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S9 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
+| S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
+| `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
+| `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
+| `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
+| `pages-retry.yml` held at `page_build` | Upstream moved this to `workflow_run: [pages-build-deployment]`. **Not adopted:** changing a workflow trigger is a stop-and-ask gate, and this repo is branch-source (its deploy runs as the managed `pages build and deployment`), so `page_build` fires correctly today. Revisit only with owner sign-off. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
 **Threshold values.** Never cache an upstream threshold — record the pointer.
 Where a config format forces a literal (`timeout-minutes` accepts no expression),
 the value is cached because it must be and **the pointer travels in the comment
 beside it**. See `qa-live.yml` / `qa-response.yml` (120, `claude.directives#301`)
-and `qa.yml` (60, browser floor). A temporary "don't do X until fixed" belongs in
+and `qa.yml` (120 — it now calls the `ui-suite` composite, so it answers to the same enforced floor, not the advisory browser one). A temporary "don't do X until fixed" belongs in
 the defective template upstream, not copied into N downstream files.
 
 ## Reporting Requirements

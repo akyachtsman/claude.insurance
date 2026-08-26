@@ -14,3 +14,7 @@ node_modules/
 .github/scripts/ui-tests/test-results/
 .github/scripts/ui-tests/playwright-report/
 .agent-reports/
+
+# Python bytecode from the CI guard scripts (check-job-bounds.py, workflow-ref-guard.py)
+__pycache__/
+*.pyc

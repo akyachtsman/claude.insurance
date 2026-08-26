@@ -170,7 +170,7 @@ SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "{", "}", ";;", "|&"}
 
 
 def _logical_lines(script):
-    """Yield logical shell lines, joining backslash continuations.
+    r"""Yield logical shell lines, joining backslash continuations.
 
     `echo \` + `  playwright install` is ONE command. Tokenizing physical lines
     made the first raise and be skipped, and the second parse as a standalone
@@ -188,7 +188,7 @@ def _logical_lines(script):
 
 
 def _continues(line):
-    """True when a trailing backslash is a SYNTACTICALLY ACTIVE continuation.
+    r"""True when a trailing backslash is a SYNTACTICALLY ACTIVE continuation.
 
     `echo ok # \` does not continue: bash ends the comment at the newline and
     runs the next line. Joining them anyway made shlex discard the next line as
