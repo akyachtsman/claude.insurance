@@ -129,6 +129,25 @@ Agents write evidence to `.agent-reports/`:
 - Destructive commands, data resets, migrations, or deploys require explicit approval.
 - If a check can't run locally, explain why and name the closest substitute.
 
+## Session Settings & Permissions (`.claude/settings.json`)
+- **Settings load at SESSION START.** Nothing merged into `.claude/settings.json`
+  affects the session that merged it — a permissions change is in force only from
+  the *next* session. Never conclude a change "didn't work" by testing it in the
+  session that made it.
+- **A correct-looking `permissions.allow` is not evidence that anything is
+  pre-approved.** While **auto mode** is active a classifier decides, and
+  `permissions` and `autoMode` are separate settings keys — the classifier does
+  not read `permissions.allow`. Denials under auto mode name *"the Claude Code
+  auto mode classifier"*, never a permission rule. Verified here at `d31486f`:
+  this repo carries the 12-entry scheduling allowlist, no `ask`, and **no
+  `autoMode` block**; `claude.directives` and `claude.prop` match.
+- **Status — diagnosis, not proven fix.** The auto-mode explanation is
+  `claude.directives`' reading of why the allowlist has never taken effect. It is
+  unconfirmed: the classifier blocks a session from writing its own live settings,
+  and that guard is correct — a session should not widen its own permissions
+  outside a reviewable diff. **Do not add an `autoMode` block speculatively;** the
+  exact JSON arrives from upstream once it is confirmed working there.
+
 ## Session Start
 1. Read all Imported Directive URLs above fully
 2. Verify the directives-toolkit plugin attached (commands/agents resolve) per global.md → Skill Bootstrap
