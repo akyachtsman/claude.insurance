@@ -54,6 +54,19 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 
+**Required watchers (`.github/workflow-ref-required.json`).** The guard checks
+two different things and only that file supplies the second: rule 1 is that
+every `workflow_run` name **resolves**; rule 2 is that a **required** watcher
+never goes **missing**. Without an entry, a refresh can delete a `workflow_run`
+trigger outright — or repoint it at some other real workflow — and the guard
+stays green, because nothing dangles. `pages-retry.yml` is registered against
+`pages-build-deployment`: it watches GitHub's **managed** Pages build, so there
+is no local file whose deletion would signal the breakage. Drop the entry only
+in the same change that deliberately stops it watching. The other watchers are
+not registered — doing so asserts their current lists are invariants, a broader
+claim than has been established. **The file holds no comments; JSON has none,
+and a `_comment` key is read as a workflow filename and fails the guard.**
+
 **Local Playwright ceiling.** In an agent sandbox **S1/S4/S7/S8 pass on
 chromium; S5/S6 cannot; the webkit profiles cannot run at all.** Two causes,
 both environmental — never "fix" a local failure from either.
