@@ -614,7 +614,11 @@ test('S2: auth gate discovered and credential accepted', async ({ page }) => {
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 
   const getApiCalls = await captureApiCalls(page);
-  await page.goto('./');
+  // `#/keep/login`, NOT `./`. The landing page is PUBLIC MARKETING — it has no
+  // auth gate at all, so detectAndAuth returned 'none' there and every auth
+  // assertion below was vacuous. S2 passed for months without once exercising a
+  // credential. The gate only exists under the Keep's route.
+  await page.goto('./#/keep/login');
   await page.waitForLoadState('networkidle').catch(() => {});
 
   // Captured BEFORE the attempt: expectGateCleared compares against it to tell a
@@ -625,10 +629,23 @@ test('S2: auth gate discovered and credential accepted', async ({ page }) => {
   const mechanism  = await detectAndAuth(page, AUTH_CREDENTIAL ?? '');
   const afterSnap  = await domSnapshot(page);
 
-  // The defect #309 fixes: detectAndAuth's result was DISCARDED, so a wrong
-  // credential left the scenario measuring the login screen and passing green.
-  // Our gate is input[type=password] — the only THROWING signal in the kit — so
-  // a rejected credential fails here loudly rather than attaching a diagnostic.
+  // THE ASSERTION THAT KEEPS THIS HONEST. Navigating fixes it today; this stops
+  // it silently regressing tomorrow. If the route moves, or the form stops
+  // rendering, mechanism goes back to 'none' and every check below passes
+  // vacuously again — exactly how this scenario was broken before.
+  expect(mechanism, 'No auth gate found at #/keep/login — S2 would verify nothing')
+    .not.toBe('none');
+
+  // detectAndAuth settles on a FIXED 3s sleep. This app keeps the form mounted
+  // while awaiting Supabase signIn() and navigates only on resolve, so ordinary
+  // backend latency looks identical to rejection. Poll for the gate to clear
+  // before judging, bounded well inside the 240s budget: a slow success becomes
+  // a success, while a real rejection still leaves the field up and throws below.
+  // Deliberately NOT fixed inside detectAndAuth — that block is byte-identical
+  // upstream and patching it would fork the graft (reported instead).
+  await expect(page.locator('input[type=password]').locator('visible=true').first())
+    .toBeHidden({ timeout: 30_000 }).catch(() => {});
+
   await expectGateCleared(page, mechanism, gateViewBefore);
 
   const domChanged = JSON.stringify(beforeSnap) !== JSON.stringify(afterSnap);
@@ -683,11 +700,18 @@ test('S3: interactive elements discovered and exercised without errors', async (
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 
   const getApiCalls = await captureApiCalls(page);
-  await page.goto('./');
+  // See S2: `./` is public marketing with no gate, so authenticating there was a
+  // no-op and this sweep mapped the PUBLIC site while claiming to exercise
+  // authenticated content.
+  await page.goto('./#/keep/login');
   await page.waitForLoadState('networkidle').catch(() => {});
   const gateViewBefore = await viewSignature(page);
   const mechanism = await detectAndAuth(page, AUTH_CREDENTIAL ?? '');
   await page.waitForLoadState('networkidle').catch(() => {});
+  expect(mechanism, 'No auth gate found at #/keep/login — the sweep would map the public site')
+    .not.toBe('none');
+  await expect(page.locator('input[type=password]').locator('visible=true').first())
+    .toBeHidden({ timeout: 30_000 }).catch(() => {});
   // Without this the sweep maps the LOGIN SCREEN's elements and reports success.
   await expectGateCleared(page, mechanism, gateViewBefore);
 
