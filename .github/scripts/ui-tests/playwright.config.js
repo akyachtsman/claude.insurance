@@ -12,6 +12,21 @@ export default defineConfig({
     // Live URL — overridable via APP_URL env var.
     baseURL: (process.env.APP_URL || 'https://akyachtsman.github.io/claude.insurance/').replace(/\/?$/, '/'),
     headless: true,
+    // ⚠️ BOTH OF THESE DEFAULT TO 0 = NO TIMEOUT in Playwright Test, which is why
+    // they are set explicitly. Left unset, an action or a navigation is bounded
+    // only by the enclosing test timeout, so ONE hung call consumes a scenario's
+    // entire budget — making every per-scenario sum in tests/app.spec.js a
+    // fiction, since each is built from terms that were not themselves bounded.
+    //
+    // navigationTimeout — a page that cannot load in 30s is a failure worth
+    // reporting as one. Governs goto(); the matching cap for
+    // waitForLoadState('networkidle') is IDLE_MS in tests/app.spec.js.
+    navigationTimeout: 30_000,
+    // actionTimeout — the floor for click()/fill()/press()/selectOption() calls
+    // that pass no timeout of their own. Most call sites pass one (2-3s) and
+    // those still win; this covers the ones that cannot reasonably guess,
+    // notably detectAndAuth()'s form interactions.
+    actionTimeout: 10_000,
     screenshot: 'only-on-failure',
     video: 'off',
     trace: 'on-first-retry',

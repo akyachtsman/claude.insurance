@@ -69,6 +69,10 @@
   --color-text-secondary: #55607F;
   --color-accent: #2F6AF6;
   --color-accent-hover: #1F52D6;
+  /* Text/icons ON an accent fill. Codifies the #fff that .btn-primary already
+     hardcoded, so the contrast guardrail measures the pair that actually
+     renders rather than a literal it cannot see. */
+  --color-on-accent: #FFFFFF;
   --color-accent-light: #E7EFFE;
   --color-accent-ring: rgba(47, 106, 246, 0.22);
   --color-danger: #C42847;
