@@ -96,6 +96,27 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
 | S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-h1` "Welcome back"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
 
+## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
+
+Synced from `claude.directives` @ `ce2140a`. These are **intentional** local
+departures from the templates. A refresh that silently restores any of them
+breaks this repo; each is listed so the next session diffs rather than "fixes".
+
+| Divergence | Why it must stay |
+|---|---|
+| `LIVE_TARGET` in `app.spec.js` | **Load-bearing; absent upstream.** Skips S2/S3/S9 when `APP_URL` is localhost. Without it those scenarios run against a static server with no backend and fail — and since #244 made `qa.yml`'s ui-tests job **blocking**, that reds every push to `main`. |
+| `readCredentialFromClaude()` | Upstream is env-only (`ce2140a`). Kept so local runs work without the secret; the credential is already in this file's UI Test Configuration table, so reading it here exposes nothing new. |
+| S5–S9 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S9 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
+| `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
+| S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
+
+**Threshold values.** Never cache an upstream threshold — record the pointer.
+Where a config format forces a literal (`timeout-minutes` accepts no expression),
+the value is cached because it must be and **the pointer travels in the comment
+beside it**. See `qa-live.yml` / `qa-response.yml` (120, `claude.directives#301`)
+and `qa.yml` (60, browser floor). A temporary "don't do X until fixed" belongs in
+the defective template upstream, not copied into N downstream files.
+
 ## Reporting Requirements
 Agents write evidence to `.agent-reports/`:
 - `implementation-summary.md`, `test-report.md`, `ui-test-report.md`
