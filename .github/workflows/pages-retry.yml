@@ -4,67 +4,184 @@ name: Pages Deploy Retry
 # try again later." — a GitHub-side blip, not a build problem — which otherwise
 # leaves the site on the previous version until someone manually re-runs it.
 #
-# Triggered by `page_build` (the event GitHub actually emits for Pages builds — the
-# dynamically-generated Pages deploy workflow does NOT fire `workflow_run`). Because
-# page_build can arrive while the deploy is still in progress, we POLL the latest
-# managed Pages run until it reaches a terminal state, then re-run it if it FAILED
-# (a full re-run reliably clears the transient error). Bounded by run_attempt (< 4)
-# so a genuinely broken deploy can't loop — then pages-monitor.yml opens its issue.
+# This workflow watches that managed deploy and, on a failure, re-runs it
+# automatically (a full re-run, which is what reliably clears the transient
+# error). It is bounded by run_attempt so a genuinely broken deploy can't loop:
+# after a few tries it stops and lets pages-monitor.yml open its tracking issue.
 #
 # Purely additive — no change to the Pages source or the existing deploy/monitor.
 on:
-  page_build:
-  workflow_dispatch:
-
+  workflow_run:
+    # The managed Pages workflow's actual `name` is its file slug
+    # "pages-build-deployment" (verified via the Actions API), not the prose
+    # title shown in the UI — the prose form never matches, so the retry
+    # would never fire.
+    # ⚠️ RULE W3 — BRANCH-SOURCE ONLY. Do NOT add your own deploy workflow here:
+    # this re-runs the whole watched run, so pointing it at a project-owned
+    # deploy replays that workflow's entire build. Actions-source projects build
+    # retry into their own deploy workflow instead (Automation 4b).
+    #
+    # ⚠️ ACTION ON AN ACTIONS-SOURCE SWITCH — pick ONE, and handle the guard
+    # entry differently in each. Nothing will tell you to: 'pages-build-
+    # deployment' is GitHub-managed, so the name still RESOLVES after the
+    # switch and W1, workflow-ref-guard and every other static check stay green.
+    #   (a) DELETE this file  -> DROP its REQUIRED entry in the same edit.
+    #   (b) REPOINT it at your own deploy, under W3's idempotent exception
+    #       -> UPDATE the REQUIRED entry to that deploy's name; do NOT drop it.
+    #       Dropping it removes the static guarantee for the customized name,
+    #       so a later watch-list edit can silently disable the exception while
+    #       workflow-ref-guard stays green -- the exact blind spot this whole
+    #       comment is about, reopened on the exception path.
+    #
+    # The reason is NOT that it goes quiet. Day to day it is inert, and that
+    # alone would only be dead weight. The reason is the VISIBILITY FLIP
+    # (global.md -> Hosting & Deployment): flipping repo visibility fires the
+    # legacy managed build even while Actions-source is configured, publishing
+    # the UNFILTERED tree. That build is precisely what this file watches — so
+    # a retry left installed will faithfully RE-RUN a rogue unfiltered deploy
+    # on failure, turning a one-off exposure into a retried one. An unrepointed
+    # monitor fails to notice; an unrepointed retry participates.
+    #
+    # Why, and the narrow exception for a provably idempotent deploy (which
+    # also requires a written REVISIT TRIGGER, not just the reasoning):
+    # docs/standards/automations.md -> Watcher Rules (W3).
+    workflows: [pages-build-deployment]
+    types: [completed]
 permissions:
   actions: write
   contents: read
 
-# Serialize retries so overlapping page_build events don't double-trigger a re-run.
+# ── LOCAL DIVERGENCE from claude.directives (restored 2026-08-26, #249) ────────
+# Absent upstream. This existed in this repo's previous pages-retry.yml and was
+# dropped when the template was adopted verbatim; Codex caught the regression.
+#
+# WHY IT MATTERS: each job re-runs the ORIGINAL SHA of the run it was triggered
+# by. Two managed Pages runs failing in one outage therefore start two
+# INDEPENDENT retry jobs, and the long API backoff inside them can let the newer
+# one be re-triggered before the older — at which point the older job redeploys
+# STALE CONTENT OVER THE NEWER COMMIT. Serializing stops the two jobs from
+# interleaving, which is worth having on its own.
+#
+# ⚠️ BUT SERIALIZING IS NOT SUFFICIENT, AND DO NOT RE-READ IT AS ORDERING. A
+# concurrency group gives MUTUAL EXCLUSION, not FIFO: GitHub does not guarantee
+# the order in which queued runs in a group execute. So the older retry can
+# still run SECOND and redeploy the older commit. An earlier revision of this
+# comment claimed the group made retries "strictly ordered"; it does not, and
+# nothing in Actions does. The stale-overwrite is closed by the obsolescence
+# CHECK in the step below — this block only keeps the two from overlapping.
+#
+# cancel-in-progress is false ON PURPOSE: a retry that is already re-running a
+# failed deploy must be allowed to finish. Cancelling it would leave the site on
+# the failed build, which is the state this workflow exists to escape.
 concurrency:
   group: pages-retry
   cancel-in-progress: false
-
 jobs:
   retry:
+    # Only when the Pages deploy failed, and only for the first few attempts.
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 4
     runs-on: ubuntu-latest
+    # Raised 5 -> 10 with the backoff below. Worst case is 90s of initial wait
+    # (30s x ATTEMPT, and the `if` above caps ATTEMPT at 3) plus 20+40+80+160s of
+    # call retries = 390s ≈ 6.5 min, which would have been killed at 5. Upstream's
+    # version of this comment says 5.2 min; that is arithmetically wrong, though
+    # its conclusion — that 10 is enough and 5 was not — still holds.
     timeout-minutes: 10
     steps:
-      - name: Re-run the latest Pages deployment if it failed
+      - name: Re-run the failed Pages deployment
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          # The triggering workflow's own id. Used to look for NEWER runs of the
+          # same workflow — see the obsolescence check below for why this is an
+          # id and not a name.
+          WF_ID: ${{ github.event.workflow_run.workflow_id }}
         run: |
           set -euo pipefail
-          latest() {
-            gh api "repos/${REPO}/actions/runs?per_page=20" \
-              --jq 'first(.workflow_runs[] | select(.name == "pages build and deployment"))'
-          }
-          run=$(latest)
-          if [ -z "$run" ] || [ "$run" = "null" ]; then
-            echo "No managed Pages deploy run found — nothing to do."; exit 0
-          fi
-          id=$(echo "$run" | jq -r '.id')
-          attempt=$(echo "$run" | jq -r '.run_attempt')
+          echo "Pages deploy run ${RUN_ID} (commit ${SHA:0:7}) failed on attempt ${ATTEMPT}."
+          echo "Re-running — transient 'try again later' publish failures clear on retry."
 
-          # page_build can fire mid-deploy — wait for this run to finish (up to ~3 min)
-          # before deciding, so we don't skip a failure that's still in flight.
-          status=$(echo "$run" | jq -r '.status')
-          for i in $(seq 1 9); do
-            [ "$status" = "completed" ] && break
-            sleep 20
-            run=$(gh api "repos/${REPO}/actions/runs/${id}" --jq '{status:.status, conclusion:.conclusion, run_attempt:.run_attempt}')
-            status=$(echo "$run" | jq -r '.status')
+          # ⚠️ THE RE-RUN CALL ITSELF MUST BE RETRIED, and this is the whole point of the
+          # change (2026-08-17). This workflow is a CHAIN: each link exists because the
+          # previous attempt's failure fired a workflow_run event. So if `gh run rerun`
+          # fails, NO new attempt is created, no event fires, and the chain is dead —
+          # silently, forever, with nothing but a red X on a job nobody watches.
+          #
+          # That is not hypothetical. On 2026-08-17 the Pages deployment API returned 503
+          # for commit 2e81e18; this workflow fired correctly three seconds later and its
+          # own `gh run rerun` came back:
+          #     failed to rerun: HTTP 503: No server is currently available...
+          # The job exited 1, attempt 2 was never created, and the site stayed on the
+          # previous build until a human re-triggered it by hand.
+          #
+          # The failure is CORRELATED by construction: the call goes to the same service
+          # that just 503'd, so the moment it is most likely to fail is precisely the
+          # outage this workflow exists for. A single-shot call cannot survive its own
+          # use case.
+          #
+          # ⚠️ AND THE OLD 20s WAS TOO FAST TO HELP. Attempts were 20s apart with a
+          # ceiling of 4, so the entire retry budget was spent inside about a minute —
+          # against an outage that ran for several. On that same commit the deploy 503'd
+          # on attempts 1, 2 AND 3 and only succeeded on the 4th, roughly six minutes
+          # later, and only because the attempts were being spaced by hand. Scaling the
+          # initial wait by attempt number is what makes four attempts span minutes
+          # instead of seconds; it costs nothing, since a deploy nobody is waiting on
+          # synchronously does not care about 90 seconds.
+          sleep $(( 30 * ATTEMPT ))
+
+          # Full re-run (not just failed jobs): re-running the whole run is what
+          # reliably clears the transient publish error.
+          ok=0
+          for wait in 0 20 40 80 160; do
+            [ "$wait" -gt 0 ] && { echo "re-run request failed; waiting ${wait}s"; sleep "$wait"; }
+
+            # ⚠️ REJECT AN OBSOLETE RUN — this, not the concurrency group, is what
+            # prevents a stale redeploy. The group serializes; it does NOT order
+            # (GitHub gives no FIFO guarantee for queued runs in a group). Since this
+            # job re-runs its OWN event's RUN_ID, an older retry executing second
+            # would republish an OLDER commit over a newer one. Only checking closes
+            # that, and it is re-checked on EVERY attempt because the waits above can
+            # span minutes and a newer deploy can land mid-loop.
+            #
+            # ⚠️ KEYED ON workflow_id, NEVER ON A NAME. The managed Pages workflow
+            # reports TWO different names: the workflows API calls it
+            # "pages-build-deployment" (the slug the `workflows:` trigger above must
+            # use), while the RUNS API calls it "pages build and deployment" (prose,
+            # spaces). Filtering runs by the slug therefore matches NOTHING — the max
+            # would fall through to 0, never exceed RUN_ID, and this guard would
+            # silently never fire while looking correct. Verified against the live API
+            # 2026-08-26.
+            #
+            # If the check itself cannot run, PROCEED rather than skip: an
+            # unverifiable check is not evidence of obsolescence, and skipping would
+            # silently abandon a deploy the site is waiting on. The stale overwrite
+            # needs a rare double-failure; an abandoned deploy needs only a flaky API.
+            if newest=$(gh api "repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=1" \
+                          --jq '.workflow_runs[0].id // 0'); then
+              if [ "${newest:-0}" -gt "${RUN_ID}" ]; then
+                echo "::notice::Pages run ${RUN_ID} (commit ${SHA:0:7}) is superseded by newer run ${newest} — skipping the re-run so an older commit is not republished over a newer one."
+                exit 0
+              fi
+            else
+              echo "::warning::Could not determine whether run ${RUN_ID} is superseded; proceeding with the re-run."
+            fi
+
+            # A failing command in an `if` CONDITION does not trip `set -e`, which is what
+            # lets the loop keep going — this call is expected to fail sometimes; that is
+            # the entire reason the loop exists.
+            if gh run rerun "${RUN_ID}" --repo "${REPO}"; then ok=1; break; fi
           done
-          concl=$(echo "$run" | jq -r '.conclusion')
-          attempt=$(echo "$run" | jq -r '.run_attempt')
-          echo "Latest Pages deploy: id=${id} status=${status} conclusion=${concl} attempt=${attempt}"
 
-          if [ "$status" = "completed" ] && [ "$concl" = "failure" ] && [ "$attempt" -lt 4 ]; then
-            echo "Deploy failed (attempt ${attempt}) — re-running to clear the transient publish error."
-            sleep 15
-            gh run rerun "$id" --repo "$REPO"
-            echo "Requested re-run of Pages deploy ${id}."
-          else
-            echo "No retry needed."
+          if [ "$ok" -ne 1 ]; then
+            # Fail LOUDLY rather than exiting 0 on a deploy that never got re-triggered.
+            # pages-monitor.yml opens the tracking issue; this annotation is what tells a
+            # human the automation gave up rather than that it was never needed.
+            echo "::error::Could not re-trigger Pages deploy ${RUN_ID} after 5 attempts — the deploy API is still refusing. The site is serving the PREVIOUS build; re-run it by hand once githubstatus.com is clear."
+            exit 1
           fi
+          echo "Requested re-run of Pages deploy ${RUN_ID}."

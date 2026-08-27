@@ -18,3 +18,9 @@ node_modules/
 # Python bytecode from the CI guard scripts (check-job-bounds.py, workflow-ref-guard.py)
 __pycache__/
 *.pyc
+
+# Transient input to the js/vendor regenerate procedure (js/vendor/README.md).
+# The bundle it produces IS committed; the throwaway entry stub is not.
+# js/vendor/package-lock.json IS committed — it is what makes the recorded
+# sha256 reproducible, and `npm ci` requires it.
+js/vendor/entry.mjs

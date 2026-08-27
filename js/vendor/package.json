@@ -1,0 +1,12 @@
+{
+  "name": "claude-insurance-vendor-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build-only manifest for js/vendor/supabase-js.js. Not shipped, not imported by the app. Its lockfile is what makes the recorded sha256 reproducible.",
+  "dependencies": {
+    "@supabase/supabase-js": "2.112.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

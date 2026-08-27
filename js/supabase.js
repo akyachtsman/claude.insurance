@@ -5,7 +5,13 @@
 // entities, assets, policies, relationships and reminder prefs — all guarded by
 // RLS (owner = auth.uid()). The service-role key is NEVER used in the browser.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// VENDORED, not fetched. This was `https://esm.sh/@supabase/supabase-js@2` — a
+// third party on the critical path of every render, at a floating major, with no
+// integrity pinning available to an ES module import. An outage there took the
+// app down; a compromised build there would have run in users' browsers holding
+// their Keep session. js/vendor/README.md carries the version, the regenerate
+// command, the sha256 and the revisit trigger a pinned copy obliges us to keep.
+import { createClient } from "./vendor/supabase-js.js";
 import { ASSET_META } from "./keep/logic/data.js";
 import { policyPresentation } from "./keep/logic/policies.js";
 

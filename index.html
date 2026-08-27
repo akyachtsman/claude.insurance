@@ -154,6 +154,13 @@
           "js/keep/views/policies-view.js", "js/keep/views/shell.js", "js/keep/views/relmap-view.js",
           "js/views/coverage.js", "js/views/landing.js", "js/views/qualify.js",
           "js/views/section.js", "js/views/summary.js",
+          // Vendored third party. It MUST be listed: js/supabase.js is cache-busted
+          // by this map, but its relative `./vendor/supabase-js.js` import resolves
+          // to an UNVERSIONED url, so a returning browser would keep serving the
+          // previously cached bundle indefinitely — and the pinned-bundle revisit
+          // trigger in js/vendor/README.md exists precisely so security updates
+          // reach people. An update nobody receives is not an update.
+          "js/vendor/supabase-js.js",
         ];
         var base = new URL(".", document.baseURI).href;
         var supportsImportMap = HTMLScriptElement.supports && HTMLScriptElement.supports("importmap");
