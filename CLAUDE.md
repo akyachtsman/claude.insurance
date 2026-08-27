@@ -119,9 +119,10 @@ goes red when that happens, so the date above matters.
   advisory, and every `/refresh-repo`). Reproducibility is pinned by
   `js/vendor/package-lock.json` and `npm ci` — pinning only the two *named*
   packages left transitive deps on ranges, so the recorded sha256 was not
-  actually reproducible. The regenerate block **must be run from `js/vendor/`**;
-  from the repo root it writes to the root and leaves the deployed bundle
-  untouched, so a security refresh would verify a file nobody serves.
+  actually reproducible. The regenerate block is **run from the repository
+  root** and enters `js/vendor/` itself — do not `cd` there first. Before that
+  `cd` existed the block wrote to the root and left the deployed bundle
+  untouched, so a security refresh would have verified a file nobody serves.
 - **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
 - **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.

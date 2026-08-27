@@ -25,12 +25,18 @@ hash, so there was no way to pin that path. Vendoring removes it entirely.
 
 ### Regenerate
 
-⚠️ **Run this from `js/vendor/`, not from the repository root.** The `cd` on the
-first line is load-bearing: every path below is relative to it, so running the
-block from the root would write `entry.mjs` and `supabase-js.js` **into the root**
-and leave the deployed `js/vendor/supabase-js.js` — the file the app actually
-imports — untouched. The build would succeed, the sha256 would match the artifact
-you just made, and you would have shipped nothing.
+⚠️ **Run this from the repository root.** The block enters `js/vendor/` itself on
+its first line and every path after that is relative to it — so do **not** `cd`
+there first, or `cd js/vendor` resolves to `js/vendor/js/vendor` and the
+regeneration either aborts (under `set -e`) or, worse, carries on in the wrong
+directory without it.
+
+That first line is load-bearing and must stay. An earlier version of this block
+used bare relative paths with no `cd`, so running it from the root — the normal
+way to run a documented repo command — wrote `entry.mjs` and `supabase-js.js`
+**into the root** and left the deployed `js/vendor/supabase-js.js`, the file the
+app actually imports, untouched. The build succeeded, the sha256 matched the
+artifact you had just made, and nothing shipped.
 
 ```sh
 cd js/vendor
@@ -64,10 +70,16 @@ packages ship no banners today — `eof` currently produces a byte-identical fil
 future dependency version which *does* ship them carries them through without
 anyone remembering to change it.
 
-**Verify after regenerating**, from `js/vendor/`: no bare imports
-(`grep -cE 'from"[^."/]' supabase-js.js` → 0), no remote references
-(`grep -c 'esm\.sh' supabase-js.js` → 0), `createClient` exported, and
-`node --check supabase-js.js` parses.
+**Verify after regenerating** — also from the repository root, so every path in
+this file means the same thing:
+
+```sh
+grep -cE 'from"[^."/]' js/vendor/supabase-js.js   # bare imports        -> 0
+grep -c  'esm\.sh'      js/vendor/supabase-js.js   # remote references   -> 0
+grep -c  'createClient' js/vendor/supabase-js.js   # export present      -> >=1
+node --check            js/vendor/supabase-js.js   # parses
+sha256sum               js/vendor/supabase-js.js   # matches the table above
+```
 
 ⚠️ **`LICENSES.md` IS PART OF THIS ARTIFACT — regenerate it too.** The bundle
 compiles nine packages into one file, so their licence notices must travel with
