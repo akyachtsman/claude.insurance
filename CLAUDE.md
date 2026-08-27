@@ -67,28 +67,43 @@ not registered — doing so asserts their current lists are invariants, a broade
 claim than has been established. **The file holds no comments; JSON has none,
 and a `_comment` key is read as a workflow filename and fails the guard.**
 
-**Local Playwright ceiling.** In an agent sandbox **S1/S4/S7/S8 pass on
-chromium; S5/S6 cannot; the webkit profiles cannot run at all.** Two causes,
-both environmental — never "fix" a local failure from either.
+**Local Playwright ceiling — recorded 2026-08-26.** In an agent sandbox
+**S1/S4/S7/S8 pass on chromium; S5/S6 do not; the webkit profiles do not run at
+all.** Two observed causes. `global.md` → **Network Access Playbook** governs
+browser-side network failures; this section only records what was measured here.
 
-- **No webkit or firefox anywhere in the fleet's sandbox image** (verified
-  across three sandboxes, 2026-08-26): it ships chromium only, so `tablet` and
-  `iphone` fail at launch in ~3ms. Installing webkit is not the fix; CI has it.
-- **The bundled browser has no working HTTPS path to any external host through
-  the proxy**, so S5/S6 cannot load `rule_settings` and compute a `.need`.
-  Confirmed with the one-command discriminator: `curl` to the Supabase REST
-  endpoint returns **200 with the real settings**, while chromium fetching the
-  *same URL* throws `Failed to fetch`. A 200 from curl beside a browser failure
-  is proof of environment.
+- **No webkit or firefox in the sandbox image** (checked in three sandboxes,
+  2026-08-26): chromium only, so `tablet` and `iphone` fail at launch. *Absent
+  is not unavailable* — a missing browser may be installable, so treat this as
+  "not present today", not "impossible". CI has both.
+- **Chromium could not complete an HTTPS request to the hosts S5/S6 need**
+  (Supabase REST, and previously esm.sh), so those scenarios cannot load
+  `rule_settings` and compute a `.need`. `curl` reached the same Supabase URL
+  with a 200 while chromium threw `Failed to fetch`.
 
-Vendoring the Supabase client (2026-08-26) fixed the *module-load* half of this
-and recovered S7/S8 — the app now boots offline. It does **not** fix the
-*runtime-XHR* half, which is why S5/S6 still cannot pass here.
+⚠️ **Do NOT treat "curl 200 + browser failure" as proof of environment.** That
+inference was retracted upstream (`claude.directives` #331, `d886513`) and it is
+unsound in both directions: curl succeeding shows the *host* is reachable from
+the sandbox, but the browser failing is equally consistent with a real app
+defect — a JS exception before the fetch, a bad URL, a selector regression. It
+decides nothing. The wrong version of this rule tells you to dismiss genuine
+failures, which is the expensive mistake.
 
-**Failure duration classifies these before you open a log:** ~3ms and uniform =
-the browser never launched; times out at the action budget with a 200 page = the
-app cannot fetch; real elapsed time with real DOM and a named assertion = an
-actual defect, treat it as one.
+Likewise **do not classify by failure duration.** A fast uniform failure is also
+a config or import throw; a 200 page with no DOM is also an app exception. Grade
+on **what actually happened** — read the log and name the assertion — never on a
+cheap correlate.
+
+Vendoring the Supabase client (2026-08-26) fixed the *module-load* half and
+recovered S7/S8 — the app now boots offline. It did not change the *runtime
+request* half, which is why S5/S6 still fail here.
+
+**What would make this record wrong** (re-check before relying on it): the
+sandbox image gains webkit/firefox, or gains a browser egress path; the proxy
+configuration changes; S5/S6 stop depending on a live Supabase read; or any
+listed scenario starts passing locally. A ceiling that is stale reads as current
+and silently suppresses a check that would now catch a real defect — nothing
+goes red when that happens, so the date above matters.
 
 ## Project-Specific Security Constraints
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
@@ -101,7 +116,12 @@ actual defect, treat it as one.
   there would have executed holding a user's session. **Accepted cost:** a
   pinned bundle does not self-update; `js/vendor/README.md` carries the
   regenerate command, the sha256 and the revisit trigger (any client security
-  advisory, and every `/refresh-repo`).
+  advisory, and every `/refresh-repo`). Reproducibility is pinned by
+  `js/vendor/package-lock.json` and `npm ci` — pinning only the two *named*
+  packages left transitive deps on ranges, so the recorded sha256 was not
+  actually reproducible. The regenerate block **must be run from `js/vendor/`**;
+  from the repo root it writes to the root and leaves the deployed bundle
+  untouched, so a security refresh would verify a file nobody serves.
 - **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
 - **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
@@ -163,7 +183,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
-| `pages-retry.yml` keeps a `concurrency` group | Absent upstream; this repo had it before #249 and lost it by adopting the template verbatim (Codex caught the regression). Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries whose long API backoff can reorder them — and the older job then **redeploys stale content over the newer commit**. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. Reported upstream. |
+| `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. Reported upstream. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
 **Threshold values.** Never cache an upstream threshold — record the pointer.
