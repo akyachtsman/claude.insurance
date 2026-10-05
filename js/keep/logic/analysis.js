@@ -1,4 +1,4 @@
-// keep/analysis.js — asset coverage analysis for the Keep.
+// keep/logic/analysis.js — asset coverage analysis for the Keep.
 // Reuses the shared rules engine (computeNeeds) for the broker-configurable,
 // risk-based RECOMMENDED coverages; core "must have" coverages per asset type
 // come from the catalog below. Pure + deterministic so it's unit-testable and
@@ -82,7 +82,12 @@ const CATALOG = {
 };
 
 export function analyzeAsset(asset, settings) {
-  const cat = CATALOG[asset.type];
+  // hasOwnProperty, not CATALOG[asset.type]. assets.type is free text the client
+  // controls, and CATALOG["constructor"] returns Object's constructor — truthy,
+  // so the `!cat` guard passed and `cat.must.map` threw. That TypeError took out
+  // the Keep landing page, My Entities AND entity detail (all call entitySummary),
+  // not just the one asset's page.
+  const cat = Object.prototype.hasOwnProperty.call(CATALOG, asset.type) ? CATALOG[asset.type] : null;
   if (!cat) return { mustHave: [], recommended: [], gaps: 0 };
   const held = new Set(asset.held || []);
 
@@ -98,7 +103,19 @@ export function analyzeAsset(asset, settings) {
         title: n.title,
         why: n.why,
         icon: (cat.icon && cat.icon[n.id]) || n.id,
-        status: held.has(n.id) ? "in-place" : "gap",
+        // An ADVISORY need is not a gap. rules.js flags the flood need raised
+        // from "unsure" flood risk as advisory ("It's worth checking your flood
+        // risk"); scoring it "gap" put it in the red alert treatment, the
+        // k-banner--gap banner, the landing "Coverage gaps" tile and the
+        // per-entity "Open gaps" metric, identical to a genuinely missing core
+        // coverage. The home profile has no "no" path for flood risk (an asset
+        // with attrs:{} yields "unsure") and `held` is broker-written only, so
+        // every client-created home carried a gap the client could not clear.
+        //
+        // Keyed on `advisory`, NOT on priority: umbrella is medium too, but it
+        // fires on a value that actually crossed the broker's threshold, so it
+        // is a real gap and stays one. cat.suggest already uses "suggested".
+        status: held.has(n.id) ? "in-place" : (n.advisory ? "suggested" : "gap"),
       });
     }
   }

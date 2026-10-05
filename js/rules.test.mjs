@@ -185,3 +185,43 @@ test("empty or unknown profile yields no needs", () => {
   assert.deepEqual(computeNeeds(null, SETTINGS), []);
   assert.deepEqual(computeNeeds({ domain: "other", answers: {} }, SETTINGS), []);
 });
+
+// ── Regression: thresholds must FAIL CLOSED (audit 2026-10-05) ──────────────
+// rule_settings.settings is free-form jsonb with no shape constraint, so a
+// broker can clear a threshold. A bare `n >= null` coerces to `n >= 0` and
+// recommended the coverage to EVERYONE.
+test("a cleared threshold recommends nothing rather than everything", () => {
+  const renter = { domain: "residential", answers: { home_status: { value: "rent" }, home_value: { amount: 1000 } } };
+  for (const bad of [null, "", "   ", NaN, "abc", true, []]) {
+    const ids = computeNeeds(renter, { residential: { umbrellaHomeValue: bad } }).map((n) => n.id);
+    assert.deepEqual(ids, ["renters"], `umbrellaHomeValue=${JSON.stringify(bad)} must not add umbrella`);
+  }
+});
+
+test("a cleared commercial threshold does not invent employees", () => {
+  const sole = { domain: "commercial", answers: { employee_count: { amount: 0 } } };
+  const ids = computeNeeds(sole, { commercial: { workersCompMinEmployees: null } }).map((n) => n.id);
+  assert.ok(!ids.includes("workers-comp"), "a sole proprietor must not be told they have employees");
+});
+
+test("a usable threshold still fires, including as a numeric string", () => {
+  const rich = { domain: "residential", answers: { home_status: { value: "own" }, home_value: { amount: 2000000 } } };
+  assert.ok(computeNeeds(rich, { residential: { umbrellaHomeValue: 1000000 } }).map((n) => n.id).includes("umbrella"));
+  assert.ok(computeNeeds(rich, { residential: { umbrellaHomeValue: "1000000" } }).map((n) => n.id).includes("umbrella"));
+});
+
+test("computeNeeds is pure for an omitted settings argument", () => {
+  // Documented as computeNeeds(profile, settings); the profile was guarded but
+  // settings was dereferenced one line later.
+  assert.deepEqual(
+    computeNeeds({ domain: "residential", answers: { home_status: { value: "rent" } } }).map((n) => n.id),
+    ["renters"],
+  );
+});
+
+test("the speculative flood need is marked advisory; established ones are not", () => {
+  const unsure = computeNeeds({ domain: "residential", answers: { flood_risk: { value: "unsure" } } }, {});
+  assert.equal(unsure.find((n) => n.id === "flood").advisory, true);
+  const yes = computeNeeds({ domain: "residential", answers: { flood_risk: { value: "yes" } } }, {});
+  assert.equal(yes.find((n) => n.id === "flood").advisory, undefined);
+});

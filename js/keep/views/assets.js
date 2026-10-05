@@ -1,4 +1,4 @@
-// keep/keep-assets.js — the Assets domain of the Keep portal.
+// keep/views/assets.js — the Assets domain of the Keep portal.
 // The all-assets table, the asset detail page (with its value & depreciation
 // schedule), and the add-asset picker flow. Extracted from views/keep.js; hangs
 // in the shared chrome from shell.js. Public: renderKeepAssets / renderKeepAsset
@@ -7,11 +7,10 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { getRuleDefaults } from "../../content.js";
 import { ASSET_META } from "../logic/data.js";
 import { analyzeAsset } from "../logic/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../logic/depreciation.js";
-import { findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
+import { fetchRules, findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
 import {
   BROKER_NAME, sep, page, backLink, originHref, money, cic, assetTypeLabel, assetTypeIcon,
   policyTypeIcon, coveragePill, policiesSection, sortableTable, statTile,
@@ -117,7 +116,7 @@ export async function renderKeepAsset(params, id) {
   const found = findAsset(id);
   if (!found) return renderKeepAssets(); // unknown asset → the assets list, not entities
   const { entity, asset } = found;
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const { mustHave, recommended, gaps } = analyzeAsset(asset, settings);
   // Fall back to a neutral marker for any asset type not in ASSET_META (e.g. a
   // freshly-added "other"/land asset) so the detail page never blanks out.

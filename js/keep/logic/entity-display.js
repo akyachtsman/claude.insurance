@@ -1,4 +1,4 @@
-// keep/entity-display.js — the SINGLE source of truth for how an entity is
+// keep/logic/entity-display.js — the SINGLE source of truth for how an entity is
 // labelled and styled everywhere it appears (rows, cards, detail header, the
 // relationship map). Pure functions derived from the canonical record fields
 // (`kind` + `subtype`/`label` + `name`) so a label can never diverge between two

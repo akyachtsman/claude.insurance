@@ -7,7 +7,6 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { getRuleDefaults } from "../../content.js";
 import {
   getUser, getEntities, signIn, addEntity,
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
@@ -123,7 +122,7 @@ function pendingRequestsReport(requests, role) {
 }
 
 export async function renderKeepLanding() {
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const first = getUser().name.split(" ")[0];
   const entities = getEntities();
   const role = (getUser() && getUser().role) || "client";
@@ -226,7 +225,9 @@ export function renderKeepInsurance() {
 
   // Summary stats across the whole table.
   const active = rows.filter((r) => policyKind(r.policy.renewalInDays) !== "exp").length;
-  const attention = rows.filter((r) => r.policy.renewalInDays <= 30).length; // expiring soon or lapsed
+  // `!= null` first: `null <= 30` is TRUE, so a policy with no renewal date on
+  // file was counted as needing attention. Unknown is not urgent.
+  const attention = rows.filter((r) => r.policy.renewalInDays != null && r.policy.renewalInDays <= 30).length;
   const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
   const premiumTotal = premiums.reduce((s, n) => s + n, 0);
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;

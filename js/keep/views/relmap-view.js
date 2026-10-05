@@ -1,4 +1,4 @@
-// keep/relmap-view.js — the Relationships-map rendering subsystem for the Keep.
+// keep/views/relmap-view.js — the Relationships-map rendering subsystem for the Keep.
 // Turns the ownership graph (getMapData) into an interactive, pannable/zoomable
 // Sugiyama-style diagram, plus the toolbar that drives its view options. The
 // layout math lives in keep/relmap.js; this module owns the DOM/SVG rendering
@@ -10,7 +10,7 @@ import { icon } from "../../icons.js";
 import { getMapData } from "../../supabase.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityRelStyleKey as relStyleKey, entityMapSub } from "../logic/entity-display.js";
-import { capTablesByEntity, orchestrate } from "../logic/relmap.js";
+import { capTablesByEntity, orchestrate, edgeKey } from "../logic/relmap.js";
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
@@ -214,7 +214,11 @@ function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));
   // Ownership-only map: only ownership edges are drawn and drive the cap-tables.
-  const edges = data.edges.filter((e) => parsePct(e.stake) != null);
+  // Number.isFinite, matching capTablesByEntity exactly. `NaN != null` is true,
+  // so a non-numeric stake used to be DRAWN as an ownership edge; now that the
+  // cap table rejects NaN, keeping it here would draw an edge with no cap-table
+  // entry behind it. These two predicates must stay identical.
+  const edges = data.edges.filter((e) => Number.isFinite(parsePct(e.stake)));
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const horiz = relView.orient === "horizontal";
 
@@ -541,12 +545,12 @@ function relationshipMap() {
   // Edges under the nodes. Each ownership edge is tinted with its owner's type
   // colour (matching that owner's segment in the owned entity's cap-table bar) and
   // carries no label — the stake lives on the owned entity's cap-table bar.
-  const edgeRefs = edges.map((e) => {
+  const edgeRefs = edges.map((e, i) => {
     const owner = byId.get(e.from);
     const color = REL_TYPE_COLOR[owner ? owner.sk : "person"] || "#c3b2f0";
     const path = s("path", { fill: "none", stroke: color, "stroke-width": "2.5", "stroke-linecap": "round", "marker-end": "url(#rel-arrow)", opacity: edgeDim(e) ? "0.08" : "0.85" });
     svg.appendChild(path);
-    return { ...e, path, wp: (waypoints && waypoints[e.from + ">" + e.to]) || [] };
+    return { ...e, path, wp: (waypoints && waypoints[edgeKey(e, i)]) || [] };
   });
   // Fan each owner's downward "bus" onto its own lane within the row gap. Without
   // this every edge crossing a gap runs along the same centre line, so different

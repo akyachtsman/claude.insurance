@@ -1,7 +1,7 @@
-// Tests for keep/relmap.js — run: node --test js/keep/relmap.test.mjs
+// Tests for keep/relmap.js — run: node --test js/keep/logic/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, controlsByEntity, fitPlan, orchestrate } from "./relmap.js";
+import { capTablesByEntity, controlsByEntity, edgeKey, fitPlan, orchestrate } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -43,7 +43,7 @@ test("orchestrate inserts a dummy waypoint for an edge that spans a layer", () =
   ];
   const { edgePath, dummy, layerOf } = orchestrate(ns, es);
   assert.equal(layerOf.w, 2);
-  const path = edgePath["u>w"];
+  const path = edgePath[edgeKey({ from: "u", to: "w" }, 2)];  // third edge in `es`
   assert.equal(Array.isArray(path) && path.length, 1);         // one dummy in the middle layer
   assert.equal(dummy[path[0]], 1);                             // sits in layer 1
 });
@@ -67,7 +67,7 @@ test("orchestrate accepts a band override and routes across the given bands", ()
   const { edgePath, dummy, layerOf } = orchestrate(ns, es, (n) => band[n.id]);
   assert.equal(layerOf.p, 0);
   assert.equal(layerOf.c, 2);
-  const path = edgePath["p>c"];
+  const path = edgePath[edgeKey({ from: "p", to: "c" }, 0)];
   assert.equal(Array.isArray(path) && path.length, 1);
   assert.equal(dummy[path[0]], 1);
 });
@@ -81,7 +81,7 @@ test("orchestrate with a band override handles a reverse-direction edge", () => 
     [{ from: "biz", to: "tr", stake: "100%" }],
     (n) => band[n.id],
   );
-  const path = edgePath["biz>tr"];
+  const path = edgePath[edgeKey({ from: "biz", to: "tr" }, 0)];
   assert.equal(Array.isArray(path) && path.length, 1);
   assert.equal(dummy[path[0]], 1);
 });
@@ -147,4 +147,55 @@ test("controlsByEntity ignores stake links and role-less links", () => {
     { from: "e", to: "f", role: "Manager", stake: "" },      // control-only → kept
   ]);
   assert.deepEqual(ctrls, { f: [{ ownerId: "e", role: "Manager" }] });
+});
+
+// ── Regression: layout integrity (audit 2026-10-05) ────────────────────────
+test("a non-numeric stake is kept out of the cap table", () => {
+  // parsePct returns NaN for junk and `NaN != null` is true, so "NaN%" was
+  // rendered with a NaN bar width. `stake` is text with no CHECK constraint.
+  assert.deepEqual(capTablesByEntity([{ from: "a", to: "b", stake: "n/a" }]), {});
+  // and it must land in controls instead, never in neither or both
+  assert.deepEqual(controlsByEntity([{ from: "a", to: "b", stake: "n/a", role: "Trustee" }]),
+    { b: [{ ownerId: "a", role: "Trustee" }] });
+});
+
+test("two edges between the same pair keep separate routes", () => {
+  // Keyed "from>to" previously, so the second overwrote the first — orphaning a
+  // dummy that still reserved layout width while both edges drew as one line.
+  const ns = [{ id: "x" }, { id: "m" }, { id: "n" }];
+  const es = [{ from: "x", to: "n", stake: "50%" }, { from: "x", to: "n", stake: "50%" }];
+  const band = { x: 0, m: 1, n: 2 };
+  const { edgePath } = orchestrate(ns, es, (n) => band[n.id]);
+  assert.equal(Object.keys(edgePath).length, 2, "each edge needs its own entry");
+  assert.notDeepEqual(edgePath[edgeKey(es[0], 0)], undefined);
+  assert.notDeepEqual(edgePath[edgeKey(es[1], 1)], undefined);
+});
+
+test("orchestrate does not mutate the edges it is given", () => {
+  const es = [{ from: "a", to: "b", stake: "100%" }];
+  const snapshot = JSON.stringify(es);
+  orchestrate([{ id: "a" }, { id: "b" }], es);
+  assert.equal(JSON.stringify(es), snapshot);
+});
+
+test("a same-band edge is excluded from between-row adjacency", () => {
+  // up/down drive crossings() and the median heuristic. A same-layer segment has
+  // no direction, and `lyr(a) < lyr(b)` is false when equal — so the target was
+  // recorded as the PARENT, and same-row positions polluted the crossing count.
+  const band = { p: 0, q: 0 };
+  const { up, down } = orchestrate([{ id: "p" }, { id: "q" }], [{ from: "p", to: "q", stake: "100%" }], (n) => band[n.id]);
+  assert.deepEqual(down.p, []);
+  assert.deepEqual(up.q, []);
+});
+
+test("a row containing a neighbourless node orders deterministically", () => {
+  // The old comparator was non-transitive, so V8 returned an order that varied
+  // with input permutation and the shipped layout was non-deterministic.
+  const ns = [{ id: "A" }, { id: "B" }, { id: "C" }, { id: "root" }];
+  const es = [{ from: "root", to: "B", stake: "50%" }, { from: "root", to: "C", stake: "50%" }];
+  const band = { root: 0, A: 1, B: 1, C: 1 };
+  const first = JSON.stringify(orchestrate(ns, es, (n) => band[n.id]).rows);
+  for (let i = 0; i < 8; i++) {
+    assert.equal(JSON.stringify(orchestrate(ns, es, (n) => band[n.id]).rows), first);
+  }
 });

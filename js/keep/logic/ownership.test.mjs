@@ -1,4 +1,4 @@
-// node --test js/keep/ownership.test.mjs
+// node --test js/keep/logic/ownership.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parsePct, totalStake, validateOwnership, stakeLabel, OWNERSHIP_ROLES } from "./ownership.js";
@@ -57,4 +57,17 @@ test("stakeLabel: formats or nulls", () => {
 
 test("roles list is non-empty and includes Owner", () => {
   assert.ok(OWNERSHIP_ROLES.includes("Owner"));
+});
+
+// ── Regression: duplicate owner rows (audit 2026-10-05) ────────────────────
+// Only the 100% total was checked, so two rows naming one owner validated and
+// both inserted — entity_relationships has no unique (from,to) constraint.
+test("validateOwnership rejects the same owner listed twice", () => {
+  const r = validateOwnership([{ ownerId: "X", pct: "50" }, { ownerId: "X", pct: "50" }]);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /already listed/);
+});
+
+test("validateOwnership still accepts distinct owners totalling 100", () => {
+  assert.deepEqual(validateOwnership([{ ownerId: "X", pct: "50" }, { ownerId: "Y", pct: "50" }]), { ok: true });
 });

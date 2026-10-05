@@ -18,10 +18,6 @@ export function getQuestionnaire() {
   return load("questionnaire");
 }
 
-export function getRuleDefaults() {
-  return load("rule-defaults");
-}
-
 // Find a topic by id across sections; returns { section, topic } or null.
 export function findTopic(data, id) {
   for (const section of data.sections) {

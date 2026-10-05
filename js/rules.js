@@ -15,9 +15,12 @@ const PRIORITY_ORDER = { high: 0, medium: 1 };
 
 export function computeNeeds(profile, settings) {
   if (!profile || !profile.answers) return [];
+  const s = settings || {};  // documented as pure for (profile, settings); an
+  // omitted second argument used to throw on `settings.residential` even though
+  // the sub-objects already defaulted one level down.
   const needs =
     profile.domain === "residential"
-      ? residentialNeeds(profile.answers, settings.residential || {})
+      ? residentialNeeds(profile.answers, s.residential || {})
       : profile.domain === "commercial"
         ? commercialNeeds(profile.answers, settings.commercial || {})
         : [];
@@ -55,10 +58,10 @@ function residentialNeeds(a, s) {
       "You're in a higher flood-risk area, and flooding is excluded from standard home and renters policies.", "high"));
   }
 
-  const highValue = homeValue >= s.umbrellaHomeValue;
-  const manyVehicles = vehicles >= s.umbrellaVehicleCount;
+  const highValue = meets(homeValue, s.umbrellaHomeValue);
+  const manyVehicles = meets(vehicles, s.umbrellaVehicleCount);
   if (highValue || manyVehicles) {
-    out.push(need("umbrella", "Umbrella / personal liability",
+    out.push(need("umbrella", "Umbrella / personal liability insurance",
       highValue
         ? "Your assets are high enough that a large claim could exceed standard liability limits."
         : "Multiple vehicles raise your liability exposure beyond standard policy limits.", "medium"));
@@ -66,7 +69,7 @@ function residentialNeeds(a, s) {
 
   if (flood === "unsure") {
     out.push(need("flood", "Flood insurance",
-      "It's worth checking your flood risk — flooding is excluded from standard policies and can occur outside mapped zones.", "medium"));
+      "It's worth checking your flood risk — flooding is excluded from standard policies and can occur outside mapped zones.", "medium", true));
   }
 
   return out;
@@ -90,13 +93,13 @@ function commercialNeeds(a, s) {
       "You own or lease premises, which a BOP bundles with property and liability cost-effectively.", "high"));
   }
 
-  if (employees >= s.workersCompMinEmployees) {
+  if (meets(employees, s.workersCompMinEmployees)) {
     out.push(need("workers-comp", "Workers' compensation",
       "You have employees, and workers' compensation is legally required in nearly every state.", "high"));
   }
 
   if (professional) {
-    out.push(need("professional-liability", "Professional liability (E&O)",
+    out.push(need("professional-liability", "Professional liability (errors & omissions)",
       "Your industry advises or serves clients, exposing you to claims of professional error.", "high"));
   }
 
@@ -107,7 +110,7 @@ function commercialNeeds(a, s) {
 
   // Standalone property coverage matters when there's no BOP to bundle it, or when
   // the business is large enough that a BOP's limits likely fall short.
-  if (hasProperty && (!hasPremises || revenue >= s.umbrellaRevenue)) {
+  if (hasProperty && (!hasPremises || meets(revenue, s.umbrellaRevenue))) {
     out.push(need("commercial-property", "Commercial property insurance",
       "You own significant equipment or inventory that would be costly to replace if damaged or stolen.", "medium"));
   }
@@ -117,16 +120,51 @@ function commercialNeeds(a, s) {
       "Vehicles used for business need commercial auto coverage; personal policies exclude business use.", "medium"));
   }
 
-  if (revenue >= s.umbrellaRevenue) {
-    out.push(need("commercial-umbrella", "Commercial umbrella",
+  if (meets(revenue, s.umbrellaRevenue)) {
+    out.push(need("commercial-umbrella", "Commercial umbrella insurance",
       "Your revenue is high enough that a major claim could exceed your underlying liability limits.", "medium"));
   }
 
   return out;
 }
 
-function need(id, title, why, priority) {
-  return { id, title, why, priority };
+// `advisory: true` marks a need raised because the risk is UNKNOWN rather than
+// established — "worth checking", not "you are missing this". Consumers that
+// score coverage must not treat an advisory need as a hard gap. Priority alone
+// cannot carry this: umbrella is also medium, but it fires on a value that has
+// actually crossed a threshold, so it IS a real gap.
+function need(id, title, why, priority, advisory) {
+  return advisory ? { id, title, why, priority, advisory: true } : { id, title, why, priority };
+}
+
+// Coerce a broker-supplied threshold to a finite number, or null if it is not
+// usable. rule_settings.settings is free-form jsonb with NO shape constraint,
+// so a threshold can arrive as null, "", "  " or a numeric string.
+function threshold(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  // Number("") is 0 — the empty string must be rejected BEFORE coercion, or a
+  // cleared field becomes a zero threshold that everything clears.
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+// Does `n` meet a broker-configured threshold? FAILS CLOSED on an unusable one.
+//
+// Never write `n >= s.someThreshold` directly. A bare comparison against null
+// coerces to `n >= 0`, which is true for every value — so clearing a threshold
+// in the broker UI silently recommended the coverage to EVERYONE. A $1,000
+// renter was told their "assets are high enough that a large claim could exceed
+// standard liability limits", and a sole proprietor with no staff was told "you
+// have employees" and needed workers' comp. Note `undefined` happened to fail
+// closed while `null` failed open, so the behaviour flipped on a distinction
+// invisible at the call site. Recommending a coverage nobody needs is the
+// failure this engine must not have: it is the output a client acts on.
+function meets(n, v) {
+  const t = threshold(v);
+  return t != null && n >= t;
 }
 
 function value(answer) {

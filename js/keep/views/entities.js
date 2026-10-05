@@ -1,4 +1,4 @@
-// keep/keep-entities.js — the Entities domain of the Keep portal.
+// keep/views/entities.js — the Entities domain of the Keep portal.
 // The three entity views (Rows list, Cards grid, Relationships map) and the
 // entity detail page, plus the entity table/tile builders and the drag-and-drop
 // card-reorder subsystem. Extracted from views/keep.js; hangs in the shared
@@ -7,12 +7,11 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { getRuleDefaults } from "../../content.js";
 import { assetStatus, entitySummary } from "../logic/analysis.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityIndustry } from "../logic/entity-display.js";
 import { relationshipMap, relToolbar } from "./relmap-view.js";
-import { getEntities, getEntity, getMapData } from "../../supabase.js";
+import { fetchRules, getEntities, getEntity, getMapData } from "../../supabase.js";
 import {
   money, cic, page, backLink, originBackRow, sortableTable, statTile, sep,
   entityAvatar, primaryEntity, saveCardOrder, loadCardOrder,
@@ -216,7 +215,7 @@ const CARD_GROUPS = [
 ];
 
 async function renderEntityCollection(layout) {
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const entities = getEntities();
   let body;
   if (layout === "cards") {
@@ -296,7 +295,7 @@ export async function renderKeepEntity(params, id) {
   // No id (the Entities tab lands here) → open the client's own "Me" entity.
   const entity = getEntity(id) || primaryEntity();
   if (!entity) return renderKeepEntityList();
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const suffix = colorSuffix(entity);
   const sum = entitySummary(entity, settings);
   const value = entityValue(entity);

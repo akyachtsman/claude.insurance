@@ -1,4 +1,4 @@
-// keep/keep-policies.js — the Policies & requests domain of the Keep portal.
+// keep/views/policies-view.js — the Policies & requests domain of the Keep portal.
 // The policy detail page, the "request a coverage change" form, and the My
 // requests list (lifecycle: requested → broker review → underwriting →
 // approved/declined). Extracted from views/keep.js; hangs in the shared chrome
@@ -17,10 +17,17 @@ import {
 
 export function renderKeepPolicy(params, id) {
   const found = findPolicy(id);
-  if (!found) return renderKeepEntityList();
+  // Unknown policy id (a stale or shared link, or a policy the broker removed)
+  // → the policies list. This line used to call renderKeepEntityList(), which is
+  // NOT imported here: it was copy-pasted from views/keep.js during the domain
+  // split and kept the original module's target without its import, so every
+  // miss threw a ReferenceError and degraded to the generic error page.
+  if (!found) return go("#/keep/insurance");
   const { entity, asset, policy } = found;
   const kind = policyKind(policy.renewalInDays);
-  const statusLabel = kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
+  // kind === null means no renewal date on file — report that, never "Active".
+  const statusLabel = kind == null ? "Renewal date not on file"
+    : kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
     : (kind === "warn" ? "Expiring soon" : "Active");
   const rinfo = reminderInfo(policy.renewalInDays, activeSchedule());
 

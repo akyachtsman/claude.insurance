@@ -1,4 +1,4 @@
-// keep/shell.js — shared chrome + UI helpers for the Keep portal.
+// keep/views/shell.js — shared chrome + UI helpers for the Keep portal.
 // The app frame (page/appBar), the header menus (notifications, account,
 // search/command palette), origin-aware back navigation, the demo ribbon,
 // reminder controls, document download helpers, and the small shared
@@ -118,10 +118,15 @@ function buildReminderSettings() {
 
 // ── small helpers ────────────────────────────────────────────────────────────
 function money(v) {
-  if (!v) return "";
-  if (v >= 1000000) return "$" + (v / 1000000).toFixed(v % 1000000 ? 1 : 0) + "M";
-  if (v >= 1000) return "$" + Math.round(v / 1000) + "K";
-  return "$" + v;
+  // `== null`, not `!v`: money(0) returned "" and a legitimate zero rendered
+  // blank. Two call sites already worked around it with `|| "$0"`.
+  if (v == null || !Number.isFinite(Number(v))) return "";
+  const n = Number(v), sign = n < 0 ? "-" : "", a = Math.abs(n);
+  // >= 999500 rounds INTO the millions: at the old >= 1000000 boundary, 999500
+  // took the K branch and rendered "$1000K" instead of "$1.0M".
+  if (a >= 999500) return sign + "$" + (a / 1000000).toFixed(a % 1000000 ? 1 : 0) + "M";
+  if (a >= 1000) return sign + "$" + Math.round(a / 1000) + "K";
+  return sign + "$" + a;
 }
 
 // Generate + download a placeholder PDF for a demo document (no real file is
@@ -523,16 +528,26 @@ function coveragePill(status) {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Both guard null. `d.getDate() + null` coerces to +0, leaving the date
+// UNCHANGED — so an absent effective_date or renewal_date rendered as TODAY: a
+// fabricated, plausible-looking date, which is worse than a visible blank
+// because nothing signals it was never recorded. Both columns are nullable.
 function dateFromDays(days) {
-  const d = new Date(); d.setDate(d.getDate() + days);
+  if (days == null || !Number.isFinite(Number(days))) return "—";
+  const d = new Date(); d.setDate(d.getDate() + Number(days));
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 function dateShort(days) {
-  const d = new Date(); d.setDate(d.getDate() + days);
+  if (days == null || !Number.isFinite(Number(days))) return "—";
+  const d = new Date(); d.setDate(d.getDate() + Number(days));
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 function expiryBadge(renewalInDays) {
   const kind = policyKind(renewalInDays);
+  // No renewal date on file. Must come before the Active fallthrough: dateShort
+  // (null) would render "Expired <today>" and the plain fallthrough claims the
+  // policy renews on a date nobody recorded.
+  if (kind == null) return el("span", { class: "k-exp" }, [el("span", { text: "Renewal date not on file" })]);
   if (kind === "exp") return el("span", { class: "k-exp k-exp--exp" }, [icon("x", { size: 14 }), el("span", { text: `Expired ${dateShort(renewalInDays)}` })]);
   if (kind === "warn") return el("span", { class: "k-exp k-exp--warn" }, [icon("alert", { size: 14 }), el("span", { text: `Expires in ${renewalInDays} day${renewalInDays === 1 ? "" : "s"} · ${dateShort(renewalInDays)}` })]);
   // Active: no check icon — the subtle green text alone conveys the state.

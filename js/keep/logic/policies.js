@@ -1,4 +1,4 @@
-// keep/policies.js — pure helpers for policy expiry + renewal reminders.
+// keep/logic/policies.js — pure helpers for policy expiry + renewal reminders.
 // No Date use here so it's deterministic/testable; the view supplies the actual
 // calendar date for display. "renewalInDays" is days from now (negative = past).
 
@@ -7,7 +7,13 @@
 export const REMINDER_SCHEDULE = [60, 30, 14, 7, 1];
 
 // Badge state for a policy based on days until renewal.
+// Returns null when the renewal date is UNKNOWN. That guard is load-bearing:
+// policies.renewal_date is nullable, so renewalInDays arrives as null for a
+// policy with no date on file, and `null <= 0` is TRUE — without this the
+// client was told a perfectly live policy had lapsed. `renewalBand` already
+// takes the same early return; these two must agree on what "unknown" means.
 export function policyKind(renewalInDays) {
+  if (renewalInDays == null) return null; // unknown — not a state, absent data
   if (renewalInDays <= 0) return "exp";   // due today / expired / lapsed
   if (renewalInDays <= 30) return "warn"; // expiring soon
   return "ok";                            // active
@@ -74,7 +80,10 @@ const POLICY_LINE_FALLBACK = [
 // adapter to set the card icon + tile colour.
 export function policyPresentation(policyOrLine) {
   const line = typeof policyOrLine === "string" ? policyOrLine : (policyOrLine && policyOrLine.line ? policyOrLine.line : "");
-  if (POLICY_LINE[line]) return POLICY_LINE[line];
+  // hasOwnProperty, not a bare lookup: `line` is free text, and
+  // POLICY_LINE["constructor"] would otherwise return Object's constructor —
+  // truthy, so the guard passes, and every facet read comes back undefined.
+  if (Object.prototype.hasOwnProperty.call(POLICY_LINE, line)) return POLICY_LINE[line];
   const s = line.toLowerCase();
   for (const [pattern, facet] of POLICY_LINE_FALLBACK) if (pattern.test(s)) return facet;
   return POLICY_LINE_OTHER;
@@ -87,28 +96,34 @@ export function policyType(policy) {
 }
 
 // Annual premium as a number. Prefers the numeric source of truth
-// (premiumAmount + premiumPeriod); falls back to parsing the legacy `premium`
-// text ("$2,260 / yr") for any row not yet migrated. Monthly is annualised (×12).
+// (premiumAmount + premiumPeriod); falls back to parsing a `premium` text
+// string ("$2,260 / yr"). Monthly is annualised (×12).
+//
+// The text path is NOT for "rows not yet migrated" — migration
+// 20260713024147_policies_drop_premium_text dropped that column, so no live row
+// can carry it. It survives for policy objects the adapter did not build: the
+// offline fixture in js/keep/logic/data.js (which still holds premium strings)
+// and any hand-built row. Delete it only together with the fixture's strings.
 export function annualPremium(policy) {
   if (policy == null) return null;
-  if (policy.premiumAmount != null && isFinite(policy.premiumAmount)) {
+  if (policy.premiumAmount != null && Number.isFinite(policy.premiumAmount)) {
     const amt = Math.round(policy.premiumAmount);
     return /mo|month/i.test(policy.premiumPeriod || "") ? amt * 12 : amt;
   }
   const raw = policy.premium;
   if (raw == null) return null;
-  if (typeof raw === "number") return isFinite(raw) ? Math.round(raw) : null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? Math.round(raw) : null;
   const m = String(raw).replace(/,/g, "").match(/-?[\d.]+/);
   if (!m) return null;
   const amt = parseFloat(m[0]);
-  if (!isFinite(amt)) return null;
+  if (!Number.isFinite(amt)) return null;
   return Math.round(/\/\s*mo|month/i.test(raw) ? amt * 12 : amt);
 }
 
 // Display string for a premium ("$2,260 / yr"), formatted from the numeric
 // source when present, else the legacy text, else "—".
 export function formatPremium(policy) {
-  if (policy && policy.premiumAmount != null && isFinite(policy.premiumAmount)) {
+  if (policy && policy.premiumAmount != null && Number.isFinite(policy.premiumAmount)) {
     return `$${Math.round(policy.premiumAmount).toLocaleString("en-US")} / ${policy.premiumPeriod || "yr"}`;
   }
   return (policy && policy.premium) || "—";
@@ -117,6 +132,10 @@ export function formatPremium(policy) {
 // Which reminders have already fired and which is next, for a given lead-time
 // schedule (default 60/30/14/7/1 days before renewal).
 export function reminderInfo(renewalInDays, schedule = REMINDER_SCHEDULE) {
+  // Unknown renewal date: nothing has been sent and nothing is scheduled.
+  // Without this, `d > null` coerces to `d > 0` and every lead time reads as
+  // already fired — telling the client all five reminders had gone out.
+  if (renewalInDays == null) return { sent: [], next: null };
   const sent = schedule.filter((d) => d > renewalInDays).sort((a, b) => b - a);
   const upcoming = schedule.filter((d) => d <= renewalInDays).sort((a, b) => b - a);
   return { sent, next: upcoming.length ? upcoming[0] : null };

@@ -13,9 +13,22 @@ export function createNavStack() {
     // Reconcile the stack with a navigation to `fullHash`.
     track(fullHash) {
       const top = stack[stack.length - 1];
-      if (fullHash === top) return;                                   // in-place re-render
-      if (stack[stack.length - 2] === fullHash) stack.pop();          // a back → pop to it
-      else stack.push(fullHash);                                      // a forward → push
+      if (fullHash === top) return;                        // in-place re-render
+      // Unwind to the route's EXISTING position, at any depth — do not test only
+      // stack[len-2]. A multi-step browser Back (held button, history dropdown,
+      // history.go(-2)) fires ONE hashchange for the final hash, so from
+      // [a,b,c] a back to `a` did not match b and got PUSHED: [a,b,c,a]. The
+      // back control on `a` then pointed at `c` — forward, to the page the user
+      // had just backed out of twice. That is the circular loop this module's
+      // header says it exists to prevent, and it breaks CLAUDE.md's
+      // "Origin-aware back (always)" rule.
+      //
+      // lastIndexOf (not indexOf) so a route visited twice unwinds to its most
+      // recent occurrence. For a single-step back and for a forward link to a
+      // route already in the stack, this is identical to the old pop.
+      const prior = stack.lastIndexOf(fullHash);
+      if (prior >= 0) stack.length = prior + 1;            // a back → unwind to it
+      else stack.push(fullHash);                           // a forward → push
     },
     // The route to return to (one below the top), or null at the root.
     previous() { return stack.length >= 2 ? stack[stack.length - 2] : null; },
