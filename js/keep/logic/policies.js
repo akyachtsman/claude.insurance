@@ -140,3 +140,24 @@ export function reminderInfo(renewalInDays, schedule = REMINDER_SCHEDULE) {
   const upcoming = schedule.filter((d) => d <= renewalInDays).sort((a, b) => b - a);
   return { sent, next: upcoming.length ? upcoming[0] : null };
 }
+
+// The three numbers the Policies summary tiles report, from a list of
+// renewalInDays values. Extracted from the view so the UNKNOWN case is
+// unit-testable: every counter here routes through policyKind, so they cannot
+// disagree about a policy with no renewal_date on file the way the inline
+// versions did (`policyKind(x) !== "exp"` counted it as in force while the
+// neighbouring `x <= 30` test correctly left it out).
+//
+// `undated` is NOT folded into either count. An undated policy is neither
+// provably in force nor provably urgent, so it is surfaced on its own and the
+// view labels it — absent data reported as absent, not guessed either way.
+export function renewalCounts(daysList) {
+  const out = { active: 0, attention: 0, undated: 0 };
+  for (const d of daysList || []) {
+    const k = policyKind(d);
+    if (k === null) out.undated += 1;                       // no renewal date on file
+    if (k === "ok" || k === "warn") out.active += 1;        // "warn" = expiring soon, still in force
+    if (k === "exp" || k === "warn") out.attention += 1;    // lapsed, or inside 30 days
+  }
+  return out;
+}

@@ -11,10 +11,13 @@ export function createNavStack() {
   const stack = [];
   return {
     // Reconcile the stack with a navigation to `fullHash`.
-    // `isTraversal` says whether this navigation was a BROWSER HISTORY move
-    // (Back/Forward) rather than following an in-app link. The caller supplies
-    // it; js/main.js derives it by stamping each history entry and checking
-    // whether the one being entered already carries a stamp.
+    // `isTraversal` is THREE-STATE, and the third state matters:
+    //   true  — a browser history move (Back/Forward).
+    //   false — an in-app link (a nav card, a breadcrumb, a router redirect).
+    //   null / undefined — the caller CANNOT TELL. js/main.js reports this only
+    //     when history.replaceState throws, so entries can never be stamped.
+    // js/main.js derives the first two by stamping each history entry and
+    // checking whether the one being entered already carries a stamp.
     //
     // ⚠️ IT CANNOT BE INFERRED FROM THE HASH, and both ways of guessing are
     // wrong in a case this app actually hits:
@@ -35,23 +38,31 @@ export function createNavStack() {
       const top = stack[stack.length - 1];
       if (fullHash === top) return;                        // in-place re-render
 
-      // A navigation to exactly the entry BELOW the top pops, with or without
-      // the flag. This case is unambiguous and was the shipped behaviour for
-      // months, so it must not depend on the flag arriving: if stamping is ever
-      // unavailable (a context where replaceState throws) every navigation
-      // reads as non-traversal, and gating this on the flag would silently
-      // restore the circular A<->B loop rather than degrading safely.
-      if (stack[stack.length - 2] === fullHash) { stack.pop(); return; }
-
-      // DEEPER unwinding needs the flag, because that is the ambiguous case: at
-      // depth >= 2 a matching entry is just as likely a forward breadcrumb
-      // click as a multi-step Back, and guessing wrong loses the user's real
-      // origin. lastIndexOf, not indexOf, so a route visited twice unwinds to
-      // its most recent occurrence; a Forward past a Back lands on a hash the
-      // earlier unwind already truncated away and so falls through to the push.
-      if (isTraversal) {
+      // A traversal unwinds to the matching entry at ANY depth. lastIndexOf,
+      // not indexOf, so a route visited twice unwinds to its most recent
+      // occurrence; a Forward past a Back lands on a hash the earlier unwind
+      // already truncated away and so falls through to the push.
+      if (isTraversal === true) {
         const prior = stack.lastIndexOf(fullHash);
         if (prior >= 0) { stack.length = prior + 1; return; }
+
+      // A KNOWN link always pushes — including onto stack[len-2]. An earlier
+      // version popped there unconditionally, on the reasoning that a one-step
+      // match "is unambiguous". It is not: after entity -> asset -> policy,
+      // clicking the ASSET breadcrumb is a forward link to exactly that entry,
+      // and popping truncated the policy away, so the asset's Back returned to
+      // the entity instead of the policy the user came from. Breadcrumbs make
+      // that the common navigation in this app, not the exotic one.
+      } else if (isTraversal == null && stack[stack.length - 2] === fullHash) {
+        // Signal absent (unstampable context) — fall back to the pre-flag
+        // heuristic, which gets single-step Back right and breadcrumbs wrong.
+        // That trade only applies where replaceState throws; without it, EVERY
+        // navigation would read as a link and a multi-step Back would push a
+        // duplicate, reinstating the circular A<->B loop this module exists to
+        // prevent. Wrong origin on a breadcrumb beats a back button that
+        // navigates forward.
+        stack.pop();
+        return;
       }
       stack.push(fullHash);
     },

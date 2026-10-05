@@ -24,6 +24,8 @@ test("in-place re-render (same hash) does not change previous", () => {
 });
 
 test("back does NOT create a circular loop (the reported asset↔policy bug)", () => {
+  // Flags omitted: this is the no-signal fallback path. The flagged path is
+  // covered by "the SAME hash unwinds when it is a history traversal" below.
   const n = createNavStack();
   n.track("#/keep/entities");
   n.track("#/keep/entity/jordan");
@@ -113,14 +115,49 @@ test("an in-place re-render is still a no-op either way", () => {
   assert.equal(n.depth, 1);
 });
 
-test("a single-step back still pops when no traversal flag is supplied", () => {
-  // The degradation path: in a context where history.replaceState throws,
-  // main.js can never stamp an entry, so every navigation arrives as
-  // non-traversal. The common case must still work rather than reinstating the
-  // circular loop — which is why the single-step pop is not gated on the flag.
+// ── Regression: the single-step pop is not "unambiguous" (Codex P2, round 3) ─
+// An earlier fix popped whenever the target was exactly stack[len-2], flag or
+// no flag, reasoning that one step could only be a Back. It is also the
+// commonest FORWARD navigation in this app: a breadcrumb one level up.
+test("a forward link to the entry just below the top PUSHES, not pops", () => {
   const n = createNavStack();
-  ["#/a", "#/b", "#/c"].forEach((h) => n.track(h));
-  n.track("#/b");                       // no flag — unstampable context
+  ["#/keep/entity/1", "#/keep/asset/9", "#/keep/policy/7"].forEach((h) => n.track(h, false));
+  n.track("#/keep/asset/9", false);     // ASSET breadcrumb, clicked from the policy
+  assert.equal(n.depth, 4);
+  assert.equal(n.previous(), "#/keep/policy/7",
+    "the asset's back must return to the policy the user came from, not the entity");
+});
+
+test("a single-step back pops when the flag says traversal", () => {
+  const n = createNavStack();
+  ["#/a", "#/b", "#/c"].forEach((h) => n.track(h, false));
+  n.track("#/b", true);                 // browser Back, one step
   assert.equal(n.depth, 2);
   assert.equal(n.previous(), "#/a");
+});
+
+test("no signal (null) falls back to the pre-flag single-step heuristic", () => {
+  // The degradation path, and the ONLY place the heuristic still runs: in a
+  // context where history.replaceState throws, main.js can never stamp an
+  // entry, so it reports null — "cannot tell" — rather than claiming `false`.
+  // Single-step Back must still work there rather than reinstating the
+  // circular loop; breadcrumbs lose their origin, which is the lesser harm.
+  for (const noSignal of [null, undefined]) {
+    const n = createNavStack();
+    ["#/a", "#/b", "#/c"].forEach((h) => n.track(h, noSignal));
+    n.track("#/b", noSignal);
+    assert.equal(n.depth, 2, `signal ${String(noSignal)}`);
+    assert.equal(n.previous(), "#/a");
+  }
+});
+
+test("with no signal a multi-step back still pushes rather than looping", () => {
+  // Documents what the fallback costs: without a stamp there is no way to tell
+  // a two-step Back from a link, so the stack grows. previous() must at least
+  // not point FORWARD at the page just backed out of.
+  const n = createNavStack();
+  ["#/a", "#/b", "#/c"].forEach((h) => n.track(h, null));
+  n.track("#/a", null);
+  assert.equal(n.depth, 4);
+  assert.equal(n.previous(), "#/c");
 });

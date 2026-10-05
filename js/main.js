@@ -39,18 +39,26 @@ export function previousRoute() { return nav.previous(); }
 //
 // replaceState (not pushState) — we are labelling the entry we are already on,
 // not adding one. Wrapped because a sandboxed or file:// context can throw on
-// it. If stamping is unavailable every navigation reads as non-traversal, and
-// nav.js is built for that: it pops a single-step back WITHOUT the flag, so the
-// common case still works and only multi-step Back degrades to a push. (An
-// earlier version of this comment claimed that fallback was "the old, safer
-// behaviour" — it would not have been, because nav.js gated the single-step pop
-// on the flag too, which would have reinstated the circular A<->B loop.)
+// it, and the throw is reported to nav.js as `null` — "cannot tell" — NOT as
+// `false`. The distinction is the whole point: nav.js treats a known link as
+// always-push (so breadcrumbs keep their origin) and only falls back to its
+// older pop-on-single-step heuristic when the signal is genuinely absent.
+// Claiming `false` there would make every multi-step Back push a duplicate and
+// reinstate the circular A<->B loop. `stampable` latches because the failure is
+// a property of the context, not of one call.
 let navSeq = 0;
+let stampable = true;
 function enteredByTraversal() {
   const st = history.state;
   if (st && typeof st.navSeq === "number") return true;   // restored: already stamped
+  if (!stampable) return null;                            // no signal available
   navSeq += 1;
-  try { history.replaceState({ navSeq }, ""); } catch { /* unstampable context */ }
+  try {
+    history.replaceState({ navSeq }, "");
+  } catch {
+    stampable = false;
+    return null;
+  }
   return false;
 }
 

@@ -12,7 +12,7 @@ import {
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
 } from "../../supabase.js";
 import { entitySummary } from "../logic/analysis.js";
-import { policyKind, renewalBand, annualPremium, formatPremium } from "../logic/policies.js";
+import { renewalBand, renewalCounts, annualPremium, formatPremium } from "../logic/policies.js";
 import { statusDisplay, stageInfo, isPending } from "../logic/requests.js";
 import { docName } from "../logic/docfile.js";
 import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../logic/ownership.js";
@@ -217,11 +217,11 @@ export function renderKeepInsurance() {
     { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
   ];
 
-  // Summary stats across the whole table.
-  const active = rows.filter((r) => policyKind(r.policy.renewalInDays) !== "exp").length;
-  // `!= null` first: `null <= 30` is TRUE, so a policy with no renewal date on
-  // file was counted as needing attention. Unknown is not urgent.
-  const attention = rows.filter((r) => r.policy.renewalInDays != null && r.policy.renewalInDays <= 30).length;
+  // Summary stats across the whole table. The renewal counters live in
+  // logic/policies.js so the unknown-date case is unit-tested: an undated
+  // policy counts as neither active nor needing attention, and is surfaced
+  // under its own label rather than guessed into one of them.
+  const { active, attention, undated } = renewalCounts(rows.map((r) => r.policy.renewalInDays));
   const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
   const premiumTotal = premiums.reduce((s, n) => s + n, 0);
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
@@ -231,7 +231,7 @@ export function renderKeepInsurance() {
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
     el("div", { class: "k-astats" }, [
       statTile("Policies", String(rows.length), `across ${insuredEntities} ${insuredEntities === 1 ? "entity" : "entities"}`),
-      statTile("Active", String(active), "in force"),
+      statTile("Active", String(active), undated ? `in force · ${undated} undated` : "in force"),
       statTile("Needs attention", String(attention), attention ? "expiring or lapsed" : "all current"),
       statTile("Annual premium", premiums.length ? (money(premiumTotal) || "$0") : "—", "total on file"),
     ]),
