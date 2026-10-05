@@ -3,7 +3,7 @@
 -- PREREQUISITE: the asset rows must already exist — no committed seed creates
 -- them (they were seeded live). Run standalone before assets exist and every
 -- UPDATE is a silent no-op (0 rows).
--- KEEP IN SYNC with the `held` arrays in js/keep/data.js (the offline test
+-- KEEP IN SYNC with the `held` arrays in js/keep/fixtures/sample.mjs (the offline test
 -- fixture) — both describe the same demo assets.
 
 update public.assets set held = '["dwelling","home-liability","home-contents","flood"]'::jsonb where name = '123 Marina Way';

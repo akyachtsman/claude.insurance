@@ -11,7 +11,7 @@
 // NOTE: findAsset/findPolicy here are FIXTURE accessors and share their names
 // with the live ones in js/supabase.js. Views import the live pair; tests import
 // these. The .mjs extension and this directory are what disambiguate them.
-// keep/logic/data.js — OFFLINE TEST FIXTURE for the Keep (+ ASSET_META, used by the app).
+// keep/fixtures/sample.mjs — OFFLINE TEST FIXTURE for the Keep. Node-only.
 // The live app reads from Supabase via js/supabase.js; this sample tree is no
 // longer the app's data source — it backs the offline unit tests (analysis/rules)
 // which can't reach a live DB. Shapes mirror the real tables so the tests and the

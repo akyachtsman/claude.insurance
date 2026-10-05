@@ -15,7 +15,7 @@ import {
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./keep/views/keep.js";
 import { getSession, ensureData } from "./supabase.js";
-import { createNavStack } from "./nav.js";
+import { createNavStack, createHistorySignal } from "./nav.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -26,45 +26,16 @@ export function go(hash) {
 // Navigation stack for "origin-aware back" (see CLAUDE.md coding standards).
 // Logic lives in js/nav.js (pure + unit-tested in js/nav.test.mjs).
 const nav = createNavStack();
+// Stamps each history entry with an identity so the nav stack can tell a
+// Back/Forward from a link, and WHICH entry it landed on. Lives in nav.js so
+// the two halves of that scheme are unit-tested together — they disagreeing is
+// what the last two review rounds found.
+const navSignal = createHistorySignal(window.history);
 export function previousRoute() { return nav.previous(); }
-
-// Tell the nav stack whether this navigation was a history traversal.
-//
-// A fresh hash navigation — an in-app link or go() — arrives with
-// history.state === null, because setting location.hash creates a NEW entry. We
-// stamp that entry immediately. When the user later traverses to it with
-// Back/Forward the browser restores the entry WITH its stamp, which is how we
-// know the difference. Nothing else distinguishes the two: both fire a bare
-// hashchange with only the resulting hash.
-//
-// replaceState (not pushState) — we are labelling the entry we are already on,
-// not adding one. Wrapped because a sandboxed or file:// context can throw on
-// it, and the throw is reported to nav.js as `null` — "cannot tell" — NOT as
-// `false`. The distinction is the whole point: nav.js treats a known link as
-// always-push (so breadcrumbs keep their origin) and only falls back to its
-// older pop-on-single-step heuristic when the signal is genuinely absent.
-// Claiming `false` there would make every multi-step Back push a duplicate and
-// reinstate the circular A<->B loop. `stampable` latches because the failure is
-// a property of the context, not of one call.
-let navSeq = 0;
-let stampable = true;
-function enteredByTraversal() {
-  const st = history.state;
-  if (st && typeof st.navSeq === "number") return true;   // restored: already stamped
-  if (!stampable) return null;                            // no signal available
-  navSeq += 1;
-  try {
-    history.replaceState({ navSeq }, "");
-  } catch {
-    stampable = false;
-    return null;
-  }
-  return false;
-}
 
 async function route() {
   const fullHash = location.hash || "#/";
-  nav.track(fullHash, enteredByTraversal());
+  nav.track(fullHash, navSignal());
 
   const raw = location.hash.replace(/^#/, "") || "/";
   const [pathPart, query] = raw.split("?");
