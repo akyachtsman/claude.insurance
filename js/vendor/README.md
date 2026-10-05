@@ -101,6 +101,38 @@ otherwise at each `/refresh-repo`**. This is the cost of vendoring, accepted
 deliberately: a dependency updated on a schedule beats one that can change or
 vanish mid-request.
 
+**Check the trigger like this, from the repository root:**
+
+```sh
+cd js/vendor && npm audit --package-lock-only
+```
+
+It reads the committed lockfile, so it needs no install and no network beyond
+the registry. **Version drift is NOT the trigger** — an advisory is. Do not
+regenerate a 216KB third-party bundle because minor releases have shipped; the
+whole point of pinning is that it does not move on its own.
+
+#### Advisory-check log
+
+Record every check here, with its result and the drift at the time. An
+unrecorded check is invisible: the next session cannot tell "checked, clean"
+from "never looked", so it either redoes the work blind or skips it — and
+skipping reads exactly like a clean result. That is the failure shape this
+whole directory exists to avoid, so the log is part of the obligation, not
+bookkeeping about it.
+
+| date | result | pinned | latest then | action |
+|---|---|---|---|---|
+| 2026-10-05 | **0 advisories** (info→critical, all zero) | 2.112.4 | 2.117.2 | none — trigger did not fire |
+
+⚠️ **What that check does and does not cover.** It queries **npm's advisory
+database only**. A cross-check against GitHub's global advisory DB was attempted
+and **refused with 403** — a Claude Code session is bound to its configured
+repositories, so `/advisories` is unavailable here. So a clean row above rests on
+**one source, not two**. It would not catch a Supabase-authored security notice
+that was never filed as an npm advisory. If you need that assurance, check the
+`supabase/supabase-js` repository's own security advisories by hand.
+
 ### package.json / package-lock.json
 
 Build-only. They are **not** shipped to users in any meaningful sense (nothing
