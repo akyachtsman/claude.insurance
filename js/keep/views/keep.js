@@ -21,12 +21,7 @@ import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderK
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
 export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
 export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "./policies-view.js";
-import {
-  BROKER_NAME, buildReminderSettings,
-  money, downloadButton, docDownloadMenu, ribbon, landingCommand, page,
-  backLink, cic, policyTypeIcon, dateShort, expiryBadge, signOutButton,
-  sortableTable, statTile, requestStepper,
-} from "./shell.js";
+import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
@@ -82,7 +77,6 @@ function collectPolicies() {
         out.push({ policy: p, asset: a, entity: ent });
   return out;
 }
-
 
 // Landing — welcome + "what would you like to do?" + a renewals report and
 // at-a-glance boxes. The home of the Keep (#/keep).
@@ -410,6 +404,12 @@ export function renderKeepDocuments() {
   mount(view);
 }
 
+// "client" -> "Client", "broker" -> "Broker", "underwriter" -> "Underwriter".
+function roleLabel(role) {
+  const r = String(role || "client");
+  return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
 export function renderKeepAccount() {
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
   const user = getUser();
@@ -419,7 +419,12 @@ export function renderKeepAccount() {
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
-      pg([["Name", user.name], ["Email", user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", BROKER_NAME]]),
+      // Role came from a literal, so a broker or underwriter signing in saw
+      // "Role: Client". It is on the profile and already read elsewhere in this
+      // file. "Member since" was a literal too; dropped rather than fabricated,
+      // since profiles exposes no created_at the client can read.
+      pg([["Name", user.name], ["Email", user.email],
+          ["Role", roleLabel(user.role)], ["Broker", BROKER_NAME]]),
     ]),
     buildReminderSettings(),
     el("div", { class: "k-btn-row" }, [signOutButton("k-btn k-btn--ghost")]),

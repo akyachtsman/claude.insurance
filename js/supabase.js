@@ -415,9 +415,17 @@ export async function notifyEnhancement(requestId, event) {
   }
 }
 
-// Final approval (broker or underwriter). The status flip goes through a direct
-// RLS-guarded update (works regardless of the Edge Function's state); the
-// approval email is sent best-effort via the function.
+// Final approval. The status flip is a DIRECT RLS-guarded update; the Edge
+// Function only sends the email, best-effort.
+//
+// ⚠️ So RLS — not the function — is the enforcement point for the lifecycle, and
+// today's policies gate on ROLE ALONE (no `with check`, no status predicate), so
+// any broker or underwriter can set any request to any status from any status:
+// approve one still at "requested", or flip a declined one back to approved.
+// CLAUDE.md assigns underwriting -> approved to the underwriter. The fix is a
+// migration, written and waiting for owner approval in
+// supabase/proposed/20261005_enhancement_request_stage_guard.sql. Hardening the
+// function alone does NOT close this path.
 export async function approveEnhancement(requestId) {
   const res = await advanceRequest(requestId, "approved");
   notifyEnhancement(requestId, "approved"); // best-effort email; don't block the UI on it

@@ -11,10 +11,7 @@ import { ASSET_META } from "../logic/data.js";
 import { analyzeAsset } from "../logic/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../logic/depreciation.js";
 import { fetchRules, findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
-import {
-  BROKER_NAME, sep, page, backLink, originHref, money, cic, assetTypeLabel, assetTypeIcon,
-  policyTypeIcon, coveragePill, policiesSection, sortableTable, statTile,
-} from "./shell.js";
+import { BROKER_NAME, sep, page, backLink, originHref, money, cic, assetTypeLabel, assetTypeIcon, coveragePill, policiesSection, sortableTable, statTile } from "./shell.js";
 
 // Assets — every asset across all entities in one table, sorted by clicking the
 // column headers (defaults to Entity). Assets whose entity didn't load (true
@@ -266,6 +263,12 @@ function kProgress(stepNum, totalSteps, onBack) {
 // Add asset: step 1 pick a type, step 2 name it + pick the entity, then write.
 export function renderKeepAddAsset(preselectEntityId) {
   const entities = getEntities();
+  // An asset has to belong to an entity, so with none there is nothing to pick.
+  // The entity <select> only gets a placeholder when length > 1, so at zero it
+  // rendered EMPTY and submitting showed "Choose which entity this belongs to."
+  // for a control that offered no choice — an error the user could not act on.
+  // A freshly invited client with no entities yet lands here from the Add menu.
+  if (!entities.length) { go("#/keep/add-entity"); return; }
   // When launched from an entity's page (#/keep/add-asset/:id) the new asset
   // should belong to that entity, not silently default to the first one.
   const preselect = entities.some((e) => e.id === preselectEntityId) ? preselectEntityId : null;

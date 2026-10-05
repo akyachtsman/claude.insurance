@@ -563,7 +563,7 @@ function policySummaryCard(policy) {
       el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 24 })]),
       el("div", { class: "k-pcard__t" }, [
         el("div", { class: "k-pcard__line", text: policy.line }),
-        el("div", { class: "k-pcard__sub", text: `${policy.carrier} · ${policy.number}` }),
+        el("div", { class: "k-pcard__sub", text: [policy.carrier, policy.number].filter(Boolean).join(" · ") || "—" }),
       ]),
       expiryBadge(policy.renewalInDays),
     ]),

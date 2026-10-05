@@ -785,10 +785,10 @@ function relationshipMap() {
 // pick, so the control stays reversible even though only the chart (not the
 // toolbar) redraws on a change.
 function relSeg(current, opts, onPick) {
-  const seg = el("div", { class: "k-seg", attrs: { role: "group" } });
+  const seg = el("div", { class: "k-segj", attrs: { role: "group" } });
   let active = current;
   const btns = opts.map((o) => {
-    const b = el("button", { class: "k-seg__b", attrs: { type: "button" } }, [el("span", { text: o.label })]);
+    const b = el("button", { class: "k-segj__b", attrs: { type: "button" } }, [el("span", { text: o.label })]);
     b.addEventListener("click", () => {
       if (o.val === active) return;
       active = o.val; sync(); onPick(o.val);

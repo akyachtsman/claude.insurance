@@ -4,7 +4,6 @@
 // card-reorder subsystem. Extracted from views/keep.js; hangs in the shared
 // chrome from shell.js. Public: renderKeepEntityList/Grid/Entities/Entity.
 import { el, mount } from "../../dom.js";
-import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
 import { assetStatus, entitySummary } from "../logic/analysis.js";
@@ -393,7 +392,9 @@ export async function renderKeepEntity(params, id) {
     cic(a),
     el("div", { class: "k-arow__main" }, [
       el("div", { class: "k-arow__name", text: a.name }),
-      el("div", { class: "k-arow__meta", text: `${a.meta} · ${money(a.value)}` }),
+      // addAsset writes value: null when the optional estimated-value field is
+      // left blank, which rendered "Home · " with a separator and nothing after.
+      el("div", { class: "k-arow__meta", text: a.value != null ? `${a.meta} · ${money(a.value)}` : a.meta }),
     ]),
     el("span", { class: `k-arow__st k-arow__st--${st.cls}`, text: st.label }),
   ]);
@@ -428,6 +429,3 @@ export async function renderKeepEntity(params, id) {
   ], { split: true });
   mount(view);
 }
-
-// Value & depreciation panel for the asset detail page. Depreciating types show
-// a milestone actual-cash-value (ACV) schedule; non-depreciating types show a

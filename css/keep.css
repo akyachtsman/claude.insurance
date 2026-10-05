@@ -86,11 +86,17 @@ body.in-keep { background: var(--color-bg); }
 .k-reltools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3) var(--space-4); padding: var(--space-3) var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); margin: 10px 0; }
 .k-reltool { display: flex; flex-direction: column; gap: 5px; }
 .k-reltool__lbl { font: 700 11px var(--font-sans); letter-spacing: .02em; text-transform: uppercase; color: var(--color-text-secondary); }
-.k-seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
-.k-seg__b { min-height: 40px; padding: 0 var(--space-3); font: 600 14px var(--font-sans); color: var(--color-text-secondary); background: var(--color-surface); border: 0; cursor: pointer; }
-.k-seg__b + .k-seg__b { border-left: 1px solid var(--color-border); }
-.k-seg__b.is-on { background: var(--color-accent); color: #fff; }
-.k-seg__b:not(.is-on):hover, .k-seg__b:focus-visible { background: var(--color-accent-light); color: var(--color-accent); outline: none; }
+/* JOINED segmented control (relationships-map toolbar): buttons touch, with a
+   divider between them. Renamed from .k-seg because the entities view switch
+   further down declared .k-seg too and won the cascade — so this toolbar was
+   rendering with that one's pill radius, 4px gap and shadow WHILE the
+   `+ .k-seg__b { border-left }` divider below still drew a line between buttons
+   that were no longer touching. Two different components, one class name. */
+.k-segj { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.k-segj__b { min-height: 40px; padding: 0 var(--space-3); font: 600 14px var(--font-sans); color: var(--color-text-secondary); background: var(--color-surface); border: 0; cursor: pointer; }
+.k-segj__b + .k-segj__b { border-left: 1px solid var(--color-border); }
+.k-segj__b.is-on { background: var(--color-accent); color: #fff; }
+.k-segj__b:not(.is-on):hover, .k-segj__b:focus-visible { background: var(--color-accent-light); color: var(--color-accent); outline: none; }
 .k-relsel { min-height: 42px; font: 600 16px var(--font-sans); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-3); max-width: 220px; }
 .k-relsel:focus-visible { outline: 2px solid var(--color-accent-ring); border-color: var(--color-accent); }
 .k-relchks { display: flex; gap: var(--space-3); }
@@ -100,6 +106,7 @@ body.in-keep { background: var(--color-bg); }
 .k-relbtn:hover, .k-relbtn:focus-visible { background: var(--color-accent); color: #fff; outline: none; }
 
 /* ── Entities view switch (List ⇄ Relationships) ────────────────────────────── */
+/* PILL segmented control (entities view switch): gapped tabs on a tinted bar. */
 .k-seg { display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 var(--space-5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-pill); box-shadow: var(--shadow-sm); }
 .k-seg__btn { display: inline-flex; align-items: center; gap: 7px; font: 800 14px var(--font-sans); color: var(--color-text-secondary); padding: 9px 20px; min-height: 42px; border-radius: var(--radius-pill); transition: background .14s, color .14s; }
 .k-seg__btn:not(.is-on):hover { color: var(--color-text-primary); background: var(--color-bg); }
@@ -186,7 +193,6 @@ body.in-keep { background: var(--color-bg); }
 .k-btn--ghost { background: var(--color-surface); color: var(--color-accent); border: 2px solid var(--color-accent-light); box-shadow: none; }
 .k-btn--ghost:hover { background: var(--color-accent-light); color: var(--color-accent-hover); }
 .k-btn--block { width: 100%; }
-.k-btn--sm { min-height: 44px; padding: 10px 16px; font-size: 14px; }
 
 /* ── Entity panels (tinted boxes that hold assets) ──────────────────────────── */
 .k-panel { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-8); box-shadow: var(--shadow-lg); margin-bottom: var(--space-6); }
@@ -277,7 +283,12 @@ a.k-ownrow:hover { background: var(--color-bg); color: inherit; }
 /* Uniform micro-label scale across both frames (section labels match the eyebrow). */
 .k-eoverview .k-lbl, .k-ecol .k-lbl { font-size: 11px; letter-spacing: .1em; }
 .k-ecol__cnt { flex: none; font: 800 11px var(--font-sans); color: var(--color-text-secondary); background: var(--color-bg); padding: 3px 10px; border-radius: var(--radius-pill); }
-.k-btn--sm { min-height: 40px; padding: 0 18px; font-size: 14px; gap: 6px; flex: none; box-shadow: 0 6px 14px -8px rgba(47,106,246,.6); text-decoration: none; }
+/* ONE .k-btn--sm. It was declared three times (here, ~line 189 and ~line 687);
+   cascade order meant the first contributed NOTHING and the second contributed
+   only gap/flex/text-decoration, so every .k-btn--sm in the app rendered at the
+   third rule's 38px with no shadow — and an editor changing either of the other
+   two saw no effect. These are the values that were actually winning. */
+.k-btn--sm { min-height: 38px; padding: 8px 16px; font-size: 14px; gap: 6px; flex: none; box-shadow: none; text-decoration: none; }
 .k-btn--sm .icon { width: 16px; height: 16px; }
 
 /* Assets grouped by protection status */
@@ -684,7 +695,6 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-reqctx__s { font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
 .k-pactions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: var(--space-5); }
 .k-pactions__hint { font: 600 13px var(--font-sans); color: var(--color-text-secondary); }
-.k-btn--sm { padding: 8px 16px; min-height: 38px; font-size: 14px; box-shadow: none; }
 .k-reqhead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); }
 .k-reqlist { display: grid; gap: 14px; }
 .k-reqcard { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 18px 20px; }

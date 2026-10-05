@@ -19,9 +19,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+// Validated at module load, not asserted away with `!`. With a missing value the
+// `!` deferred the failure to createClient(undefined, ...) inside the request
+// handler, surfacing as an unhandled rejection rather than a diagnosable error.
+function required(name: string): string {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`notify-enhancement: required env var ${name} is not set`);
+  return v;
+}
+const SUPABASE_URL = required("SUPABASE_URL");
+const SERVICE_KEY = required("SUPABASE_SERVICE_ROLE_KEY");
+const ANON_KEY = required("SUPABASE_ANON_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const BROKER_EMAIL = Deno.env.get("BROKER_EMAIL") || "";
 const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "The Keep <onboarding@resend.dev>";
@@ -121,18 +129,44 @@ Deno.serve(async (req: Request) => {
         `You'll get another email once it has final approval.`,
       ]),
     );
-    await admin.from("enhancement_requests").update({ requested_notified_at: new Date().toISOString() }).eq("id", requestId);
+    // Only stamp when something actually went out. sendEmail returns
+    // {sent:false, reason:"no_provider_key"} whenever RESEND_API_KEY is unset —
+    // the documented default state — so an unconditional stamp recorded "we
+    // tried", making the column useless for finding un-notified requests.
+    if (brokerMail.sent || clientMail.sent) {
+      await admin.from("enhancement_requests").update({ requested_notified_at: new Date().toISOString() }).eq("id", requestId);
+    }
     return json({ ok: true, event, broker: brokerMail, client: clientMail });
   }
 
-  // event === "approved" — broker, underwriter, or service-role only.
+  // event === "approved" — the UNDERWRITER's decision, or service-role.
+  //
+  // CLAUDE.md assigns the underwriting -> approved decision to the underwriter;
+  // the broker advances a request only as far as underwriting, which is what the
+  // UI already enforces (policies-view gates the broker's control on
+  // requested|broker_review). This function is the SERVER-SIDE authority and was
+  // accepting "approved" from a broker as well, so the split existed only in the
+  // UI. RLS does not close it either: er_broker_update gates by role with no
+  // status predicate and no WITH CHECK.
   if (!isServiceRole) {
     if (!user) return json({ error: "forbidden" }, 403);
     const { data: prof } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (prof?.role !== "broker" && prof?.role !== "underwriter") return json({ error: "forbidden" }, 403);
+    if (prof?.role !== "underwriter") return json({ error: "forbidden" }, 403);
   }
+
+  // STAGE CHECK. The row's status was loaded above and never inspected, so any
+  // authorized caller could approve a request in ANY state: one still at
+  // "requested" jumped straight to approved, skipping broker review and
+  // underwriting, and a DECLINED request could be flipped back to approved —
+  // with the email still reading "final approval" and never mentioning the
+  // decline, because `row` was read before the update.
+  if (row.status !== "underwriting") {
+    return json({ error: "bad_stage", status: row.status, expected: "underwriting" }, 409);
+  }
+
+  const approvedAt = new Date().toISOString();
   await admin.from("enhancement_requests")
-    .update({ status: "approved", approved_at: new Date().toISOString(), approved_notified_at: new Date().toISOString() })
+    .update({ status: "approved", approved_at: approvedAt })
     .eq("id", requestId);
   const brokerMail = await sendEmail(
     BROKER_EMAIL,
@@ -151,5 +185,8 @@ Deno.serve(async (req: Request) => {
       `Your broker will follow up with the updated policy details.`,
     ]),
   );
+  if (brokerMail.sent || clientMail.sent) {
+    await admin.from("enhancement_requests").update({ approved_notified_at: new Date().toISOString() }).eq("id", requestId);
+  }
   return json({ ok: true, event, broker: brokerMail, client: clientMail });
 });

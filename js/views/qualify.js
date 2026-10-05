@@ -23,7 +23,12 @@ export async function renderQualify(params) {
   const presetDomain = params && params.get("domain");
   const state = {
     domain: (presetDomain === "residential" || presetDomain === "commercial") ? presetDomain : null,
-    locked: Boolean(presetDomain),   // entered from a coverage page with a domain
+    // Derived from the VALIDATED domain, not the raw param. `?domain=business`
+    // (a plausible hand-edit — the branch label reads "For my business") left
+    // domain null while locked stayed true, so Back on question 1 skipped both
+    // earlier arms and navigated to `#/null`, ejecting the user to the marketing
+    // page instead of returning to "Who are we protecting?".
+    locked: presetDomain === "residential" || presetDomain === "commercial",
     stepIndex: 0,
     answers: {},
     error: "",
@@ -99,6 +104,7 @@ export async function renderQualify(params) {
   }
 
   function goBack() {
+    state.error = "";   // a stale validation error survived Back + re-answer
     if (state.stepIndex > 0) {
       state.stepIndex -= 1;
     } else if (!state.locked) {

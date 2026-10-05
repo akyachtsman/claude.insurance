@@ -11,9 +11,7 @@ import { ASSET_META } from "../logic/data.js";
 import { policyKind, reminderInfo, formatPremium } from "../logic/policies.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, nextStage } from "../logic/requests.js";
 import { findPolicy, getUser, getPrefs, addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest } from "../../supabase.js";
-import {
-  sep, page, backLink, cic, dateFromDays, expiryBadge, docItem, activeSchedule, requestStepper,
-} from "./shell.js";
+import { sep, page, backLink, dateFromDays, expiryBadge, docItem, activeSchedule, requestStepper } from "./shell.js";
 
 export function renderKeepPolicy(params, id) {
   const found = findPolicy(id);
@@ -61,7 +59,9 @@ export function renderKeepPolicy(params, id) {
       el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 30 })]),
       el("div", { class: "k-phead__t" }, [
         el("h1", { text: policy.line }),
-        el("div", { class: "sub", text: `${policy.carrier} · NAIC ${policy.naic}` }),
+        // carrier/naic/number are all nullable text, and a template literal
+        // stringifies null — this read "NAIC null".
+        el("div", { class: "sub", text: [policy.carrier, policy.naic ? `NAIC ${policy.naic}` : null].filter(Boolean).join(" · ") || "—" }),
       ]),
       expiryBadge(policy.renewalInDays),
     ]),
