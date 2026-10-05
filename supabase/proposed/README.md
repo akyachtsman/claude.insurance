@@ -14,6 +14,7 @@ same change that applies it.
 | file | why it is waiting |
 |---|---|
 | `20261005_enhancement_request_stage_guard.sql` | Closes a real authorization hole (below). Needs owner approval + `apply_migration`. |
+| `20261005_profiles_role_not_self_assignable.sql` | Closes a **live privilege escalation**: any signed-in client can set its own `profiles.role` to `broker`. Needs owner approval + `apply_migration`. |
 
 ## 20261005_enhancement_request_stage_guard.sql
 
@@ -57,3 +58,49 @@ which is the one the UI actually uses — only this migration does.
 
 **To apply:** review, then move to `supabase/migrations/` in the same change that
 runs it, and drop its row from the table above.
+
+## 20261005_profiles_role_not_self_assignable.sql
+
+Found while reviewing the feature-002 plan on 2026-10-05, and **verified against
+the live database** rather than inferred from these files.
+
+**The hole.** `authenticated` holds table-level `UPDATE` on `public.profiles` —
+every column, `role` included — and the only RLS policy on it is
+`using (id = auth.uid()) with check (id = auth.uid())`. Neither clause mentions
+`role`, and there is no trigger. So this one PostgREST call succeeds:
+
+```js
+await supabase.from("profiles").update({ role: "broker" }).eq("id", uid);
+```
+
+It is reachable from the browser with the client demo credential, which CLAUDE.md
+publishes and the login screen prefills.
+
+**Blast radius — real, and narrower than it first looks.** The only role-keyed
+policies in the whole schema are the four on `enhancement_requests`. Every other
+table (`entities`, `assets`, `policies`, `entity_relationships`) keys on
+`owner = auth.uid()` with no role escape, so a self-promoted broker does **not**
+gain access to any other client's cover. What it does gain:
+
+- `SELECT` on every client's enhancement requests — free-text subject and body.
+- `UPDATE` on them, and `er_broker_update` has no `with check`, so `owner`,
+  `subject` and `body` can be rewritten too, not just `status`.
+
+This is **pre-existing and live today** — independent of PR #251 and of
+feature 002. Both would merely be built on top of it.
+
+**Why a column grant, not a policy.** RLS evaluates whole rows: `with check`
+sees only the NEW row and cannot compare it against the OLD one, so no policy can
+express "this column may not change". Column-level privileges are the only
+mechanism that does, short of a trigger. (The same OLD-row blindness is why the
+stage guard above needs its own `with check` transition predicates.)
+
+**Scope check.** `js/supabase.js` is the only client writer: one `update` of
+`{reminder_email, reminder_schedule}` (line 312) and one `select` (line 100).
+There is no client-side `INSERT` in `js/` and no trigger creates the row, so the
+revoke removes capability the app never used.
+
+**To apply:** review, then move to `supabase/migrations/` in the same change that
+runs it, run the post-apply probe in the file's footer **as a client session**
+(service-role bypasses RLS and would report a false pass), and drop its row from
+the table above.
