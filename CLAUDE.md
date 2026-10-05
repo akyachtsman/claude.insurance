@@ -273,7 +273,19 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.app-header h1` · choice steps: `.choices .choice` · contact: `#contact-name` · summary: `.need`, `.disclaimer` · error: `.error` |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard`, `.k-error`, `.k-h1` |
+
+⚠️ **Every selector in that row was verified against the rendered page on
+2026-10-05** (headless chromium, local static server) — not read off the
+source. `home` was `.app-header h1`, which matches **nothing**: there is no
+`.app-header` anywhere in `js/`, `css/` or `index.html`, and the home `h1` is
+`main > section.hero > … > h1.hero__title`. `.site-header` exists but is the
+nav bar and contains no `h1`. This is the same dead-selector failure as the
+`.card` entry in the row above, which was fixed while this one was left — and
+this table is **agent input**, so a dead selector here becomes an assertion
+that can never pass. Re-verify against the page, not the stylesheet: `.card`
+was live CSS with no emitter, and `#contact-name` is the reverse — correct,
+but invisible to grep because the id is interpolated.
 
 ## Project-Specific Test Scenarios
 Authoritative list of coverage beyond the generic S1–S4 suite — the ui-tester
