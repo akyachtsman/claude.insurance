@@ -77,8 +77,11 @@ async function dispatch(parts, params) {
   }
 }
 
-// The Keep sub-router: #/keep, #/keep/login, #/keep/add-asset,
-// #/keep/entity/:id, #/keep/asset/:id.
+// The Keep sub-router. All 17 routes: #/keep (landing), /login, /list (My
+// Entities), /entities (relationships map), /grid, /entity/:id, /assets,
+// /asset/:id, /insurance (all policies), /policy/:id, /requests (My requests),
+// /request/:id, /add-asset, /add-entity, /documents, /account, /security.
+// (This header previously listed five of them.)
 // Guards every route except login behind a Supabase Auth session, and loads the
 // user's data once before rendering so the views can read it synchronously.
 async function dispatchKeep(rest) {
