@@ -1,7 +1,8 @@
 // Tests for keep/relmap.js — run: node --test js/keep/logic/relmap.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capTablesByEntity, controlsByEntity, edgeKey, fitPlan, orchestrate } from "./relmap.js";
+import { capTablesByEntity, controlsByEntity, edgeKey, fitPlan, orchestrate,
+         alignCross, relOrtho, relHopPath, REL_NODE_W, REL_NODE_H, REL_HGAP, REL_VGAP } from "./relmap.js";
 
 // A small graph mirroring the demo shape: a 3-owner company plus a trustee link
 // (no stake) and an ownership chain.
@@ -198,4 +199,105 @@ test("a row containing a neighbourless node orders deterministically", () => {
   for (let i = 0; i < 8; i++) {
     assert.equal(JSON.stringify(orchestrate(ns, es, (n) => band[n.id]).rows), first);
   }
+});
+
+// ── The connector standard's GEOMETRIC verification (audit 2026-10-05) ──────
+//
+// CLAUDE.md → "Non-overlapping connectors (always)" requires counting
+// cross-source collinear overlaps and lines-behind-boxes PROGRAMMATICALLY,
+// because "a visual glance misses collinear overlaps". That check was
+// impossible to write while the routing math was sealed inside the 839-line
+// DOM-bound view; these are it.
+
+// Build real edge polylines for a graph, the way the renderer does.
+function routeAll(nodes, edges, bandOf) {
+  const { order, rows, dummy, edgePath, up, down } = orchestrate(nodes, edges, bandOf);
+  const sepOf = () => REL_NODE_W + REL_HGAP;
+  const cross = alignCross(order, rows, up, down, sepOf);
+  const bandIndex = {};
+  order.forEach((b, bi) => rows[b].forEach((id) => { bandIndex[id] = bi; }));
+  const ptOf = (id) => ({ x: cross[id], y: bandIndex[id] * (REL_NODE_H + REL_VGAP) });
+  return edges.map((e, i) => {
+    const wp = edgePath[edgeKey(e, i)] || [];
+    const chain = [ptOf(e.from), ...wp.map(ptOf), ptOf(e.to)];
+    const r = relOrtho(chain, false, null, null);
+    return { e, pts: r.pts || [] };
+  }).filter((r) => r.pts.length >= 2);
+}
+const segsOf = (pts) => pts.slice(0, -1).map((p, i) => [p, pts[i + 1]]);
+const near = (a, b) => Math.abs(a - b) < 0.5;
+
+test("no two edges from DIFFERENT sources run collinear", () => {
+  // Two owners' runs sharing a line read as one line — the failure the standard
+  // exists to prevent, and the one the eye cannot catch.
+  const nodes = [{ id: "o1" }, { id: "o2" }, { id: "t1" }, { id: "t2" }, { id: "mid" }];
+  const edges = [
+    { from: "o1", to: "t1", stake: "100%" },
+    { from: "o2", to: "t2", stake: "100%" },
+  ];
+  const band = { o1: 0, o2: 0, mid: 1, t1: 2, t2: 2 };
+  const routed = routeAll(nodes, edges, (n) => band[n.id]);
+  let overlaps = 0;
+  for (let i = 0; i < routed.length; i++) {
+    for (let j = i + 1; j < routed.length; j++) {
+      if (routed[i].e.from === routed[j].e.from) continue;   // a bus is one relationship
+      for (const [a, b] of segsOf(routed[i].pts)) {
+        for (const [c, d] of segsOf(routed[j].pts)) {
+          const vert = near(a.x, b.x) && near(c.x, d.x) && near(a.x, c.x);
+          const horz = near(a.y, b.y) && near(c.y, d.y) && near(a.y, c.y);
+          if (!vert && !horz) continue;
+          const [p0, p1] = vert ? [a.y, b.y] : [a.x, b.x];
+          const [q0, q1] = vert ? [c.y, d.y] : [c.x, d.x];
+          const span = Math.min(Math.max(p0, p1), Math.max(q0, q1)) - Math.max(Math.min(p0, p1), Math.min(q0, q1));
+          if (span > 1) overlaps++;    // a shared POINT is a crossing, not an overlap
+        }
+      }
+    }
+  }
+  assert.equal(overlaps, 0, `${overlaps} cross-source collinear overlap(s)`);
+});
+
+test("no edge segment runs behind a node box", () => {
+  // Includes the same-band case (a holding company owning an operating company,
+  // both in the business band), which is where a straight run would cut through
+  // whatever card sits between them.
+  const nodes = [{ id: "holdco" }, { id: "midco" }, { id: "opco" }];
+  const edges = [{ from: "holdco", to: "opco", stake: "100%" }];
+  const band = { holdco: 2, midco: 2, opco: 2 };
+  const { rows, order, up, down } = orchestrate(nodes, edges, (n) => band[n.id]);
+  const cross = alignCross(order, rows, up, down, () => REL_NODE_W + REL_HGAP);
+  const bandIndex = {};
+  order.forEach((b, bi) => rows[b].forEach((id) => { bandIndex[id] = bi; }));
+  const ptOf = (id) => ({ x: cross[id], y: bandIndex[id] * (REL_NODE_H + REL_VGAP) });
+  const { pts } = relOrtho([ptOf("holdco"), ptOf("opco")], false, null, null);
+  assert.ok(pts && pts.length >= 2, "same-band edge must produce a routed polyline");
+
+  const boxes = nodes.map((n) => {
+    const c = ptOf(n.id);
+    return { id: n.id, x0: c.x - REL_NODE_W / 2, x1: c.x + REL_NODE_W / 2, y0: c.y - REL_NODE_H / 2, y1: c.y + REL_NODE_H / 2 };
+  });
+  const inside = (p, b) => p.x > b.x0 + 1 && p.x < b.x1 - 1 && p.y > b.y0 + 1 && p.y < b.y1 - 1;
+  const behind = [];
+  for (const [a, b] of segsOf(pts)) {
+    for (const box of boxes) {
+      if (box.id === "holdco" || box.id === "opco") continue;   // its own endpoints
+      // Sample the segment; these runs are axis-aligned so sampling is exact enough.
+      for (let t = 0; t <= 1; t += 0.05) {
+        const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        if (inside(p, box)) { behind.push(box.id); t = 2; }
+      }
+    }
+  }
+  assert.deepEqual([...new Set(behind)], [], "edge runs behind a card");
+});
+
+test("a perpendicular crossing is broken with a GAP, never an arc", () => {
+  // relHopPath must emit a fresh `M` (a move, i.e. a gap) at each crossing —
+  // never a curve command, which reads as a node or a join at small sizes.
+  const pts = [{ x: 0, y: 0 }, { x: 0, y: 200 }];
+  const d = relHopPath(pts, [{ c: 100, s0: -50, s1: 50 }], false);
+  assert.ok(d.includes("M"), "expected a move command (the gap)");
+  assert.equal(/[CcQqSsTtAa]/.test(d.replace(/^M/, "")), false, `arc/curve command in path: ${d}`);
+  // and with no crossers it stays one unbroken run
+  assert.equal((relHopPath(pts, [], false).match(/M/g) || []).length, 1);
 });

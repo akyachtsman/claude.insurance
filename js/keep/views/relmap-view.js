@@ -10,7 +10,8 @@ import { icon } from "../../icons.js";
 import { getMapData } from "../../supabase.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityRelStyleKey as relStyleKey, entityMapSub } from "../logic/entity-display.js";
-import { capTablesByEntity, orchestrate, edgeKey } from "../logic/relmap.js";
+import { capTablesByEntity, orchestrate, edgeKey, alignCross, relOrtho, relHopPath,
+         REL_NODE_W, REL_NODE_H, REL_HGAP, REL_VGAP } from "../logic/relmap.js";
 
 function svgText(str, attrs) { const t = s("text", attrs); t.textContent = str; return t; }
 
@@ -57,159 +58,19 @@ const relView = { orient: "vertical", mode: "ownership", focus: null, chips: tru
 // (owners above what they own) — see keep/relmap.js orchestrate — and sizes the
 // canvas to the busiest row and the depth of the deepest chain, so boxes never
 // pack tighter than one node + gap.
-const REL_NODE_W = 210, REL_NODE_H = 118, REL_HGAP = 30, REL_VGAP = 78, REL_PAD = 34;
+// REL_NODE_W/H and REL_HGAP/VGAP live in logic/relmap.js with the routing math
+// that consumes them; re-exported here so the renderer keeps one name for each.
+const REL_PAD = 34;
 const REL_DUMMY_W = 16;   // routing-waypoint slot width on the cross axis
 // Below this on-screen box width the map stops shrinking and pans instead.
 const REL_MIN_NODE_PX = 150;
 // Manual zoom bounds and per-click step (relative to the fit scale's natural 1×).
 const REL_ZOOM_MIN = 0.3, REL_ZOOM_MAX = 2.4, REL_ZOOM_STEP = 1.25;
+
 // Lay the graph out per the current relView. Bands (ownership layers, or type
 // groups) stack along one axis; members spread along the other. Orientation swaps
 // which axis is which — vertical stacks bands top-down, horizontal stacks them
 // left-to-right (spreading deep chains across the width).
-// Cross-axis placement (Brandes–Köpf). A simple barycenter relaxation drifts and
-// never straightens single-child chains (a deep A→B→C hangs out as a staircase).
-// Instead: (1) align each node under the median of its owners, chaining nodes into
-// vertical "blocks" while forbidding crossings, so an ownership chain becomes one
-// straight column; then (2) compact the blocks as far toward the start of the axis
-// as the minimum separation allows. Deterministic; owners sit directly above what
-// they own and the whole layout packs tight.
-function alignCross(order, rows, up, down, sepOf) {
-  const rowOf = {}, pos = {};
-  order.forEach((r) => rows[r].forEach((id, i) => { rowOf[id] = r; pos[id] = i; }));
-
-  // (1) Vertical alignment: link each node to its median owner into a block
-  // (root = block head, alignN = next node in the block, cyclic).
-  const root = {}, alignN = {};
-  order.forEach((r) => rows[r].forEach((id) => { root[id] = id; alignN[id] = id; }));
-  for (let ri = 1; ri < order.length; ri++) {
-    const r = order[ri], prev = order[ri - 1];
-    let last = -1;                                    // owner index used so far — keep increasing (no crossing)
-    for (const v of rows[r]) {
-      const owners = (up[v] || []).map((u) => pos[u]);
-      if (!owners.length) continue;
-      owners.sort((a, b) => a - b);
-      const lo = Math.floor((owners.length - 1) / 2), hi = Math.ceil((owners.length - 1) / 2);
-      for (let m = lo; m <= hi; m++) {
-        if (alignN[v] !== v) break;                   // already placed in a block
-        const oi = owners[m];
-        if (oi > last) { const u = rows[prev][oi]; alignN[u] = v; root[v] = root[u]; alignN[v] = root[v]; last = oi; }
-      }
-    }
-  }
-
-  // (2) Horizontal compaction: shove each block toward the axis start, respecting
-  // the min separation against the block to its left in every row (BK sink/shift).
-  const sink = {}, shift = {}, x = {};
-  order.forEach((r) => rows[r].forEach((id) => { sink[id] = id; shift[id] = Infinity; }));
-  const place = (v) => {
-    if (x[v] != null) return;
-    x[v] = 0;
-    let w = v;
-    do {
-      const p = pos[w];
-      if (p > 0) {
-        const u = rows[rowOf[w]][p - 1], ru = root[u];
-        place(ru);
-        const sep = sepOf(u, w);
-        if (sink[v] === v) sink[v] = sink[ru];
-        if (sink[v] !== sink[ru]) shift[sink[ru]] = Math.min(shift[sink[ru]], x[v] - x[ru] - sep);
-        else x[v] = Math.max(x[v], x[ru] + sep);
-      }
-      w = alignN[w];
-    } while (w !== v);
-  };
-  order.forEach((r) => rows[r].forEach((id) => { if (root[id] === id) place(id); }));
-
-  const c = {};
-  order.forEach((r) => rows[r].forEach((id) => {
-    c[id] = x[root[id]];
-    const sh = shift[sink[root[id]]];
-    if (sh < Infinity) c[id] += sh;
-  }));
-  return c;
-}
-// Orthogonal (org-chart) edge routing through a chain of box/dummy centres. Every
-// run is axis-aligned and straight: the edge leaves the owner's facing edge, drops
-// into the empty channel in the gap *between* two rows, runs across it, then into the
-// next row — repeating through any dummy waypoints (which occupy the gap columns
-// between boxes). Because each cross-run lives in a row gap and each along-run in a
-// box-centre or dummy column, the line never passes behind a box. The exit/entry
-// faces follow the actual band direction (so a reverse link — owner below its target
-// — leaves the top and enters the bottom), and a same-band link dips into the
-// adjacent row gap rather than cutting through the cards. Works along either axis via
-// a main/cross split (main = the band-stacking axis). `channelOf(p, q)` optionally
-// picks the along-gap coordinate for each run (used to fan each owner's bus onto its
-// own lane so runs don't overlap); it defaults to the middle of the gap. Returns the
-// path `d` plus a `mid` anchor for the role label.
-function relOrtho(chain, horiz, channelOf, entryCross) {
-  const halfMain = (horiz ? REL_NODE_W : REL_NODE_H) / 2;
-  const gapHalf = (horiz ? REL_HGAP : REL_VGAP) / 2;
-  const mainOf = (p) => (horiz ? p.x : p.y);
-  const crossOf = (p) => (horiz ? p.y : p.x);
-  const pt = (main, cross) => (horiz ? { x: main, y: cross } : { x: cross, y: main });
-  const pathOf = (P) => P.reduce((s, p, i) => s + (i ? " L " : "M ") + p.x + " " + p.y, "");
-  const n = chain.length;
-  const a = chain[0], b = chain[n - 1];
-  if (n < 2) return { d: "", mid: a || { x: 0, y: 0 } };
-
-  // Same-band link (no rows between the two cards): dip into the gap just past the
-  // band and back, so the run stays out of every card in that band.
-  if (n === 2 && mainOf(a) === mainOf(b)) {
-    const ch = mainOf(a) + halfMain + gapHalf, ac = crossOf(a), bc = crossOf(b);
-    const P = [pt(mainOf(a) + halfMain, ac), pt(ch, ac), pt(ch, bc), pt(mainOf(b) + halfMain, bc)];
-    return { d: pathOf(P), mid: pt(ch, (ac + bc) / 2), pts: P };
-  }
-
-  const dStart = Math.sign(mainOf(chain[1]) - mainOf(a)) || 1;
-  const dEnd = Math.sign(mainOf(b) - mainOf(chain[n - 2])) || 1;
-  // Enter the target at `entryCross` when given (its owner's slice of the cap-table
-  // bar) so several arrows into one box spread across the bar instead of stacking on
-  // the centre; the last run jogs to it.
-  const crossAt = (i) => (i === n - 1 && entryCross != null) ? entryCross : crossOf(chain[i]);
-  const P = [pt(mainOf(a) + dStart * halfMain, crossOf(a))];
-  for (let i = 0; i < n - 1; i++) {
-    const ch = channelOf ? channelOf(chain[i], chain[i + 1]) : (mainOf(chain[i]) + mainOf(chain[i + 1])) / 2;   // channel (lane) in the row gap
-    P.push(pt(ch, crossAt(i)), pt(ch, crossAt(i + 1)));
-  }
-  P.push(pt(mainOf(b) - dEnd * halfMain, crossAt(n - 1)));
-  const m = (n - 1) >> 1, p = chain[m], q = chain[m + 1];
-  return { d: pathOf(P), mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, pts: P };
-}
-
-// Build an edge's path string, breaking each of its gap-spanning runs with a small
-// GAP where it crosses the perpendicular run of another edge — so where an edge
-// merely passes across another (e.g. a holding company's connector crossing the
-// arrows into an unrelated box) the crossed line breaks and the other passes cleanly
-// through, reading as a crossing, not a join (and without an arc that looks like a
-// node). `crossers` are the perpendicular segments of every other edge: `c` is their
-// constant coordinate and `[s0,s1]` their span. In vertical layout the gap-spanning
-// run is horizontal; in horizontal layout it is vertical. Only interior crossings break.
-function relHopPath(pts, crossers, horiz) {
-  const R = 6;                                            // half-gap (the rounded line-caps eat ~1.25px each side)
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
-    // The gap-spanning run breaks: horizontal in a vertical layout, vertical otherwise.
-    const hoppable = horiz ? (Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) > 1)
-                           : (Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) > 1);
-    if (!hoppable) { d += ` L ${b.x} ${b.y}`; continue; }
-    const fixed = horiz ? a.x : a.y;                     // constant coordinate of the run
-    const t0 = horiz ? a.y : a.x, t1 = horiz ? b.y : b.x;   // the run travels t0 → t1
-    const dir = Math.sign(t1 - t0) || 1;
-    const cuts = crossers
-      .filter((v) => v.c > Math.min(t0, t1) + 2 && v.c < Math.max(t0, t1) - 2 && fixed > v.s0 + 1 && fixed < v.s1 - 1)
-      .map((v) => v.c)
-      .sort((x, y) => dir * (x - y));
-    for (const c of cuts) {                              // draw up to the crossing, then skip over it
-      if (horiz) d += ` L ${a.x} ${c - dir * R} M ${a.x} ${c + dir * R}`;
-      else d += ` L ${c - dir * R} ${a.y} M ${c + dir * R} ${a.y}`;
-    }
-    d += ` L ${b.x} ${b.y}`;
-  }
-  return d;
-}
-
 function relLayout() {
   const data = getMapData();
   const nodes = data.nodes.map((n) => ({ ...n, sk: relStyleKey(n) }));

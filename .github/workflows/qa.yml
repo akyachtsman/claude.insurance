@@ -70,6 +70,19 @@ jobs:
         run: node .github/scripts/check-contrast.js
 
 
+      # ── Asset manifest guard (PROJECT-SPECIFIC — no upstream equivalent) ────
+      - name: Asset manifest guard
+        # index.html hand-maintains three lists with nothing validating them:
+        # MODULES (the cache-busting import map), SHEETS, and the <noscript>
+        # stylesheet links. An omission from MODULES is SILENT — the module still
+        # loads, it just resolves to an UNVERSIONED url, so returning browsers
+        # keep a stale copy after a deploy and nothing goes red. That already
+        # happened: 2be517a reads "they were omitted, so a deploy could serve a
+        # stale copy". The guard walks the real import graph from js/main.js
+        # rather than globbing, and exits 2 (CANNOT CHECK) rather than passing if
+        # an input is missing. Negative-tested on all four cases.
+        run: node .github/scripts/check-asset-manifest.js
+
       - name: Workflow cross-reference guard
         # Every `workflow_run.workflows:` entry must name a real workflow. GitHub
         # raises no error when one does not — the watcher simply never fires.
