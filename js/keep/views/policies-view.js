@@ -7,7 +7,7 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { ASSET_META } from "../logic/data.js";
+import { ASSET_META } from "../logic/asset-meta.js";
 import { policyKind, reminderInfo, formatPremium } from "../logic/policies.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, nextStage } from "../logic/requests.js";
 import { findPolicy, getUser, getPrefs, addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest } from "../../supabase.js";

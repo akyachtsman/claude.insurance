@@ -33,9 +33,3 @@ export function markSubmitted() {
 export function isSubmitted() {
   return state.submitted;
 }
-
-export function reset() {
-  state.profile = null;
-  state.contact = null;
-  state.submitted = false;
-}

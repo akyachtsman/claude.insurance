@@ -12,7 +12,7 @@
 // their Keep session. js/vendor/README.md carries the version, the regenerate
 // command, the sha256 and the revisit trigger a pinned copy obliges us to keep.
 import { createClient } from "./vendor/supabase-js.js";
-import { ASSET_META } from "./keep/logic/data.js";
+import { ASSET_META } from "./keep/logic/asset-meta.js";
 import { policyPresentation } from "./keep/logic/policies.js";
 
 const CONFIG = {
@@ -29,10 +29,6 @@ export const supabase = createClient(CONFIG.url, CONFIG.anonKey);
 const publicClient = createClient(CONFIG.url, CONFIG.anonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
-
-export function isLive() {
-  return Boolean(CONFIG.url && CONFIG.anonKey);
-}
 
 // Demo logins (RLS still scopes every read/write). Two roles for testing:
 //   user   → the client view (owns the seeded demo data)

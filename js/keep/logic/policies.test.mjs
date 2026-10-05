@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { policyKind, reminderInfo, renewalBand, policyType, annualPremium, policyPresentation, formatPremium } from "./policies.js";
-import { findPolicy } from "./data.js";
+import { findPolicy } from "../fixtures/sample.mjs";
 
 test("policyKind classifies active / expiring / expired", () => {
   assert.equal(policyKind(263), "ok");

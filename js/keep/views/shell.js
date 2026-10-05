@@ -9,7 +9,7 @@ import { el } from "../../dom.js";
 import { go, previousRoute } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { ASSET_META } from "../logic/data.js";
+import { ASSET_META } from "../logic/asset-meta.js";
 import { policyKind, policyType, REMINDER_SCHEDULE } from "../logic/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../logic/search.js";
 import { buildPdf, docLines, docName } from "../logic/docfile.js";

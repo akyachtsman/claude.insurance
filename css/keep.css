@@ -122,7 +122,6 @@ body.in-keep { background: var(--color-bg); }
 /* ── Documents (Entity -> Asset -> Policy -> docs) ──────────────────────────── */
 .k-docsearch { width: 100%; min-height: 48px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 16px; font: 600 15px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; margin-bottom: var(--space-5); }
 .k-docsearch:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
-.k-bigav--sm { width: 42px; height: 42px; border-radius: 13px; font-size: 15px; }
 .k-docs-empty { text-align: center; color: var(--color-text-secondary); font: 600 14px var(--font-sans); padding: var(--space-8); }
 
 /* ── Settings controls (reminder preferences) ───────────────────────────────── */
@@ -364,25 +363,18 @@ a.k-arow:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); colo
 .k-etile__stat span { font: 700 9px var(--font-sans); text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-secondary); }
 
 /* ── Asset cards (chunky, rounded) ──────────────────────────────────────────── */
-.k-cc { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; align-items: center; gap: var(--space-4); box-shadow: var(--shadow-sm); color: inherit; transition: transform .16s, box-shadow .16s; }
-a.k-cc:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); color: inherit; }
 .k-cic { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; flex: none; }
 .k-cic--home { background: var(--color-accent-light); color: var(--color-accent); }
 .k-cic--auto { background: var(--color-ok-bg); color: var(--color-ok); }
 .k-cic--boat { background: var(--color-gap-bg); color: var(--color-gap); }
 .k-cic--gem  { background: var(--color-warn-bg); color: var(--color-warn); }
 .k-cic--cp   { background: #e7f3ff; color: #2a7fd6; }
-.k-cc__main { flex: 1; min-width: 0; }
-.k-cc__name { font: 700 18px var(--font-display); }
-.k-cc__meta { font: 600 14px var(--font-sans); color: var(--color-text-secondary); margin: 2px 0 10px; }
-.k-cc__val { font: 800 18px var(--font-display); white-space: nowrap; }
 
 /* ── Status pills ───────────────────────────────────────────────────────────── */
 .k-pill { display: inline-flex; align-items: center; gap: 6px; font: 800 13px var(--font-sans); padding: 7px 14px; border-radius: var(--radius-pill); }
 .k-pill .icon { width: 15px; height: 15px; }
 .k-pill--ok  { background: var(--color-ok-bg);  color: var(--color-ok); }
 .k-pill--gap { background: var(--color-gap-bg); color: var(--color-gap); }
-.k-pill--warn{ background: var(--color-warn-bg);color: var(--color-warn); }
 .k-pill--rec { background: var(--color-accent-light); color: var(--color-accent); }
 
 /* ── Coverage analysis ──────────────────────────────────────────────────────── */
@@ -746,5 +738,4 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
   .k-search__in:focus { width: 200px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .k-cc, .k-btn { transition: none; }
 }

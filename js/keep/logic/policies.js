@@ -102,7 +102,7 @@ export function policyType(policy) {
 // The text path is NOT for "rows not yet migrated" — migration
 // 20260713024147_policies_drop_premium_text dropped that column, so no live row
 // can carry it. It survives for policy objects the adapter did not build: the
-// offline fixture in js/keep/logic/data.js (which still holds premium strings)
+// offline fixture in js/keep/fixtures/sample.mjs (which still holds premium strings)
 // and any hand-built row. Delete it only together with the fixture's strings.
 export function annualPremium(policy) {
   if (policy == null) return null;

@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeAsset, assetStatus, entitySummary } from "./analysis.js";
-import { getEntity, findAsset } from "./data.js";
+import { getEntity, findAsset } from "../fixtures/sample.mjs";
 import { SETTINGS } from "../../test-settings.mjs";
 
 test("home above the umbrella threshold shows umbrella as the gap; flood is in place", () => {

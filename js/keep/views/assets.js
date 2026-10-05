@@ -7,7 +7,7 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { ASSET_META } from "../logic/data.js";
+import { ASSET_META } from "../logic/asset-meta.js";
 import { analyzeAsset } from "../logic/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../logic/depreciation.js";
 import { fetchRules, findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
