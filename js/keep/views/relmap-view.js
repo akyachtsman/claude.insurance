@@ -142,7 +142,17 @@ function relLayout() {
   // the dummy to the target's column makes the edge run straight down its own column,
   // clear of the boxes it passes. Real nodes stay put, so the layout doesn't shift.
   const dummyTarget = {};
-  for (const key in edgePath) { const to = key.slice(key.indexOf(">") + 1); edgePath[key].forEach((d) => { dummyTarget[d] = to; }); }
+  // Built from the EDGE OBJECTS, never by parsing the key. This previously did
+  // `key.slice(key.indexOf(">") + 1)`, which assumed the key was exactly
+  // "from>to". Once the key gained the edge index to keep two relationships
+  // between one pair apart ("from>to>0"), that parse returned "to>0" — so
+  // `cross[dummyTarget[id]]` was undefined and the nudge below evaluated to NaN,
+  // propagating through every dummy position, the canvas offset and ultimately
+  // every rendered node coordinate, for ANY relationship spanning more than one
+  // band. Reading e.to directly cannot break again when the key format changes.
+  edges.forEach((e, i) => {
+    (edgePath[edgeKey(e, i)] || []).forEach((d) => { dummyTarget[d] = e.to; });
+  });
   if (Object.keys(dummyTarget).length) {
     for (let pass = 0; pass < 4; pass++) {
       for (const r of order) {

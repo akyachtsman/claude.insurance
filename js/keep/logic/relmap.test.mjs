@@ -301,3 +301,47 @@ test("a perpendicular crossing is broken with a GAP, never an arc", () => {
   // and with no crossers it stays one unbroken run
   assert.equal((relHopPath(pts, [], false).match(/M/g) || []).length, 1);
 });
+
+// ── Regression: resolving a dummy's target (Codex P1, 2026-10-05) ───────────
+//
+// relmap-view.js builds a dummy -> target map so each routing waypoint can be
+// snapped to its target's column. It used to derive the target by PARSING the
+// edgePath key: `key.slice(key.indexOf(">") + 1)`. Once the key gained the edge
+// index, that returned "to>0" instead of "to", so the subsequent cross[] lookup
+// was undefined and the nudge produced NaN — which propagated through every
+// dummy position, the canvas offset and ultimately every rendered coordinate,
+// for any relationship spanning more than one band.
+//
+// The earlier geometric tests here did not catch it because they call alignCross
+// and relOrtho directly and never go through the view's edgePath consumption.
+// These assert the contract that consumption depends on.
+test("every edgePath entry resolves to a REAL target node id via edge metadata", () => {
+  const nodes = [{ id: "owner" }, { id: "mid" }, { id: "target" }];
+  const edges = [{ from: "owner", to: "target", stake: "100%" }];
+  const band = { owner: 0, mid: 1, target: 2 };
+  const { edgePath, dummy } = orchestrate(nodes, edges, (n) => band[n.id]);
+  const ids = new Set(nodes.map((n) => n.id));
+
+  // exactly how the view must build it: from the edge objects, never the key
+  const dummyTarget = {};
+  edges.forEach((e, i) => {
+    (edgePath[edgeKey(e, i)] || []).forEach((d) => { dummyTarget[d] = e.to; });
+  });
+
+  assert.ok(Object.keys(dummy).length > 0, "this graph must produce a dummy to be a real test");
+  assert.equal(Object.keys(dummyTarget).length, Object.keys(dummy).length);
+  for (const [d, to] of Object.entries(dummyTarget)) {
+    assert.ok(ids.has(to), `dummy ${d} resolved to "${to}", which is not a node id`);
+  }
+});
+
+test("the edgePath key is NOT parseable as from>to — do not parse it", () => {
+  // Kept as an explicit guard: it records WHY the view must not slice the key,
+  // so a future reader does not reintroduce the parse as a tidy-up.
+  const e = { from: "owner", to: "target" };
+  const key = edgeKey(e, 0);
+  assert.equal(key, "owner>target>0");
+  assert.notEqual(key.slice(key.indexOf(">") + 1), e.to,
+    "if this ever passes, the key format changed and the NaN trap is gone — but still prefer e.to");
+  assert.equal(key.split(">")[1], e.to, "the target is the MIDDLE segment, not the tail");
+});

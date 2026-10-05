@@ -155,19 +155,41 @@ Deno.serve(async (req: Request) => {
   }
 
   // STAGE CHECK. The row's status was loaded above and never inspected, so any
-  // authorized caller could approve a request in ANY state: one still at
-  // "requested" jumped straight to approved, skipping broker review and
-  // underwriting, and a DECLINED request could be flipped back to approved —
-  // with the email still reading "final approval" and never mentioning the
-  // decline, because `row` was read before the update.
-  if (row.status !== "underwriting") {
-    return json({ error: "bad_stage", status: row.status, expected: "underwriting" }, 409);
+  // authorized caller could ask this function to announce an approval for a
+  // request in ANY state — including a DECLINED one, whose client email would
+  // still read "final approval" and never mention the decline, because `row` is
+  // read before the update.
+  //
+  // ⚠️ BOTH "underwriting" AND "approved" are accepted, and the reason matters.
+  // This function does NOT own the transition: approveEnhancement() in
+  // js/supabase.js performs a direct RLS-guarded update to "approved" FIRST and
+  // only then calls here, best-effort, for the email. So by the time this runs
+  // on the normal path the row ALREADY reads "approved". An earlier version of
+  // this check demanded "underwriting" and therefore returned 409 on every
+  // legitimate underwriter approval made through the shipped UI, silently
+  // dropping both the broker and the client notification. Caught in review.
+  //
+  // Accepting "approved" gives an attacker nothing: reaching that state needs
+  // the direct update, which this function has no part in, and anyone who can do
+  // it does not need this endpoint. What the check still buys is that an
+  // approval cannot be ANNOUNCED for a row sitting at "requested",
+  // "broker_review" or "declined".
+  //
+  // The lifecycle itself is enforced by RLS, not here — and today's policies
+  // gate on role alone. See supabase/proposed/
+  // 20261005_enhancement_request_stage_guard.sql, which is the fix that actually
+  // closes it and is waiting on owner approval.
+  if (row.status !== "underwriting" && row.status !== "approved") {
+    return json({ error: "bad_stage", status: row.status, expected: "underwriting|approved" }, 409);
   }
 
-  const approvedAt = new Date().toISOString();
-  await admin.from("enhancement_requests")
-    .update({ status: "approved", approved_at: approvedAt })
-    .eq("id", requestId);
+  // Only write when the transition has not already happened, so the UI's
+  // approved_at is not clobbered with a later timestamp on the normal path.
+  if (row.status === "underwriting") {
+    await admin.from("enhancement_requests")
+      .update({ status: "approved", approved_at: new Date().toISOString() })
+      .eq("id", requestId);
+  }
   const brokerMail = await sendEmail(
     BROKER_EMAIL,
     `Enhancement approved: ${row.subject}`,
