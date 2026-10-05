@@ -181,7 +181,36 @@ goes red when that happens, so the date above matters.
   `cd` existed the block wrote to the root and left the deployed bundle
   untouched, so a security refresh would have verified a file nobody serves.
 - **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
-- **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
+- **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
+  there is no lead-reading path in the static app. ⚠️ The second half of this
+  line used to read "so no privileged read path exists in the static app",
+  which **stopped being true when the Keep shipped broker/underwriter views.**
+  `js/keep/views/policies-view.js` renders staff controls off `role`, and
+  `enhancement_requests` carries four role-keyed RLS policies
+  (`er_broker_select/update`, `er_underwriter_select/update`) that let staff read
+  and write **every** client's requests from the browser. That is a privileged
+  read path in the static app, and the next constraint is why it matters.
+- **⚠️ OPEN — `profiles.role` is self-assignable (live, verified 2026-10-05).**
+  Not an accepted trade-off; an unfixed hole, recorded here so it is not
+  rediscovered. `authenticated` holds table-level `UPDATE` on `public.profiles`
+  (every column, `role` included) and the only policy on it is
+  `using (id = auth.uid()) with check (id = auth.uid())` — no column
+  restriction, no trigger. So one PostgREST call from the browser,
+  `supabase.from("profiles").update({ role: "broker" }).eq("id", uid)`,
+  promotes any signed-in client to staff. Reachable with the demo credential
+  this file publishes and the login screen prefills.
+  **Blast radius (verified, and narrower than it looks):** the only role-keyed
+  policies in the schema are the four on `enhancement_requests`. `entities`,
+  `assets`, `policies` and `entity_relationships` key on `owner = auth.uid()`
+  with no role escape, so a self-promoted broker gains **no** access to another
+  client's cover — it gains read/write on every client's enhancement requests
+  (and `er_broker_update` has no `with check`, so `owner`/`subject`/`body` are
+  rewritable too, not just `status`).
+  **Fix written, not applied:** `supabase/proposed/20261005_profiles_role_not_self_assignable.sql`
+  (a column-level `REVOKE` — RLS evaluates whole rows, so `with check` cannot
+  express "this column may not change"). Needs owner approval. Verify by
+  re-running the probe in that file's footer **as a client session**;
+  service-role bypasses RLS and reports a false pass.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
