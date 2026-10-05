@@ -8,7 +8,7 @@ import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
 import {
-  getUser, getEntities, signIn, addEntity,
+  fetchRules, getUser, getEntities, signIn, addEntity,
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
 } from "../../supabase.js";
 import { entitySummary } from "../logic/analysis.js";

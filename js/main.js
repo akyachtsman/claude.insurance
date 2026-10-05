@@ -28,9 +28,35 @@ export function go(hash) {
 const nav = createNavStack();
 export function previousRoute() { return nav.previous(); }
 
+// Tell the nav stack whether this navigation was a history traversal.
+//
+// A fresh hash navigation — an in-app link or go() — arrives with
+// history.state === null, because setting location.hash creates a NEW entry. We
+// stamp that entry immediately. When the user later traverses to it with
+// Back/Forward the browser restores the entry WITH its stamp, which is how we
+// know the difference. Nothing else distinguishes the two: both fire a bare
+// hashchange with only the resulting hash.
+//
+// replaceState (not pushState) — we are labelling the entry we are already on,
+// not adding one. Wrapped because a sandboxed or file:// context can throw on
+// it. If stamping is unavailable every navigation reads as non-traversal, and
+// nav.js is built for that: it pops a single-step back WITHOUT the flag, so the
+// common case still works and only multi-step Back degrades to a push. (An
+// earlier version of this comment claimed that fallback was "the old, safer
+// behaviour" — it would not have been, because nav.js gated the single-step pop
+// on the flag too, which would have reinstated the circular A<->B loop.)
+let navSeq = 0;
+function enteredByTraversal() {
+  const st = history.state;
+  if (st && typeof st.navSeq === "number") return true;   // restored: already stamped
+  navSeq += 1;
+  try { history.replaceState({ navSeq }, ""); } catch { /* unstampable context */ }
+  return false;
+}
+
 async function route() {
   const fullHash = location.hash || "#/";
-  nav.track(fullHash);
+  nav.track(fullHash, enteredByTraversal());
 
   const raw = location.hash.replace(/^#/, "") || "/";
   const [pathPart, query] = raw.split("?");

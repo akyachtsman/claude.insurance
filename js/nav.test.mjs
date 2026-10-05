@@ -57,7 +57,7 @@ test("deep-link / fresh load has no previous (caller uses its fallback)", () => 
 test("a multi-step back unwinds the stack instead of pushing", () => {
   const n = createNavStack();
   ["#/a", "#/b", "#/c"].forEach((h) => n.track(h));
-  n.track("#/a");
+  n.track("#/a", true);          // browser Back, two steps
   assert.equal(n.depth, 1);
   assert.equal(n.previous(), null);
 });
@@ -65,13 +65,62 @@ test("a multi-step back unwinds the stack instead of pushing", () => {
 test("a back to a middle entry truncates to it", () => {
   const n = createNavStack();
   ["#/a", "#/b", "#/c", "#/d"].forEach((h) => n.track(h));
-  n.track("#/b");
+  n.track("#/b", true);          // browser Back
   assert.equal(n.depth, 2);
   assert.equal(n.previous(), "#/a");
 });
 
-test("repeated A->B->A->B does not grow the stack without bound", () => {
+test("repeated A<->B via Back does not grow the stack without bound", () => {
   const n = createNavStack();
-  for (let i = 0; i < 20; i++) { n.track("#/a"); n.track("#/b"); }
+  for (let i = 0; i < 20; i++) { n.track("#/b"); n.track("#/a", true); }
   assert.ok(n.depth <= 2, `stack grew to ${n.depth}`);
+});
+
+// ── Regression: forward links must NOT unwind (Codex P2, 2026-10-05) ───────
+// Deciding from the hash alone is wrong in both directions. Unwinding to any
+// existing entry broke breadcrumbs: this app builds them, so it is the common
+// case. The caller now passes whether the event was a history traversal.
+test("a forward link to a route already deeper in the stack PUSHES", () => {
+  const n = createNavStack();
+  ["#/keep/list", "#/keep/entity/1", "#/keep/asset/9", "#/keep/policy/7"].forEach((h) => n.track(h));
+  n.track("#/keep/entity/1");          // breadcrumb click — a LINK, not Back
+  assert.equal(n.depth, 5);
+  assert.equal(n.previous(), "#/keep/policy/7",
+    "entity's back must return to the policy the user actually came from");
+});
+
+test("the SAME hash unwinds when it is a history traversal", () => {
+  const n = createNavStack();
+  ["#/keep/list", "#/keep/entity/1", "#/keep/asset/9", "#/keep/policy/7"].forEach((h) => n.track(h));
+  n.track("#/keep/entity/1", true);    // browser Back
+  assert.equal(n.depth, 2);
+  assert.equal(n.previous(), "#/keep/list");
+});
+
+test("a traversal to a hash not in the stack pushes rather than losing it", () => {
+  // Back past the start of this session's stack, or a Forward onto a route the
+  // previous unwind truncated away.
+  const n = createNavStack();
+  n.track("#/a");
+  n.track("#/zz", true);
+  assert.equal(n.depth, 2);
+  assert.equal(n.previous(), "#/a");
+});
+
+test("an in-place re-render is still a no-op either way", () => {
+  const n = createNavStack();
+  n.track("#/a"); n.track("#/a"); n.track("#/a", true);
+  assert.equal(n.depth, 1);
+});
+
+test("a single-step back still pops when no traversal flag is supplied", () => {
+  // The degradation path: in a context where history.replaceState throws,
+  // main.js can never stamp an entry, so every navigation arrives as
+  // non-traversal. The common case must still work rather than reinstating the
+  // circular loop — which is why the single-step pop is not gated on the flag.
+  const n = createNavStack();
+  ["#/a", "#/b", "#/c"].forEach((h) => n.track(h));
+  n.track("#/b");                       // no flag — unstampable context
+  assert.equal(n.depth, 2);
+  assert.equal(n.previous(), "#/a");
 });

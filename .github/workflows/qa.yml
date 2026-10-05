@@ -83,6 +83,18 @@ jobs:
         # an input is missing. Negative-tested on all four cases.
         run: node .github/scripts/check-asset-manifest.js
 
+      - name: Undefined-call guard
+        # Every called identifier in a browser module must be declared, imported
+        # or a known global. This class shipped TWICE in one PR: a function
+        # copy-pasted during a module split without its import, and a scripted
+        # import edit whose single-line regex missed a MULTI-LINE import block.
+        # Nothing else catches it — `node --check` only parses (a free
+        # identifier is legal until it runs), the import checks only prove the
+        # specifier resolves, and the UI suite skips the Keep scenarios on a
+        # localhost server, so the page that broke is never opened there.
+        # Deliberately conservative: it under-reports rather than cry wolf.
+        run: node .github/scripts/check-undefined-calls.js
+
       - name: Workflow cross-reference guard
         # Every `workflow_run.workflows:` entry must name a real workflow. GitHub
         # raises no error when one does not — the watcher simply never fires.

@@ -104,6 +104,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
+| Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
 
 **Required watchers (`.github/workflow-ref-required.json`).** The guard checks
 two different things and only that file supplies the second: rule 1 is that
