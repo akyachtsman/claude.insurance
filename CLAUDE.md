@@ -107,6 +107,8 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
+| Python compiles clean | `python3 .github/scripts/check-py-warnings.py` |
+| ui-suite env parity | `python3 .github/scripts/check-ui-suite-env.py --kit-dir .github/scripts/ui-tests` |
 
 **Required watchers (`.github/workflow-ref-required.json`).** The guard checks
 two different things and only that file supplies the second: rule 1 is that
@@ -121,48 +123,57 @@ not registered — doing so asserts their current lists are invariants, a broade
 claim than has been established. **The file holds no comments; JSON has none,
 and a `_comment` key is read as a workflow filename and fails the guard.**
 
-**Local Playwright ceiling — recorded 2026-08-26; webkit/firefox half
-re-verified 2026-10-05.** The browser-egress half was NOT re-verified (see the
-note at the end of this section); it is carried forward unchanged. In an agent sandbox
-**S1/S4/S7/S8 pass on chromium; S5/S6 do not; the webkit profiles do not run at
-all.** Two observed causes. `global.md` → **Network Access Playbook** governs
-browser-side network failures; this section only records what was measured here.
+**Local Playwright ceiling — MEASURED 2026-10-06, replacing a wrong record.**
+The previous version of this section said *"the webkit profiles do not run at
+all"* and *"no webkit or firefox in the sandbox image"*, re-verified 2026-10-05
+by listing `/opt/pw-browsers`. **Both claims were wrong, and the method was the
+one `test.md` forbids.** That section says: *"Absent is not unavailable — a
+browser missing from the image may be installable. Run the ladder rather than
+judging by eye."* This file even stated the principle while recording an
+eye-check as verification; the tool that settles it
+(`.github/scripts/browser-ladder.js`) was not installed here until this refresh,
+which is the whole reason the wrong answer survived two sessions.
 
-- **No webkit or firefox in the sandbox image** (checked in three sandboxes
-  2026-08-26; **re-checked 2026-10-05 in a fresh container — still chromium
-  only**: `/opt/pw-browsers` holds chromium, two pinned chromium builds, their
-  headless shells and ffmpeg, nothing else), so `tablet` and `iphone` fail at
-  launch. *Absent
-  is not unavailable* — a missing browser may be installable, so treat this as
-  "not present today", not "impossible". CI has both.
-- **Chromium could not complete an HTTPS request to the hosts S5/S6 need**
-  (Supabase REST, and previously esm.sh), so those scenarios cannot load
-  `rule_settings` and compute a `.need`. `curl` reached the same Supabase URL
-  with a 200 while chromium threw `Failed to fetch`.
+What is actually true, measured by running it:
+
+| check | result |
+|---|---|
+| `browser-ladder.js webkit` | **LAUNCHES** at rung `install --with-deps` |
+| `browser-ladder.js firefox` | **LAUNCHES** at rung `install` |
+| `--project=tablet` (webkit), S1 + S7 | **2 passed**, 15.5s |
+| `--project=iphone` (webkit), S1 + S7 + S8 | **3 passed**, 14.5s |
+
+So the webkit profiles RUN LOCALLY. They need one `playwright install
+--with-deps webkit` first; absent from the image is not absent from the
+sandbox. A stale ceiling reads as current and silently suppresses a check that
+would catch a real defect — this one suppressed two whole viewport profiles.
+
+**What still does not run here: S5/S6/S9**, which need a live Supabase read the
+sandbox browser cannot complete. That half of the record is unchanged and was
+NOT re-measured on 2026-10-06.
+
+⚠️ **The ladder grades browser STARTUP only, and says so itself:** *"network
+egress, DNS, TLS, filesystem limits and every other sandbox constraint are all
+still open questions."* A launching browser is not a passing suite.
 
 ⚠️ **Do NOT treat "curl 200 + browser failure" as proof of environment.** That
-inference was retracted upstream (`claude.directives` #331, `d886513`) and it is
-unsound in both directions: curl succeeding shows the *host* is reachable from
-the sandbox, but the browser failing is equally consistent with a real app
-defect — a JS exception before the fetch, a bad URL, a selector regression. It
-decides nothing. The wrong version of this rule tells you to dismiss genuine
-failures, which is the expensive mistake.
-
-Likewise **do not classify by failure duration.** A fast uniform failure is also
-a config or import throw; a 200 page with no DOM is also an app exception. Grade
-on **what actually happened** — read the log and name the assertion — never on a
-cheap correlate.
+inference was retracted upstream (`claude.directives` #331, `d886513`) and is
+unsound in both directions: curl succeeding shows the *host* is reachable, but
+the browser failing is equally consistent with a real app defect — a JS
+exception before the fetch, a bad URL, a selector regression. It decides
+nothing. Likewise **do not classify by failure duration.** Grade on **what
+actually happened** — read the log and name the assertion — never on a cheap
+correlate.
 
 Vendoring the Supabase client (2026-08-26) fixed the *module-load* half and
-recovered S7/S8 — the app now boots offline. It did not change the *runtime
+recovered S7/S8 — the app boots offline. It did not change the *runtime
 request* half, which is why S5/S6 still fail here.
 
 **What would make this record wrong** (re-check before relying on it): the
-sandbox image gains webkit/firefox, or gains a browser egress path; the proxy
-configuration changes; S5/S6 stop depending on a live Supabase read; or any
-listed scenario starts passing locally. A ceiling that is stale reads as current
-and silently suppresses a check that would now catch a real defect — nothing
-goes red when that happens, so the date above matters.
+sandbox gains a browser egress path; the proxy configuration changes; S5/S6 stop
+depending on a live Supabase read; or `browser-ladder.js` stops reporting
+LAUNCHES for webkit or firefox. Re-check by **running the ladder and the
+profile**, never by listing a directory.
 
 ## Project-Specific Security Constraints
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
@@ -215,6 +226,48 @@ goes red when that happens, so the date above matters.
   service-role bypasses RLS and reports a false pass.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
+
+### Auth-gate readiness: proven, not windowed (wired 2026-10-06)
+
+`test.md` → *Playwright* makes "no auth gate found" a **window** unless the
+project turns it into a proof: the kit settles, looks, and reports absence, and
+absence at time T is not absence at T+1 — so an app whose gate-deciding request
+is still in flight produces a green on auth that was never exercised.
+
+This repo had the defect in its plumbed-through form, which is worse than not
+having the feature: `.github/scripts/ui-tests/tests/app.spec.js` already carried
+`awaitAuthReady()` reading `TEST_AUTH_READY_SELECTOR` / `TEST_AUTH_READY_REQUEST`,
+and **neither `qa.yml` nor the `ui-suite` composite passed them**, so the
+function could only ever take its `'windowed'` branch. The code's own comment
+promises *"A CONFIGURED CONDITION THAT NEVER RESOLVES IS LOUD, not a silent
+fallback"* — a promise it could not keep, because nothing could configure it.
+Found by `check-ui-suite-env.py`, which exists for exactly this (#320), on its
+first run here.
+
+Now wired: `qa.yml` passes `vars.TEST_AUTH_READY_SELECTOR`,
+`vars.TEST_AUTH_READY_REQUEST` and `vars.TEST_AUTH_SUCCESS_SELECTOR` into the
+composite. They are **repository variables, not secrets** — a masked selector is
+unreadable in a failure message.
+
+⚠️ **Still unset, so the answer is still `windowed` — the plumbing is fixed, the
+proof is not.** To get a decided answer, set as repository *variables*:
+`TEST_AUTH_READY_SELECTOR` to a selector matching **either** outcome:
+`.k-authcard, .k-welcome__h` — the login card **or** the signed-in home heading.
+One naming only the gate times out on every signed-in run.
+
+⚠️ **NOT `.k-h1` — an earlier version of this very paragraph said to use it, and
+that would have turned `qa-live` red on the first run after the variable was
+set.** `.k-h1` appears on Entities, Policies, Documents, Account, Assets and the
+add/request forms, and on **neither** the login card (its title is `.k-atitle`)
+nor the signed-in home view, which is where a successful login lands —
+`go("#/keep")` → `el("h1", { class: "k-welcome__h", … })` (`js/keep/views/keep.js:165`).
+S9 already asserts `.k-welcome__h` for exactly this reason, with its own comment
+saying why not the bare text.
+
+`TEST_AUTH_SUCCESS_SELECTOR` is **optional and arguably redundant here**: S9
+already proves the dashboard renders after a real login. If you set it, use
+`.k-welcome__h`. A configured condition that never resolves FAILS rather than
+falling back, by design — which is why the wrong selector is loud, not silent.
 
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
@@ -273,11 +326,17 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard`, `.k-error`, `.k-h1` |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only) |
 
-⚠️ **Every selector in that row was verified against the rendered page on
-2026-10-05** (headless chromium, local static server) — not read off the
-source. `home` was `.app-header h1`, which matches **nothing**: there is no
+⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
+2026-10-05** (headless chromium, local static server) — not read off the source.
+**The Keep selectors were not, and one of them was wrong.** They were added under
+the same heading without being rendered, because the Keep needs a live backend the
+sandbox browser cannot reach — and `.k-h1` was listed as the dashboard heading when
+the dashboard uses `.k-welcome__h`. Corrected 2026-10-06 from the source
+(`js/keep/views/keep.js:165`) and from S9, which already asserted the right one.
+A claim of verification that covers only part of a row is the same defect as the
+dead selector it was written to fix. `home` was `.app-header h1`, which matches **nothing**: there is no
 `.app-header` anywhere in `js/`, `css/` or `index.html`, and the home `h1` is
 `main > section.hero > … > h1.hero__title`. `.site-header` exists but is the
 nav bar and contains no `h1`. This is the same dead-selector failure as the
@@ -297,7 +356,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S6 | Commercial qualification flow | As S5 but choose "For my business"; industry-first questioning; contact via phone only → summary lists ≥1 `.need` and the "not a quote" disclaimer | Commercial branch stalls, no needs computed, or disclaimer missing |
 | S7 | Summary empty state | Deep-link `#/summary` with no prior answers → a friendly "No summary yet" empty state (the store is in-memory) | Blank page, crash, or JS error instead of the empty state |
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
-| S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-h1` "Welcome back"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
+| S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-welcome__h`, "Welcome back, …"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
@@ -312,19 +371,20 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | S5–S9 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S9 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
-| `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
+| ~~`check-contrast.js` carries `css/tokens.css`~~ **RESOLVED — adopted upstream** | No longer a divergence. The template now checks `styles/tokens.css` **or** `css/tokens.css` by default and takes `--tokens <file>` for anything else, which is exactly what was reported. Row kept only so the next refresh does not re-add it as a finding; delete it after one more sync. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
+| `awaitAuthReady` consults an already-arrived response | **Absent upstream; a real bug in the upstream kit, found by Codex on #253 and reproduced before fixing.** `page.waitForResponse()` resolves only on a FUTURE response — Playwright does not replay ones already received — and every caller arms it AFTER awaiting `page.goto()`. So a readiness request that completes DURING navigation is missed and the wait times out, failing S2/S3/S4 with *"never resolved"* on a request that did arrive. Measured: `TEST_AUTH_READY_REQUEST=tokens.css` failed S4 at 25000ms; with the fix it passes in 6.8s, and the SELECTOR and default paths are unchanged. The fix is an `auto` fixture recording matching responses from before the body navigates, plus a check ahead of the wait. The SELECTOR path never had this race (`waitForSelector` with `state:'attached'` matches an element already present), which is why only the REQUEST branch is touched. **Report upstream at the next `/refresh-repo`** — the whole kit has it, and a refresh that takes the kit verbatim would delete this. |
+| `renderWitness` extended to S5–S9 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S9 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
-### ⚠️ This rulebook is stale — run `/refresh-repo` (recorded 2026-10-05)
+### ✅ Rulebook synced 2026-10-06 (was six weeks / 43 commits stale)
 
-`.claude/directive-sync.json` records the last sync as `1d57879` @ **2026-08-26**,
-and the divergence table above is written against that state. The upstream
-directives now carry **nine sections whose owner rulings postdate it**, so the
-table is reasoning from a six-week-old rulebook:
+Synced to `bbfdcfc` on 2026-10-06, from `1d57879` @ 2026-08-26 — 43 commits. The
+nine sections below are the owner rulings that had accumulated in that window;
+they are now read and in force, and are listed so the provenance stays visible:
 
 | section | ruling |
 |---|---|
@@ -339,11 +399,19 @@ table is reasoning from a six-week-old rulebook:
 | `test.md` → *Playwright* | 2026-09-24 |
 | `git.md` → *Fallback reviewer when Codex is down* | 2026-09-29 |
 
-This was established from the **stamps in the live directive text**, not from a
-commit diff: `claude.directives` is not in this session's GitHub scope, so the
-SHA delta could not be computed from here and the per-section provenance
-archaeology that `/audit-repo` asks for could not be run on those files. The
-stamps are sufficient to prove staleness; they do not tell you what else moved.
+⚠️ **The sentence that used to sit here was wrong, and wrong in a way
+`global.md` names explicitly.** It read: *"`claude.directives` is not in this
+session's GitHub scope, so the SHA delta could not be computed from here."* It
+can be. `claude.directives` is a **public** repo, and `global.md` →
+*Repository Scope* draws the line this confused: **ACT scope** is hard-limited
+to this session's repo, **READ scope is unrestricted for public repos**, and
+that section says in terms *"NEVER claim a public repo 'can't be seen' — that
+confuses ACT scope with READ scope."* `/refresh-repo` Phases 2–3 run over git
+transport for exactly this reason. Verified 2026-10-06: one `add_repo` call
+reported read access already available, a shallow clone succeeded, and the
+file-level delta came back in one `git diff`. What is genuinely unavailable for
+an unattached repo is the **GitHub API** surface — issues, PRs, the github MCP
+— never git reads.
 Two consequences already found and handled: *Diagrams & connectors* duplicates
 this repo's local connector standard (now deferring to it, with two missing
 provisions restored), and *Charts & data display* mandates the native `dataviz`
