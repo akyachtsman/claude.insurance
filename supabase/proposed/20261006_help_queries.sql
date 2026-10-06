@@ -83,17 +83,29 @@ create table if not exists public.help_queries (
 
 alter table public.help_queries enable row level security;
 
--- SELECT is granted on an explicit column list rather than table-wide. The
--- trade-off is deliberate and fails closed: a column added here later is not
--- readable until this grant names it (PostgREST's select=* would return 42501),
--- which is the safe direction for a table the client can read back.
-grant select (id, owner, asked_at, question) on public.help_queries to authenticated;
-
--- NO INSERT, NO UPDATE, NO DELETE for `authenticated` — see the header. The
--- client's privilege on this table is read-your-own-rows and nothing else, so
--- the throttle's history is not merely append-only to a client, it is untouchable
--- by one.
+-- ⚠️ `authenticated` HOLDS NOTHING ON THIS TABLE. No select, no insert, no
+-- update, no delete — it is a server-only throttle log, and the browser has
+-- never read it.
 --
+-- The SELECT grant went on 2026-10-06, a round after the INSERT grant, for a
+-- reason neither of the two facts behind it shows on its own:
+--
+--   · This file's own follow-up note says `question` holds whatever the client
+--     typed, which "may well be a name, an address or a claim detail".
+--   · CLAUDE.md publishes ONE demo credential and the login screen prefills it.
+--
+-- Put together: every visitor using that demo authenticates as the SAME `owner`,
+-- so `using (owner = auth.uid())` is not a per-person fence there — it admits
+-- all of them to all of each other's questions. The policy looked like row-level
+-- isolation and provided none on a shared account. Both facts were already
+-- written down in this repo; nothing had joined them.
+--
+-- Keeping it for a possible "you have used N of 20" UI was the argument against
+-- removing it. That is hypothetical and the disclosure is concrete — and if that
+-- UI is ever wanted, the count goes through the Edge Function, which already
+-- computes it.
+--
+-- The only principal with any privilege here is the service role.
 -- The writer is the service role. Supabase grants it table privileges in the
 -- public schema by default (every other table here relies on that, and
 -- notify-enhancement writes under the same key), but it is stated explicitly
@@ -103,19 +115,16 @@ grant select, insert, delete on public.help_queries to service_role;
 -- DELETE is for the function's own release paths — over the cap, or a count that
 -- could not run — where nothing has been billed and the reservation must go back.
 
--- RLS is enabled above, so the table is default-deny; this is the only path out
--- of it for a client. It is scoped `to authenticated` — an unscoped policy
--- applies to every role, `anon` included, and the help desk sits behind the
--- Keep's auth gate (FR-1). There is deliberately no INSERT, UPDATE or DELETE
--- policy: with no matching grant either, that is both layers.
-create policy "help_queries select own" on public.help_queries
-  for select to authenticated using (owner = auth.uid());
--- NOTE: the SELECT policy is NOT load-bearing for the function's writes, though
--- an earlier version of this comment said it was. `insert ... returning` needs a
--- SELECT policy that admits the new row only when the inserter is subject to
--- RLS; the function inserts under the service-role key, which bypasses RLS for
--- the whole statement, RETURNING included. This policy exists purely so a client
--- can read its own history back.
+-- NO POLICIES AT ALL. RLS is enabled above, so with none defined the table is
+-- closed to every role that does not bypass RLS — which is the service role and
+-- nothing else. The absent grants and the absent policies are the two layers,
+-- the same reasoning this file uses for its append-only surface throughout.
+--
+-- NOTE: a SELECT policy is NOT load-bearing for the function's writes, though an
+-- earlier version of this file said it was. `insert ... returning` needs one only
+-- when the inserter is subject to RLS; the function inserts under the
+-- service-role key, which bypasses RLS for the whole statement, RETURNING
+-- included.
 
 -- The throttle counts one owner's rows inside a time window, so (owner,
 -- asked_at) is the access path and this index is not optional at the scale a
@@ -127,8 +136,8 @@ create index if not exists help_queries_owner_asked_at_idx
 
 -- INVERSE (reversible-by-design, per data.md):
 --   drop table if exists public.help_queries cascade;
--- The two policies, the index and both grants are dependent objects and go with
--- it. Nothing pre-existing needs restoring, because this file creates a table
+-- The index and the service-role grant are dependent objects and go with it
+-- (there are no policies and no client grants left to drop). Nothing pre-existing needs restoring, because this file creates a table
 -- rather than altering one — which is why the inverse is a drop and not a
 -- counter-grant.
 -- DESTRUCTIVE: that also discards every recorded question, which is the
@@ -138,11 +147,12 @@ create index if not exists help_queries_owner_asked_at_idx
 -- {answer:null, reason:"unavailable"} and the help page renders its quiet
 -- notice (FR-17). The inverse disables the help desk; it does not unmeter it.
 
--- POST-APPLY PROBE (run as a CLIENT session, not service-role — service-role
---   bypasses RLS *and* ignores column privileges, so every check below would
---   report a false pass. Steps 3 and 5 are destructive under service-role:
---   there they SUCCEED and wipe or rewrite the log. Assert on SQLSTATE, not on
---   message text.)
+-- POST-APPLY PROBE (run steps 1-5 as a CLIENT session, not service-role —
+--   service-role bypasses RLS *and* ignores privileges, so every check below
+--   would report a false pass. Steps 4 and 5 are DESTRUCTIVE under service-role:
+--   there they SUCCEED and wipe or rewrite the log. Step 0 and the two
+--   after-the-fact reads are the only parts that use the service key, and they
+--   are marked. Assert on SQLSTATE, not on message text.)
 --
 --   0. SEED a row to probe against. The client can no longer write this table,
 --      so do this ONCE as service-role (or by asking a question through the
@@ -171,31 +181,44 @@ create index if not exists help_queries_owner_asked_at_idx
 --      Rejected before any policy is consulted, because the privilege is absent
 --      rather than narrowed.
 --
---   3. Client deletes — expect FAILURE, 42501 (no DELETE grant):
+--   3. Client READS — expect FAILURE, 42501 (no SELECT grant, and no policy
+--      either). This is the step round 3 added, and it is the one that matters
+--      most on a shared demo account:
+--        select question from public.help_queries;
+--      Via PostgREST: supabase.from("help_queries").select("question")
+--      ⚠️ ALSO INVERTED from an earlier draft, which granted `select` and a
+--      `using (owner = auth.uid())` policy. With ONE published demo credential
+--      that every visitor signs in with, that policy fences nothing: they are all
+--      the same `owner`, so each could read every question the others had typed —
+--      and `question` is free text a client may put a name, an address or a claim
+--      detail into. A success here means the grant came back.
+--
+--   4. Client deletes — expect FAILURE, 42501 (no DELETE grant):
 --        delete from public.help_queries;
---      THEN assert the step-0 row is still present:
+--      THEN, AS SERVICE-ROLE (the client can no longer read), assert the step-0
+--      row survives:
 --        select count(*) from public.help_queries;   -- unchanged
 --      That second assertion is the one that matters. If the DELETE grant were
 --      ever restored, the absent DELETE policy would turn this into a 0-row
 --      no-op that returns SUCCESS rather than an error — a probe checking only
 --      "the call failed" would pass while the throttle history became erasable.
 --
---   4. Client backdates — expect FAILURE, 42501 (no UPDATE grant):
+--   5. Client backdates — expect FAILURE, 42501 (no UPDATE grant):
 --        update public.help_queries set asked_at = now() - interval '2 hours';
---      Same caveat as step 3: with a grant and no policy this becomes a silent
---      0-row no-op, so assert asked_at is unchanged, not merely that the call
---      errored.
+--      Same caveat as step 4, and the same service-role read to check it: assert
+--      asked_at is unchanged, not merely that the call errored.
 --
---   5. Cross-owner read (needs a SECOND client session) — expect the step-0 row
---      to be invisible:
---        select count(*) from public.help_queries;   -- 0, or that session's own
---      rows only; never the row seeded in step 0.
+--   (The old step 5, a cross-owner read from a second client session, is gone:
+--   step 3 is strictly stronger. No client session can read ANY row, so there is
+--   no cross-owner case left to probe.)
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- TWO FOLLOW-UPS this migration deliberately does NOT carry, recorded here so
 -- they are decided rather than forgotten.
 --
---   A. NO RETENTION. `question` stores the client's own free text indefinitely,
+--   A. NO RETENTION. Narrower than it was, now that `authenticated` cannot read
+--      this table at all — the text is reachable only with the service-role
+--      key — but not closed. `question` stores the client's free text indefinitely,
 --      and a client may well type a name, an address or a claim detail into a
 --      help box. The throttle needs only `owner` + `asked_at`; the text is kept
 --      because a help desk that cannot be read back cannot be improved. Nothing

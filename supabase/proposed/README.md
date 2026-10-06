@@ -141,11 +141,10 @@ history erasable. Only the service-role key, which bypasses RLS, can prune it.
 project, so a table with flawless RLS and no `GRANT` returns 42501 on every
 call — RLS narrows privileges, it never confers them. (Column-form precedent:
 `20260624171640_public_leads_and_rule_settings.sql` grants `anon` INSERT on a
-column list for exactly this reason.) The client's privilege is
-**read-your-own-rows and nothing else**:
+column list for exactly this reason.) `authenticated` ends up holding
+**nothing at all** on this table, and there are no policies either:
 
 ```sql
-grant select (id, owner, asked_at, question) on public.help_queries to authenticated;
 grant select, insert, delete on public.help_queries to service_role;
 ```
 
@@ -165,9 +164,18 @@ Two independent security reviews flagged it within a minute of that cap being
 pushed. Filtering the count on a server-only column would also work; removing the
 write surface is better than counting around it.
 
-The only policy left is `help_queries select own`. There is no INSERT, UPDATE or
-DELETE policy **and** no matching grant — both layers — and it is scoped
-`to authenticated`, because an unscoped policy also applies to `anon`.
+⚠️ **The client SELECT grant went one round later**, and for a reason neither of
+the two facts behind it shows alone: this migration's own note says `question`
+holds whatever the client typed, "a name, an address or a claim detail"; and
+CLAUDE.md publishes ONE demo credential that the login screen prefills. Together,
+every visitor using that demo is the SAME `owner`, so `using (owner = auth.uid())`
+fenced nothing — each could read every question the others had typed. The policy
+looked like row-level isolation and provided none on a shared account. Both facts
+were already written down in this repo; nothing had joined them.
+
+So there are **no policies at all**. RLS is on with none defined, which closes the
+table to every role that does not bypass RLS — the service role and nothing else.
+The absent grants and the absent policies are the two layers.
 
 **One consequence for T5.** `default auth.uid()` evaluates to NULL under the
 service-role key and `owner` is `not null`, so the function's insert must pass
