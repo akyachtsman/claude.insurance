@@ -19,9 +19,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+// Validated at module load, not asserted away with `!`. With a missing value the
+// `!` deferred the failure to createClient(undefined, ...) inside the request
+// handler, surfacing as an unhandled rejection rather than a diagnosable error.
+function required(name: string): string {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`notify-enhancement: required env var ${name} is not set`);
+  return v;
+}
+const SUPABASE_URL = required("SUPABASE_URL");
+const SERVICE_KEY = required("SUPABASE_SERVICE_ROLE_KEY");
+const ANON_KEY = required("SUPABASE_ANON_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const BROKER_EMAIL = Deno.env.get("BROKER_EMAIL") || "";
 const FROM_EMAIL = Deno.env.get("FROM_EMAIL") || "The Keep <onboarding@resend.dev>";
@@ -121,19 +129,67 @@ Deno.serve(async (req: Request) => {
         `You'll get another email once it has final approval.`,
       ]),
     );
-    await admin.from("enhancement_requests").update({ requested_notified_at: new Date().toISOString() }).eq("id", requestId);
+    // Only stamp when something actually went out. sendEmail returns
+    // {sent:false, reason:"no_provider_key"} whenever RESEND_API_KEY is unset —
+    // the documented default state — so an unconditional stamp recorded "we
+    // tried", making the column useless for finding un-notified requests.
+    if (brokerMail.sent || clientMail.sent) {
+      await admin.from("enhancement_requests").update({ requested_notified_at: new Date().toISOString() }).eq("id", requestId);
+    }
     return json({ ok: true, event, broker: brokerMail, client: clientMail });
   }
 
-  // event === "approved" — broker, underwriter, or service-role only.
+  // event === "approved" — the UNDERWRITER's decision, or service-role.
+  //
+  // CLAUDE.md assigns the underwriting -> approved decision to the underwriter;
+  // the broker advances a request only as far as underwriting, which is what the
+  // UI already enforces (policies-view gates the broker's control on
+  // requested|broker_review). This function is the SERVER-SIDE authority and was
+  // accepting "approved" from a broker as well, so the split existed only in the
+  // UI. RLS does not close it either: er_broker_update gates by role with no
+  // status predicate and no WITH CHECK.
   if (!isServiceRole) {
     if (!user) return json({ error: "forbidden" }, 403);
     const { data: prof } = await admin.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (prof?.role !== "broker" && prof?.role !== "underwriter") return json({ error: "forbidden" }, 403);
+    if (prof?.role !== "underwriter") return json({ error: "forbidden" }, 403);
   }
-  await admin.from("enhancement_requests")
-    .update({ status: "approved", approved_at: new Date().toISOString(), approved_notified_at: new Date().toISOString() })
-    .eq("id", requestId);
+
+  // STAGE CHECK. The row's status was loaded above and never inspected, so any
+  // authorized caller could ask this function to announce an approval for a
+  // request in ANY state — including a DECLINED one, whose client email would
+  // still read "final approval" and never mention the decline, because `row` is
+  // read before the update.
+  //
+  // ⚠️ BOTH "underwriting" AND "approved" are accepted, and the reason matters.
+  // This function does NOT own the transition: approveEnhancement() in
+  // js/supabase.js performs a direct RLS-guarded update to "approved" FIRST and
+  // only then calls here, best-effort, for the email. So by the time this runs
+  // on the normal path the row ALREADY reads "approved". An earlier version of
+  // this check demanded "underwriting" and therefore returned 409 on every
+  // legitimate underwriter approval made through the shipped UI, silently
+  // dropping both the broker and the client notification. Caught in review.
+  //
+  // Accepting "approved" gives an attacker nothing: reaching that state needs
+  // the direct update, which this function has no part in, and anyone who can do
+  // it does not need this endpoint. What the check still buys is that an
+  // approval cannot be ANNOUNCED for a row sitting at "requested",
+  // "broker_review" or "declined".
+  //
+  // The lifecycle itself is enforced by RLS, not here — and today's policies
+  // gate on role alone. See supabase/proposed/
+  // 20261005_enhancement_request_stage_guard.sql, which is the fix that actually
+  // closes it and is waiting on owner approval.
+  if (row.status !== "underwriting" && row.status !== "approved") {
+    return json({ error: "bad_stage", status: row.status, expected: "underwriting|approved" }, 409);
+  }
+
+  // Only write when the transition has not already happened, so the UI's
+  // approved_at is not clobbered with a later timestamp on the normal path.
+  if (row.status === "underwriting") {
+    await admin.from("enhancement_requests")
+      .update({ status: "approved", approved_at: new Date().toISOString() })
+      .eq("id", requestId);
+  }
   const brokerMail = await sendEmail(
     BROKER_EMAIL,
     `Enhancement approved: ${row.subject}`,
@@ -151,5 +207,8 @@ Deno.serve(async (req: Request) => {
       `Your broker will follow up with the updated policy details.`,
     ]),
   );
+  if (brokerMail.sent || clientMail.sent) {
+    await admin.from("enhancement_requests").update({ approved_notified_at: new Date().toISOString() }).eq("id", requestId);
+  }
   return json({ ok: true, event, broker: brokerMail, client: clientMail });
 });

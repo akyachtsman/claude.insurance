@@ -1,4 +1,4 @@
-// keep/depreciation.js — per-asset-type actual-cash-value (ACV) depreciation.
+// keep/logic/depreciation.js — per-asset-type actual-cash-value (ACV) depreciation.
 // Pure + deterministic (unit-testable, no I/O). Treats the asset's current
 // estimated value as today's replacement cost and projects a straight-line ACV
 // decline over the type's useful life down to a salvage floor. Property, land

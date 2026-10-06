@@ -1,4 +1,4 @@
-// node --test js/keep/docfile.test.mjs
+// node --test js/keep/logic/docfile.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPdf, docLines, docName, docKind } from "./docfile.js";

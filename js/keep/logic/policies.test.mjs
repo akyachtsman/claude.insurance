@@ -1,9 +1,9 @@
 // policies.test.mjs — unit tests for policy expiry + reminder helpers.
-// Run: node --test js/keep/policies.test.mjs
+// Run: node --test js/keep/logic/policies.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { policyKind, reminderInfo, renewalBand, policyType, annualPremium, policyPresentation, formatPremium } from "./policies.js";
-import { findPolicy } from "./data.js";
+import { policyKind, reminderInfo, renewalBand, renewalCounts, policyType, annualPremium, policyPresentation, formatPremium } from "./policies.js";
+import { findPolicy } from "../fixtures/sample.mjs";
 
 test("policyKind classifies active / expiring / expired", () => {
   assert.equal(policyKind(263), "ok");
@@ -113,4 +113,83 @@ test("sample policies are reachable and carry standard fields", () => {
   assert.equal(policyKind(policy.renewalInDays), "ok");
   assert.equal(policyKind(findPolicy("flood-marina").policy.renewalInDays), "warn");
   assert.equal(policyKind(findPolicy("wind-marina").policy.renewalInDays), "exp");
+});
+
+// ── Regression: unknown renewal date (audit 2026-10-05) ─────────────────────
+// policies.renewal_date is nullable, so renewalInDays arrives as null. These
+// are the cases a green 112-test suite missed: renewalBand(null) WAS tested,
+// and it was the only one of the three with a guard.
+test("policyKind reports an unknown renewal date as unknown, not expired", () => {
+  assert.equal(policyKind(null), null);        // `null <= 0` is true — must not read "exp"
+  assert.equal(policyKind(undefined), null);   // the two unknowns must agree
+  assert.equal(policyKind(0), "exp");          // due today is still expired
+  assert.equal(policyKind(1), "warn");
+});
+
+test("reminderInfo reports nothing sent when the renewal date is unknown", () => {
+  // `d > null` coerces to `d > 0`, which previously marked all five lead times
+  // as already sent and none upcoming.
+  assert.deepEqual(reminderInfo(null), { sent: [], next: null });
+  assert.deepEqual(reminderInfo(undefined), { sent: [], next: null });
+});
+
+test("policyPresentation does not resolve inherited Object keys", () => {
+  // `line` is free broker-written text; a bare map lookup returned Object's
+  // own members as if they were presentation facets.
+  // Assert the facet is WELL-FORMED, not that it is "other": "hasOwnProperty"
+  // lowercases to contain "property", which legitimately matches the home
+  // fallback. The defect was the bare lookup returning Object's constructor,
+  // whose .key/.label/.icon are all undefined.
+  for (const k of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+    const f = policyPresentation(k);
+    assert.equal(typeof f.key, "string", `${k} must yield a real facet`);
+    assert.equal(typeof f.label, "string", `${k} must yield a label`);
+    assert.equal(typeof f.icon, "string", `${k} must yield an icon`);
+  }
+  assert.equal(policyPresentation("constructor").key, "other");
+});
+
+test("premium guards reject non-numeric amounts instead of coercing to 0", () => {
+  // Global isFinite("") is true, so a blank numeric form field became $0 AND
+  // suppressed the text fallback that held the real figure.
+  assert.equal(annualPremium({ premiumAmount: "" , premium: "$3,420 / yr" }), 3420);
+  assert.equal(formatPremium({ premiumAmount: "", premium: "$3,420 / yr" }), "$3,420 / yr");
+  assert.equal(annualPremium({ premiumAmount: 2260, premiumPeriod: "yr" }), 2260);
+});
+
+// ── Regression: the summary counters and an UNKNOWN renewal date ───────────
+// `policyKind(null) !== "exp"` is true, so the Policies page counted a policy
+// with no renewal_date on file as "Active · in force" — a confident claim made
+// from absent data — while the neighbouring "needs attention" counter already
+// (correctly) excluded it. Four counters, two answers. (Codex P2, round 3.)
+test("renewalCounts puts an undated policy in neither active nor attention", () => {
+  const c = renewalCounts([null]);
+  assert.deepEqual(c, { active: 0, attention: 0, undated: 1 },
+    "an undated policy is neither provably in force nor provably urgent");
+});
+
+test("renewalCounts classifies each known state once", () => {
+  //            lapsed  due today  expiring soon  active   undated
+  const days = [-40,    0,         12,            400,     null, undefined];
+  const c = renewalCounts(days);
+  assert.equal(c.undated, 2, "null and undefined are both 'no date on file'");
+  assert.equal(c.active, 2, "expiring soon (12d) is still in force, alongside 400d");
+  assert.equal(c.attention, 3, "lapsed + due today + expiring soon");
+});
+
+test("renewalCounts never counts more rows than it was given", () => {
+  // active + attention double-counts "warn" by design (expiring soon is both
+  // in force and urgent), but neither bucket alone may exceed the dated rows.
+  const days = [-5, 0, 3, 29, 30, 31, 900, null];
+  const c = renewalCounts(days);
+  const dated = days.length - c.undated;
+  assert.ok(c.active <= dated, `active ${c.active} > dated ${dated}`);
+  assert.ok(c.attention <= dated, `attention ${c.attention} > dated ${dated}`);
+  assert.equal(c.active + c.attention - days.filter((d) => d > 0 && d <= 30).length, dated,
+    "every dated row lands in exactly one of active/attention, bar the warn overlap");
+});
+
+test("renewalCounts tolerates an empty or absent list", () => {
+  assert.deepEqual(renewalCounts([]), { active: 0, attention: 0, undated: 0 });
+  assert.deepEqual(renewalCounts(), { active: 0, attention: 0, undated: 0 });
 });

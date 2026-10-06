@@ -1,4 +1,4 @@
-// node --test js/keep/entity-types.test.mjs
+// node --test js/keep/logic/entity-types.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENTITY_TYPE_GROUPS, TYPE_TO_KIND, kindForType, DEFAULT_ENTITY_TYPE, isNonprofitType } from "./entity-types.js";

@@ -1,4 +1,4 @@
-// keep/keep-policies.js — the Policies & requests domain of the Keep portal.
+// keep/views/policies-view.js — the Policies & requests domain of the Keep portal.
 // The policy detail page, the "request a coverage change" form, and the My
 // requests list (lifecycle: requested → broker review → underwriting →
 // approved/declined). Extracted from views/keep.js; hangs in the shared chrome
@@ -7,20 +7,25 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { ASSET_META } from "../logic/data.js";
+import { ASSET_META } from "../logic/asset-meta.js";
 import { policyKind, reminderInfo, formatPremium } from "../logic/policies.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, nextStage } from "../logic/requests.js";
 import { findPolicy, getUser, getPrefs, addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest } from "../../supabase.js";
-import {
-  sep, page, backLink, cic, dateFromDays, expiryBadge, docItem, activeSchedule, requestStepper,
-} from "./shell.js";
+import { sep, page, backLink, dateFromDays, expiryBadge, docItem, activeSchedule, requestStepper } from "./shell.js";
 
 export function renderKeepPolicy(params, id) {
   const found = findPolicy(id);
-  if (!found) return renderKeepEntityList();
+  // Unknown policy id (a stale or shared link, or a policy the broker removed)
+  // → the policies list. This line used to call renderKeepEntityList(), which is
+  // NOT imported here: it was copy-pasted from views/keep.js during the domain
+  // split and kept the original module's target without its import, so every
+  // miss threw a ReferenceError and degraded to the generic error page.
+  if (!found) return go("#/keep/insurance");
   const { entity, asset, policy } = found;
   const kind = policyKind(policy.renewalInDays);
-  const statusLabel = kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
+  // kind === null means no renewal date on file — report that, never "Active".
+  const statusLabel = kind == null ? "Renewal date not on file"
+    : kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
     : (kind === "warn" ? "Expiring soon" : "Active");
   const rinfo = reminderInfo(policy.renewalInDays, activeSchedule());
 
@@ -54,7 +59,9 @@ export function renderKeepPolicy(params, id) {
       el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 30 })]),
       el("div", { class: "k-phead__t" }, [
         el("h1", { text: policy.line }),
-        el("div", { class: "sub", text: `${policy.carrier} · NAIC ${policy.naic}` }),
+        // carrier/naic/number are all nullable text, and a template literal
+        // stringifies null — this read "NAIC null".
+        el("div", { class: "sub", text: [policy.carrier, policy.naic ? `NAIC ${policy.naic}` : null].filter(Boolean).join(" · ") || "—" }),
       ]),
       expiryBadge(policy.renewalInDays),
     ]),

@@ -1,5 +1,5 @@
 // entity-display.test.mjs — unit tests for the single entity-label source.
-// Run: node --test js/keep/entity-display.test.mjs
+// Run: node --test js/keep/logic/entity-display.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { entityCategory, entitySubtype, entityColorSuffix, entityRelStyleKey, entityAvatarIcon, entityMapSub, entityIndustry } from "./entity-display.js";

@@ -72,9 +72,6 @@
 .btn-secondary { background: var(--color-surface); color: var(--color-accent); border-color: var(--color-border); }
 .btn-secondary:hover { border-color: var(--color-accent); color: var(--color-accent-hover); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
 
-.btn-ghost { background: transparent; color: var(--color-accent); padding-left: var(--space-2); padding-right: var(--space-2); }
-.btn-ghost:hover { color: var(--color-accent-hover); }
-.btn-ghost:hover .icon { transform: translateX(3px); }
 
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; transform: none; }
 .btn-row { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
@@ -89,7 +86,6 @@
   color: var(--color-accent);
   flex: none;
 }
-.icon-badge--lg { width: 64px; height: 64px; border-radius: var(--radius-xl); }
 .icon-badge--ring { box-shadow: 0 0 0 6px var(--color-accent-ring); }
 
 /* ── Section band ────────────────────────────────────────────────────────── */

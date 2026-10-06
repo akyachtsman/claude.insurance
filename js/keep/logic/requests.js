@@ -1,4 +1,4 @@
-// keep/requests.js — pure helpers for policy enhancement requests.
+// keep/logic/requests.js — pure helpers for policy enhancement requests.
 // No DOM: validation + display mapping, unit-tested (requests.test.mjs).
 
 export const SUBJECT_MAX = 200;
@@ -41,7 +41,14 @@ export function isPending(status) {
   return status !== "approved" && status !== "declined";
 }
 
-// The next stage a broker can advance a request to (null at/after underwriting).
+// The next stage in the lifecycle, or null once there is none.
+//
+// NOT a role guard, despite the name. nextStage("underwriting") returns
+// "approved" — the underwriting -> approved decision CLAUDE.md assigns to the
+// UNDERWRITER, not the broker. An earlier version of this comment said "null
+// at/after underwriting", which would have let a caller trust this function
+// alone for authorization. Callers must gate on role themselves, as
+// policies-view.js does.
 export function nextStage(status) {
   const i = REQUEST_STAGES.findIndex((s) => s.key === status);
   if (i < 0 || i >= REQUEST_STAGES.length - 1) return null; // unknown, or already approved
@@ -57,7 +64,9 @@ const STATUS = {
   declined:      { label: "Declined", cls: "k-pill--gap", icon: "x" },
 };
 export function statusDisplay(status) {
-  return STATUS[status] || STATUS.requested;
+  // Own-property lookup: STATUS["constructor"] is truthy, so the fallback was
+  // skipped and `.label` came back undefined, rendering an empty pill.
+  return (Object.prototype.hasOwnProperty.call(STATUS, status) && STATUS[status]) || STATUS.requested;
 }
 
 // A sensible default subject when the client starts from a specific policy.

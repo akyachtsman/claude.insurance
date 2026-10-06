@@ -1,4 +1,4 @@
-// node --test js/keep/search.test.mjs
+// node --test js/keep/logic/search.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "./search.js";

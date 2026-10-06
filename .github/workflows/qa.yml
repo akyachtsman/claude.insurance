@@ -70,6 +70,31 @@ jobs:
         run: node .github/scripts/check-contrast.js
 
 
+      # ── Asset manifest guard (PROJECT-SPECIFIC — no upstream equivalent) ────
+      - name: Asset manifest guard
+        # index.html hand-maintains three lists with nothing validating them:
+        # MODULES (the cache-busting import map), SHEETS, and the <noscript>
+        # stylesheet links. An omission from MODULES is SILENT — the module still
+        # loads, it just resolves to an UNVERSIONED url, so returning browsers
+        # keep a stale copy after a deploy and nothing goes red. That already
+        # happened: 2be517a reads "they were omitted, so a deploy could serve a
+        # stale copy". The guard walks the real import graph from js/main.js
+        # rather than globbing, and exits 2 (CANNOT CHECK) rather than passing if
+        # an input is missing. Negative-tested on all four cases.
+        run: node .github/scripts/check-asset-manifest.js
+
+      - name: Undefined-call guard
+        # Every called identifier in a browser module must be declared, imported
+        # or a known global. This class shipped TWICE in one PR: a function
+        # copy-pasted during a module split without its import, and a scripted
+        # import edit whose single-line regex missed a MULTI-LINE import block.
+        # Nothing else catches it — `node --check` only parses (a free
+        # identifier is legal until it runs), the import checks only prove the
+        # specifier resolves, and the UI suite skips the Keep scenarios on a
+        # localhost server, so the page that broke is never opened there.
+        # Deliberately conservative: it under-reports rather than cry wolf.
+        run: node .github/scripts/check-undefined-calls.js
+
       - name: Workflow cross-reference guard
         # Every `workflow_run.workflows:` entry must name a real workflow. GitHub
         # raises no error when one does not — the watcher simply never fires.

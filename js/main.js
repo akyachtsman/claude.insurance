@@ -15,7 +15,7 @@ import {
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./keep/views/keep.js";
 import { getSession, ensureData } from "./supabase.js";
-import { createNavStack } from "./nav.js";
+import { createNavStack, createHistorySignal } from "./nav.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
 export function go(hash) {
@@ -26,11 +26,16 @@ export function go(hash) {
 // Navigation stack for "origin-aware back" (see CLAUDE.md coding standards).
 // Logic lives in js/nav.js (pure + unit-tested in js/nav.test.mjs).
 const nav = createNavStack();
+// Stamps each history entry with an identity so the nav stack can tell a
+// Back/Forward from a link, and WHICH entry it landed on. Lives in nav.js so
+// the two halves of that scheme are unit-tested together — they disagreeing is
+// what the last two review rounds found.
+const navSignal = createHistorySignal(window.history);
 export function previousRoute() { return nav.previous(); }
 
 async function route() {
   const fullHash = location.hash || "#/";
-  nav.track(fullHash);
+  nav.track(fullHash, navSignal());
 
   const raw = location.hash.replace(/^#/, "") || "/";
   const [pathPart, query] = raw.split("?");
@@ -77,8 +82,11 @@ async function dispatch(parts, params) {
   }
 }
 
-// The Keep sub-router: #/keep, #/keep/login, #/keep/add-asset,
-// #/keep/entity/:id, #/keep/asset/:id.
+// The Keep sub-router. All 17 routes: #/keep (landing), /login, /list (My
+// Entities), /entities (relationships map), /grid, /entity/:id, /assets,
+// /asset/:id, /insurance (all policies), /policy/:id, /requests (My requests),
+// /request/:id, /add-asset, /add-entity, /documents, /account, /security.
+// (This header previously listed five of them.)
 // Guards every route except login behind a Supabase Auth session, and loads the
 // user's data once before rendering so the views can read it synchronously.
 async function dispatchKeep(rest) {

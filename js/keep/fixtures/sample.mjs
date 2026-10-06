@@ -1,4 +1,17 @@
-// keep/data.js — OFFLINE TEST FIXTURE for the Keep (+ ASSET_META, used by the app).
+// keep/fixtures/sample.mjs — OFFLINE TEST FIXTURE for the Keep. Node-only.
+//
+// Imported by the unit tests ONLY. It is deliberately .mjs and deliberately
+// outside logic/: logic/ is production code, and this is not. Keeping it out of
+// the browser graph is what stops ~12KB of sample data shipping to every
+// visitor (see js/keep/logic/asset-meta.js for the history).
+//
+// It must never appear in index.html's MODULES — check-asset-manifest.js
+// asserts that no .mjs is reachable from js/main.js.
+//
+// NOTE: findAsset/findPolicy here are FIXTURE accessors and share their names
+// with the live ones in js/supabase.js. Views import the live pair; tests import
+// these. The .mjs extension and this directory are what disambiguate them.
+// keep/fixtures/sample.mjs — OFFLINE TEST FIXTURE for the Keep. Node-only.
 // The live app reads from Supabase via js/supabase.js; this sample tree is no
 // longer the app's data source — it backs the offline unit tests (analysis/rules)
 // which can't reach a live DB. Shapes mirror the real tables so the tests and the
@@ -252,15 +265,3 @@ export function findPolicy(policyId) {
 // Per asset-type presentation: `cic`/`icon` for the marker, `label` for the
 // canonical category shown in the Type column (a fixed vocabulary, so the column
 // stays consistent instead of echoing each asset's freeform meta text).
-export const ASSET_META = {
-  home: { cic: "home", icon: "home", label: "Home" },
-  auto: { cic: "auto", icon: "auto", label: "Vehicle" },
-  watercraft: { cic: "boat", icon: "boat", label: "Watercraft" },
-  valuables: { cic: "gem", icon: "gem", label: "Valuables" },
-  "commercial-space": { cic: "cp", icon: "commercial-property", label: "Commercial space" },
-  "commercial-auto": { cic: "auto", icon: "commercial-auto", label: "Commercial auto" },
-  business: { cic: "cp", icon: "briefcase", label: "Business" },
-  // "other" covers land/vacant lots and any miscellaneous asset (see ASSET_GROUPS
-  // in keep.js). Kept in sync so these render an icon/colour instead of crashing.
-  other: { cic: "home", icon: "shield", label: "Other" },
-};

@@ -1,4 +1,4 @@
-// keep/ownership.js — pure helpers for entity ownership stakes.
+// keep/logic/ownership.js — pure helpers for entity ownership stakes.
 // An ownership row is { ownerId, role, pct } where pct is a string/number
 // percentage (or blank for "no stake", e.g. a trustee). No DOM; unit-tested.
 
@@ -31,6 +31,17 @@ export function validateOwnership(rows) {
     const n = parsePct(r.pct);
     if (Number.isNaN(n)) return { ok: false, error: "Enter a valid percentage (or leave it blank)." };
     if (n != null && (n < 1 || n > 100)) return { ok: false, error: "Each stake must be between 1% and 100%." };
+  }
+  // Reject the SAME owner twice. Only the 100% total was checked, so two rows
+  // naming one owner validated and both inserted (entity_relationships has no
+  // unique (from,to) constraint) — the cap-table bar then listed that owner
+  // twice and the map drew two edges for one relationship. The add-entity form
+  // builds every row's <select> from the same owner list with no exclusion, so
+  // clicking "Add owner" twice leaves both rows on the same default owner.
+  const seen = new Set();
+  for (const r of rows) {
+    if (seen.has(r.ownerId)) return { ok: false, error: "That owner is already listed — combine the rows into one stake." };
+    seen.add(r.ownerId);
   }
   const total = totalStake(rows);
   if (total > 100) return { ok: false, error: `Total stake is ${total}% — it can't exceed 100%.` };

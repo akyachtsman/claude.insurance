@@ -4,7 +4,7 @@ import { el, mount } from "../dom.js";
 import { icon, iconBadge, coverageIcon } from "../icons.js";
 import { enhance } from "../motion.js";
 import { getCoverage, getSection, firstSentence } from "../content.js";
-import { sectionHead, trustStrip, ctaBand, eyebrow } from "../components/ui.js";
+import { trustStrip, ctaBand, eyebrow } from "../components/ui.js";
 
 export async function renderSection(params, id) {
   const data = await getCoverage();

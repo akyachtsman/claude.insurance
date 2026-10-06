@@ -24,17 +24,69 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 
 ## Application Architecture
 - `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
-- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep` = landing/home, `#/keep/login`, `#/keep/list` = My Entities, `#/keep/entities` = Relationships map, `#/keep/entity/:id`, `#/keep/asset/:id`, `#/keep/policy/:id`, `#/keep/add-asset`, `#/keep/add-entity`, `#/keep/documents`, `#/keep/account`, `#/keep/security`). A route guard sends unauthenticated Keep routes to login. Origin-aware back via a router nav stack (`js/nav.js`). Toggles `body.in-keep` to swap site chrome.
+- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep` = landing/home, `#/keep/login`, `#/keep/list` = My Entities, `#/keep/entities` = Relationships map, `#/keep/entity/:id`, `#/keep/asset/:id`, `#/keep/policy/:id`, `#/keep/add-asset`, `#/keep/add-entity`, `#/keep/documents`, `#/keep/insurance` = all policies, `#/keep/requests` = My requests, `#/keep/request/:id`, `#/keep/assets` = all assets, `#/keep/grid`, `#/keep/account`, `#/keep/security`). A route guard sends unauthenticated Keep routes to login. Origin-aware back via a router nav stack (`js/nav.js`). Toggles `body.in-keep` to swap site chrome.
 - `js/views/` — public marketing views: `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`.
 - `js/keep/` — the Keep feature, split by layer:
   - `js/keep/views/` (rendering) — `keep.js` (entry: login, landing/home with renewals report + at-a-glance boxes, documents, account, security, add-entity), `entities.js` (My Entities list/cards/map + entity detail + card drag-reorder), `assets.js` (assets table + asset detail + add-asset), `policies-view.js` (policy detail + request form + My requests), `shell.js` (shared chrome: app frame, header menus, search, back-nav, doc download, formatters), `relmap-view.js` (Relationships-map SVG engine).
-  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `data` (offline fixture + `ASSET_META`).
-- **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/logic/data.js` is now the **offline test fixture + `ASSET_META`** (not the app's data source); `js/keep/logic/analysis.js` (asset → coverage analysis; reuses `rules.js`; tests `js/keep/logic/analysis.test.mjs`); `js/keep/logic/depreciation.js` (pure per-asset-type actual-cash-value depreciation engine; straight-line ACV to a per-type salvage floor, non-depreciating for property/land/valuables; surfaced as an Assets-table column + a "Value & depreciation" schedule on the asset detail page; tests `js/keep/logic/depreciation.test.mjs`); `css/keep.css` (Direction C portal styles, `k-` prefixed). Reachable by URL, unlinked from the public nav. A demo ribbon marks it as the seeded demo account.
+  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `asset-meta` (`ASSET_META` — the
+    only one of these on the render path). The offline fixture is **not** here:
+    it lives in `js/keep/fixtures/sample.mjs`, deliberately outside `logic/`.
+- **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/logic/asset-meta.js` holds `ASSET_META` (asset-type icon/colour/label — on the render path);
+  `js/keep/fixtures/sample.mjs` is the **offline test fixture**, Node-only and
+  deliberately outside `logic/` so it stays off the browser graph. They were one
+  file (`js/keep/logic/data.js`) until 2026-10-05: because `js/supabase.js`
+  imported the map from it, the whole file sat in `index.html`'s `MODULES` and
+  ~13KB of sample data was fetched and evaluated on **every** page load,
+  including the anonymous marketing site. `check-asset-manifest.js` now asserts
+  no `.mjs` is reachable from `js/main.js`, so it cannot come back. `js/keep/logic/analysis.js` (asset → coverage analysis; reuses `rules.js`; tests `js/keep/logic/analysis.test.mjs`); `js/keep/logic/depreciation.js` (pure per-asset-type actual-cash-value depreciation engine; straight-line ACV to a per-type salvage floor, non-depreciating for property/land/valuables; surfaced as an Assets-table column + a "Value & depreciation" schedule on the asset detail page; tests `js/keep/logic/depreciation.test.mjs`); `css/keep.css` (Direction C portal styles, `k-` prefixed). Reachable by URL, unlinked from the public nav. A demo ribbon marks it as the seeded demo account.
 - `js/rules.js` — pure needs/gap engine `(profile, settings) → needs[]`; thresholds come from settings (broker-editable), never hard-coded. Tests: `js/rules.test.mjs` (`node --test js/rules.test.mjs`)
-- `js/supabase.js` — live data client (`@supabase/supabase-js`, **vendored** at `js/vendor/supabase-js.js` — see that directory's README): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; `js/keep/logic/data.js` remains as the offline test fixture + `ASSET_META`. Service-role key never shipped. **No mocked/hard-coded data path ships:** the app *always* reads/writes real Supabase. A stubbed `supabase.js` exists only in the offline Playwright harness (a scratchpad-only overlay, never committed) so UI geometry/render can be checked without network or auth; it is not part of the repo or the deployed app.
-- `js/format.js`, `js/dom.js` — formatting helpers and `textContent`-only DOM helpers
+- `js/supabase.js` — live data client (`@supabase/supabase-js`, **vendored** at `js/vendor/supabase-js.js` — see that directory's README): a session-less public client for anonymous lead capture + rule settings, and an authenticated client for the Keep (auth, per-user reads, writes). Adapts DB rows → the nested shape the views expect; it imports `ASSET_META` from `js/keep/logic/asset-meta.js` and nothing from the offline fixture, which is what keeps `js/keep/fixtures/sample.mjs` off the browser graph. Service-role key never shipped. **No mocked/hard-coded data path ships:** the app *always* reads/writes real Supabase. A stubbed `supabase.js` exists only in the offline Playwright harness (a scratchpad-only overlay, never committed) so UI geometry/render can be checked without network or auth; it is not part of the repo or the deployed app.
+- `js/dom.js` — `textContent`-only DOM helpers. **There is no `js/format.js`** —
+  it was deleted in `2be517a` (zero importers) and this line claimed it for
+  months afterwards. The formatters live in `js/keep/views/shell.js` (`money`,
+  `dateFromDays`, `dateShort`, `expiryBadge`) and `js/keep/logic/policies.js`
+  (`formatPremium`); the public views have no money formatter at all.
+- `js/store.js` — in-memory questionnaire answer store (why deep-linking
+  `#/summary` has nothing to show — scenario S7)
+- `js/content.js` — fetches + caches `content/*.json`; `findTopic` lookup
+- `js/components/` — `ui.js` (marketing blocks), `progress.js`, `glossary.js`.
+  **Public path only** — nothing under `js/keep/` imports from here. The Keep's
+  generic widgets live in `js/keep/views/shell.js`.
+- `js/icons.js`, `js/svg.js`, `js/motion.js` — sprite icons, SVG element helper,
+  reveal/count-up observers
+- `js/test-settings.mjs` — test-only fixture (reads `content/rule-defaults.json`
+  so the unit tests exercise the real seed values); never in `index.html`
 - `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) and `desk-ask` are deployed and ACTIVE; the `notify-lead` / `notify-renewal` functions are still to come.
+- `css/` — `tokens.css` (design tokens), `base.css`, `components.css`,
+  `forms.css`, `views.css`, `motion.css` (public site) + `keep.css` (portal,
+  `k-` prefixed); self-hosted OFL fonts in `css/fonts/`
+- `docs/data-model.md` — the canonical label/field reference behind the "one
+  canonical label" standard above
+- `specs/` — **frozen** point-in-time SDD record for feature 001, not current
+  architecture; see `specs/README.md` for its known divergences from the code
+- `scripts/setup-playwright.sh` — local browser setup
+- `learnings.jsonl` — append-only session learnings (`/learn`)
+- `.github/workflows/` — 8 workflows: `qa.yml`, `qa-live.yml`, `qa-response.yml`,
+  `ci-monitor.yml`, `ci-notify.yml`, `codex-monitor.yml`, `pages-monitor.yml`,
+  `pages-retry.yml`. `.github/actions/` holds the shared composite actions
+  (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
+  `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+  and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
+  `notify-renewal` functions are still to come.
+  - ⚠️ **`desk-ask` is a retired stub, not part of this system.** It is still
+    deployed here and reads ACTIVE, which an earlier version of this line listed
+    alongside `notify-enhancement` as though both were working features. Its
+    source (fetched 2026-10-05) is a 410 responder whose own comment says it
+    "was deployed by mistake into the wrong project and has been neutralized: it
+    reads nothing, calls nothing, and stores nothing. Safe to delete entirely."
+    Nothing in `js/` references it. It is deliberately **not** vendored into
+    `supabase/functions/` — the fix is to delete the function (Dashboard → Edge
+    Functions → desk-ask → Delete), which needs owner approval as a production
+    change. Until then it is a live JWT-verified endpoint that does nothing.
+- `supabase/proposed/` — migrations **written but not applied**, awaiting owner
+  approval. `supabase/migrations/` means "live and matching `list_migrations`";
+  this directory exists so that stays true. See its README.
 
 ## Backend (Supabase — provisioned)
 - **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
@@ -53,6 +105,8 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Job bounds guard | `python3 .github/scripts/check-job-bounds.py` |
 | Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
+| Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
+| Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
 
 **Required watchers (`.github/workflow-ref-required.json`).** The guard checks
 two different things and only that file supplies the second: rule 1 is that
@@ -67,13 +121,18 @@ not registered — doing so asserts their current lists are invariants, a broade
 claim than has been established. **The file holds no comments; JSON has none,
 and a `_comment` key is read as a workflow filename and fails the guard.**
 
-**Local Playwright ceiling — recorded 2026-08-26.** In an agent sandbox
+**Local Playwright ceiling — recorded 2026-08-26; webkit/firefox half
+re-verified 2026-10-05.** The browser-egress half was NOT re-verified (see the
+note at the end of this section); it is carried forward unchanged. In an agent sandbox
 **S1/S4/S7/S8 pass on chromium; S5/S6 do not; the webkit profiles do not run at
 all.** Two observed causes. `global.md` → **Network Access Playbook** governs
 browser-side network failures; this section only records what was measured here.
 
-- **No webkit or firefox in the sandbox image** (checked in three sandboxes,
-  2026-08-26): chromium only, so `tablet` and `iphone` fail at launch. *Absent
+- **No webkit or firefox in the sandbox image** (checked in three sandboxes
+  2026-08-26; **re-checked 2026-10-05 in a fresh container — still chromium
+  only**: `/opt/pw-browsers` holds chromium, two pinned chromium builds, their
+  headless shells and ffmpeg, nothing else), so `tablet` and `iphone` fail at
+  launch. *Absent
   is not unavailable* — a missing browser may be installable, so treat this as
   "not present today", not "impossible". CI has both.
 - **Chromium could not complete an HTTPS request to the hosts S5/S6 need**
@@ -124,14 +183,74 @@ goes red when that happens, so the date above matters.
   `cd` existed the block wrote to the root and left the deployed bundle
   untouched, so a security refresh would have verified a file nobody serves.
 - **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
-- **No broker-facing UI in v1:** brokers consume leads via Supabase + email, so no privileged read path exists in the static app.
+- **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
+  there is no lead-reading path in the static app. ⚠️ The second half of this
+  line used to read "so no privileged read path exists in the static app",
+  which **stopped being true when the Keep shipped broker/underwriter views.**
+  `js/keep/views/policies-view.js` renders staff controls off `role`, and
+  `enhancement_requests` carries four role-keyed RLS policies
+  (`er_broker_select/update`, `er_underwriter_select/update`) that let staff read
+  and write **every** client's requests from the browser. That is a privileged
+  read path in the static app, and the next constraint is why it matters.
+- **⚠️ OPEN — `profiles.role` is self-assignable (live, verified 2026-10-05).**
+  Not an accepted trade-off; an unfixed hole, recorded here so it is not
+  rediscovered. `authenticated` holds table-level `UPDATE` on `public.profiles`
+  (every column, `role` included) and the only policy on it is
+  `using (id = auth.uid()) with check (id = auth.uid())` — no column
+  restriction, no trigger. So one PostgREST call from the browser,
+  `supabase.from("profiles").update({ role: "broker" }).eq("id", uid)`,
+  promotes any signed-in client to staff. Reachable with the demo credential
+  this file publishes and the login screen prefills.
+  **Blast radius (verified, and narrower than it looks):** the only role-keyed
+  policies in the schema are the four on `enhancement_requests`. `entities`,
+  `assets`, `policies` and `entity_relationships` key on `owner = auth.uid()`
+  with no role escape, so a self-promoted broker gains **no** access to another
+  client's cover — it gains read/write on every client's enhancement requests
+  (and `er_broker_update` has no `with check`, so `owner`/`subject`/`body` are
+  rewritable too, not just `status`).
+  **Fix written, not applied:** `supabase/proposed/20261005_profiles_role_not_self_assignable.sql`
+  (a column-level `REVOKE` — RLS evaluates whole rows, so `with check` cannot
+  express "this column may not change"). Needs owner approval. Verify by
+  re-running the probe in that file's footer **as a client session**;
+  service-role bypasses RLS and reports a false pass.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
 - **Origin-aware back (always):** any back / return / cancel control MUST return the user to the page they actually navigated *from*, not a hardcoded destination. The router records the previous route; back controls navigate to it, falling back to the hierarchical parent only when there's no prior in-app page (e.g. a deep link or fresh load). Never assume the parent in the breadcrumb is where the user came from (they may have arrived from a notification, search, or the documents view). Applies to every new feature or button.
-- **Non-overlapping connectors (always):** in the Relationships map — or any node-and-edge diagram — no two connectors from *different* sources may run collinear so they merge into one visible line, and none may run behind a box. Every distinct relationship stays traceable to exactly one owner→owned pair. Give same-orientation runs that share a corridor their own lane/offset; break a *perpendicular* crossing with a small gap — never an arc or loop (which reads as a node or a join). One source fanning out through a single shared trunk (a bus) is fine — that is one relationship, not two; two *different* owners sharing a line is not. Deconflict as a routing pass, then **verify geometrically before shipping** — count cross-source overlaps and lines-behind-boxes programmatically (a visual glance misses collinear overlaps, and hash-nav serves cached JS so the eye can't confirm the new build). Applies to every change that routes edges.
+- **One canonical label, one shared module (always):** every label shown in any
+  view derives from one canonical record field, through one shared module
+  (`js/keep/logic/entity-display.js` for entities). Labels are never
+  re-synthesized per view — that is what caused the "You · personal" (map) vs
+  "UBO" (table) divergence. Promoted here from `docs/data-model.md`, which held
+  it as a binding `**Rule:**` while nothing in the repo pointed at that file, so
+  a newcomer following this document would never have found it.
+- **Non-overlapping connectors (always):** this is now **ratified upstream** as
+  `design.md` → *Diagrams & connectors* (owner ruling, 2026-09-24). **Follow the
+  upstream section; it is the authority.** The summary below is kept only
+  because this repo's Relationships map is the surface it governs — do not treat
+  this copy as the rule, and delete it in favour of a pointer at the next
+  `/refresh-repo`.
+  No two connectors from *different* sources may run collinear so they merge
+  into one visible line, and none may run behind a box — route around it with a
+  bend. Every distinct relationship stays traceable to exactly one owner→owned
+  pair. Give same-orientation runs that share a corridor their own lane/offset;
+  break a *perpendicular* crossing with a small gap — never an arc or loop
+  (which reads as a node or a join). One source fanning out through a single
+  shared trunk (a bus) is fine — that is one relationship, not two; two
+  *different* owners sharing a line is not. Deconflict as a routing pass, then
+  **verify geometrically before shipping** — count cross-source overlaps and
+  lines-behind-boxes programmatically (a visual glance misses collinear
+  overlaps, and hash-nav serves cached JS so the eye can't confirm the new
+  build), against the **served** build, not the local file.
+  **Two upstream provisions this local copy was missing** (added 2026-10-05,
+  found by `/audit-repo` diffing the local standard against the ratified one):
+  (1) if edges carry labels, each label sits on its own edge's lane, never in a
+  shared corridor where it could attach to a neighbour; (2) the native
+  `artifact-diagramming` skill owns this ground and should be read before
+  drawing one — the blocking criteria above sit on top of it, and where the
+  skill is silent it decides.
 
 ## Agent Workflow
 1. Use a `claude/<name>` feature branch
@@ -151,10 +270,22 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Keep credential (valid) | `user` / `keep-demo-2026` (client view, prefilled) · `broker` / `keep-demo-2026` (broker view). Bare username → `<name>@example.com`. |
 | Keep credential (invalid) | any other password → `.k-error` on the login form |
 | Primary nav button | `Find what coverage I need` |
-| Primary content selector | `.card` |
+| Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.app-header h1` · choice steps: `.choices .choice` · contact: `#contact-name` · summary: `.need`, `.disclaimer` · error: `.error` |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard`, `.k-error`, `.k-h1` |
+
+⚠️ **Every selector in that row was verified against the rendered page on
+2026-10-05** (headless chromium, local static server) — not read off the
+source. `home` was `.app-header h1`, which matches **nothing**: there is no
+`.app-header` anywhere in `js/`, `css/` or `index.html`, and the home `h1` is
+`main > section.hero > … > h1.hero__title`. `.site-header` exists but is the
+nav bar and contains no `h1`. This is the same dead-selector failure as the
+`.card` entry in the row above, which was fixed while this one was left — and
+this table is **agent input**, so a dead selector here becomes an assertion
+that can never pass. Re-verify against the page, not the stylesheet: `.card`
+was live CSS with no emitter, and `#contact-name` is the reverse — correct,
+but invisible to grep because the id is interpolated.
 
 ## Project-Specific Test Scenarios
 Authoritative list of coverage beyond the generic S1–S4 suite — the ui-tester
@@ -184,8 +315,40 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
+| `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
+
+### ⚠️ This rulebook is stale — run `/refresh-repo` (recorded 2026-10-05)
+
+`.claude/directive-sync.json` records the last sync as `1d57879` @ **2026-08-26**,
+and the divergence table above is written against that state. The upstream
+directives now carry **nine sections whose owner rulings postdate it**, so the
+table is reasoning from a six-week-old rulebook:
+
+| section | ruling |
+|---|---|
+| `global.md` → *"Proceed" — the Standing Directive* | 2026-08-27 |
+| `global.md` → *A Knowing Deviation Is an Escalation* | 2026-09-02 |
+| `global.md` → *Review Rounds Have to Terminate* | 2026-09-10 |
+| `global.md` → *Parallel Tasking via Subagents* | 2026-09-10 (amended) |
+| `global.md` → *Automations* | 2026-09-24 |
+| `global.md` → *Subagent Model Selection* | 2026-09-24 |
+| `design.md` → *Charts & data display* | 2026-09-24 |
+| `design.md` → *Diagrams & connectors* | 2026-09-24 |
+| `test.md` → *Playwright* | 2026-09-24 |
+| `git.md` → *Fallback reviewer when Codex is down* | 2026-09-29 |
+
+This was established from the **stamps in the live directive text**, not from a
+commit diff: `claude.directives` is not in this session's GitHub scope, so the
+SHA delta could not be computed from here and the per-section provenance
+archaeology that `/audit-repo` asks for could not be run on those files. The
+stamps are sufficient to prove staleness; they do not tell you what else moved.
+Two consequences already found and handled: *Diagrams & connectors* duplicates
+this repo's local connector standard (now deferring to it, with two missing
+provisions restored), and *Charts & data display* mandates the native `dataviz`
+skill for any chart — this repo draws SVG for icons and the relationships map
+but no charts, so nothing is in breach there today.
 
 **Threshold values.** Never cache an upstream threshold — record the pointer.
 Where a config format forces a literal (`timeout-minutes` accepts no expression),

@@ -1,5 +1,5 @@
 // depreciation.test.mjs — unit tests for the Keep asset depreciation engine.
-// Run: node --test js/keep/depreciation.test.mjs
+// Run: node --test js/keep/logic/depreciation.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { depreciationFor, depreciationMilestones, DEPRECIATION } from "./depreciation.js";

@@ -1,6 +1,6 @@
-// keep/search.js — pure search + command-intent matching for the Keep.
+// keep/logic/search.js — pure search + command-intent matching for the Keep.
 // No DOM, no globals: takes data in, returns ranked results. Unit-tested
-// (js/keep/search.test.mjs). Powers both the top-nav search box and the
+// (js/keep/logic/search.test.mjs). Powers both the top-nav search box and the
 // "what would you like to accomplish?" command input on the landing page.
 import { docName } from "./docfile.js";
 

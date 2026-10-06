@@ -1,4 +1,4 @@
-// node --test js/keep/requests.test.mjs
+// node --test js/keep/logic/requests.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateRequest, statusDisplay, defaultSubject, SUBJECT_MAX, MESSAGE_MAX, stageInfo, isPending, nextStage, REQUEST_STAGES } from "./requests.js";

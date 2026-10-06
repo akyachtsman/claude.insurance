@@ -19,7 +19,7 @@ caused the "You · personal" (map) vs "UBO" (table) divergence.
 | Domain | Canonical field | Single source module | Produces |
 |---|---|---|---|
 | Entity | `kind` (+ `subtype`) | `js/keep/logic/entity-display.js` | category (UBO / Individual / Company / Trust), subtype text, colour, avatar icon, map sub-label |
-| Asset | `type` | `js/keep/logic/data.js` `ASSET_META` | label, icon, colour · (+ `depreciation.js` for ACV) |
+| Asset | `type` | `js/keep/logic/asset-meta.js` `ASSET_META` | label, icon, colour · (+ `depreciation.js` for ACV) |
 | Policy | `line` | `js/keep/logic/policies.js` `policyPresentation` | type label, table icon, card icon, tile colour |
 
 - `js/supabase.js` is a **thin adapter**: it maps DB rows to the view shape and

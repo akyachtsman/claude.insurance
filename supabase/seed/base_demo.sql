@@ -6,7 +6,8 @@
 -- PREREQUISITE: the demo auth user must exist first. profiles.id and
 -- entities.owner both FK to auth.users(id), so create the Supabase Auth user
 -- with id 11111111-1111-4111-8111-111111111111 (broker invite + password) before
--- running this. Asset/policy demo rows are seeded separately (see js/keep/data.js
+-- running this. Asset/policy demo rows are seeded separately (see
+-- js/keep/fixtures/sample.mjs
 -- for the sample shapes); this file covers only the profile + base entities.
 
 insert into public.profiles (id, full_name, role) values

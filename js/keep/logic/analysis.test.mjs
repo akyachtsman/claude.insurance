@@ -1,9 +1,9 @@
 // analysis.test.mjs — unit tests for the Keep asset-coverage analysis.
-// Run: node --test js/keep/analysis.test.mjs
+// Run: node --test js/keep/logic/analysis.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzeAsset, assetStatus, entitySummary } from "./analysis.js";
-import { getEntity, findAsset } from "./data.js";
+import { getEntity, findAsset } from "../fixtures/sample.mjs";
 import { SETTINGS } from "../../test-settings.mjs";
 
 test("home above the umbrella threshold shows umbrella as the gap; flood is in place", () => {
@@ -56,4 +56,30 @@ test("entity summary aggregates assets and gaps", () => {
   assert.equal(sum.assets, 4);
   assert.equal(sum.gaps, 3); // home: umbrella (1) + watercraft: hull + liability (2)
   assert.ok(sum.inPlace >= 7);
+});
+
+// ── Regression: client-created asset states (audit 2026-10-05) ─────────────
+test("an inherited Object key does not crash the analysis", () => {
+  // assets.type is free text and clients have full CRUD. CATALOG["constructor"]
+  // was truthy, so the `!cat` guard passed and cat.must.map() threw — taking out
+  // the Keep landing, My Entities AND entity detail, which all call entitySummary.
+  for (const t of ["constructor", "toString", "valueOf", "__proto__"]) {
+    assert.deepEqual(analyzeAsset({ type: t, held: [] }), { mustHave: [], recommended: [], gaps: 0 });
+    assert.doesNotThrow(() => entitySummary({ assets: [{ type: t }] }));
+  }
+});
+
+test("a home with unknown flood risk is not scored as a gap", () => {
+  // addAsset always writes attrs:{}, which the home profile turns into
+  // flood_risk "unsure" -> an advisory need. `held` is broker-written only, so
+  // scoring that a gap left every client-created home permanently flagged with
+  // something the client could not clear.
+  const bare = { type: "home", value: 400000, facts: [], attrs: {}, held: ["dwelling", "home-liability", "home-contents"] };
+  assert.equal(assetStatus(bare, {}).gaps, 0);
+  assert.equal(analyzeAsset(bare, {}).recommended.find((r) => r.id === "flood").status, "suggested");
+});
+
+test("an established flood risk IS still a gap", () => {
+  const zone = { type: "home", value: 400000, facts: [], attrs: { floodZone: true }, held: ["dwelling", "home-liability", "home-contents"] };
+  assert.equal(analyzeAsset(zone, {}).recommended.find((r) => r.id === "flood").status, "gap");
 });

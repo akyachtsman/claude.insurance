@@ -7,13 +7,12 @@ import { el, mount } from "../../dom.js";
 import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { getRuleDefaults } from "../../content.js";
 import {
-  getUser, getEntities, signIn, addEntity,
+  fetchRules, getUser, getEntities, signIn, addEntity,
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
 } from "../../supabase.js";
 import { entitySummary } from "../logic/analysis.js";
-import { policyKind, renewalBand, annualPremium, formatPremium } from "../logic/policies.js";
+import { renewalBand, renewalCounts, annualPremium, formatPremium } from "../logic/policies.js";
 import { statusDisplay, stageInfo, isPending } from "../logic/requests.js";
 import { docName } from "../logic/docfile.js";
 import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../logic/ownership.js";
@@ -22,12 +21,7 @@ import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderK
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
 export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
 export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "./policies-view.js";
-import {
-  BROKER_NAME, buildReminderSettings,
-  money, downloadButton, docDownloadMenu, ribbon, landingCommand, page,
-  backLink, cic, policyTypeIcon, dateShort, expiryBadge, signOutButton,
-  sortableTable, statTile, requestStepper,
-} from "./shell.js";
+import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
@@ -84,7 +78,6 @@ function collectPolicies() {
   return out;
 }
 
-
 // Landing — welcome + "what would you like to do?" + a renewals report and
 // at-a-glance boxes. The home of the Keep (#/keep).
 // Compact "Request status" window for the landing page — pending requests with
@@ -123,7 +116,7 @@ function pendingRequestsReport(requests, role) {
 }
 
 export async function renderKeepLanding() {
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const first = getUser().name.split(" ")[0];
   const entities = getEntities();
   const role = (getUser() && getUser().role) || "client";
@@ -224,9 +217,11 @@ export function renderKeepInsurance() {
     { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
   ];
 
-  // Summary stats across the whole table.
-  const active = rows.filter((r) => policyKind(r.policy.renewalInDays) !== "exp").length;
-  const attention = rows.filter((r) => r.policy.renewalInDays <= 30).length; // expiring soon or lapsed
+  // Summary stats across the whole table. The renewal counters live in
+  // logic/policies.js so the unknown-date case is unit-tested: an undated
+  // policy counts as neither active nor needing attention, and is surfaced
+  // under its own label rather than guessed into one of them.
+  const { active, attention, undated } = renewalCounts(rows.map((r) => r.policy.renewalInDays));
   const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
   const premiumTotal = premiums.reduce((s, n) => s + n, 0);
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
@@ -236,7 +231,7 @@ export function renderKeepInsurance() {
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
     el("div", { class: "k-astats" }, [
       statTile("Policies", String(rows.length), `across ${insuredEntities} ${insuredEntities === 1 ? "entity" : "entities"}`),
-      statTile("Active", String(active), "in force"),
+      statTile("Active", String(active), undated ? `in force · ${undated} undated` : "in force"),
       statTile("Needs attention", String(attention), attention ? "expiring or lapsed" : "all current"),
       statTile("Annual premium", premiums.length ? (money(premiumTotal) || "$0") : "—", "total on file"),
     ]),
@@ -409,6 +404,12 @@ export function renderKeepDocuments() {
   mount(view);
 }
 
+// "client" -> "Client", "broker" -> "Broker", "underwriter" -> "Underwriter".
+function roleLabel(role) {
+  const r = String(role || "client");
+  return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
 export function renderKeepAccount() {
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) => el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
   const user = getUser();
@@ -418,7 +419,12 @@ export function renderKeepAccount() {
     el("p", { class: "k-sub", text: "Your profile and notification settings." }),
     el("div", { class: "k-grp" }, [
       el("div", { class: "k-grp__h" }, [icon("user", { size: 15 }), el("span", { text: "Profile" })]),
-      pg([["Name", user.name], ["Email", user.email], ["Role", "Client"], ["Member since", "Jun 2026"], ["Broker", BROKER_NAME]]),
+      // Role came from a literal, so a broker or underwriter signing in saw
+      // "Role: Client". It is on the profile and already read elsewhere in this
+      // file. "Member since" was a literal too; dropped rather than fabricated,
+      // since profiles exposes no created_at the client can read.
+      pg([["Name", user.name], ["Email", user.email],
+          ["Role", roleLabel(user.role)], ["Broker", BROKER_NAME]]),
     ]),
     buildReminderSettings(),
     el("div", { class: "k-btn-row" }, [signOutButton("k-btn k-btn--ghost")]),

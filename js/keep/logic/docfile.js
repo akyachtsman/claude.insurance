@@ -1,4 +1,4 @@
-// keep/docfile.js — generate a minimal, self-contained PDF for a demo document.
+// keep/logic/docfile.js — generate a minimal, self-contained PDF for a demo document.
 // The Keep's documents are sample records with no real stored file, so the
 // download button produces a clearly-labeled placeholder PDF (named after the
 // document) rather than pretending to serve a confidential file. Pure + tested.

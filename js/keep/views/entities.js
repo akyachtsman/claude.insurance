@@ -1,18 +1,16 @@
-// keep/keep-entities.js — the Entities domain of the Keep portal.
+// keep/views/entities.js — the Entities domain of the Keep portal.
 // The three entity views (Rows list, Cards grid, Relationships map) and the
 // entity detail page, plus the entity table/tile builders and the drag-and-drop
 // card-reorder subsystem. Extracted from views/keep.js; hangs in the shared
 // chrome from shell.js. Public: renderKeepEntityList/Grid/Entities/Entity.
 import { el, mount } from "../../dom.js";
-import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
-import { getRuleDefaults } from "../../content.js";
 import { assetStatus, entitySummary } from "../logic/analysis.js";
 import { parsePct } from "../logic/ownership.js";
 import { entityCategory, entitySubtype, entityColorSuffix as colorSuffix, entityIndustry } from "../logic/entity-display.js";
 import { relationshipMap, relToolbar } from "./relmap-view.js";
-import { getEntities, getEntity, getMapData } from "../../supabase.js";
+import { fetchRules, getEntities, getEntity, getMapData } from "../../supabase.js";
 import {
   money, cic, page, backLink, originBackRow, sortableTable, statTile, sep,
   entityAvatar, primaryEntity, saveCardOrder, loadCardOrder,
@@ -216,7 +214,7 @@ const CARD_GROUPS = [
 ];
 
 async function renderEntityCollection(layout) {
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const entities = getEntities();
   let body;
   if (layout === "cards") {
@@ -296,7 +294,7 @@ export async function renderKeepEntity(params, id) {
   // No id (the Entities tab lands here) → open the client's own "Me" entity.
   const entity = getEntity(id) || primaryEntity();
   if (!entity) return renderKeepEntityList();
-  const settings = await getRuleDefaults();
+  const settings = await fetchRules();
   const suffix = colorSuffix(entity);
   const sum = entitySummary(entity, settings);
   const value = entityValue(entity);
@@ -394,7 +392,9 @@ export async function renderKeepEntity(params, id) {
     cic(a),
     el("div", { class: "k-arow__main" }, [
       el("div", { class: "k-arow__name", text: a.name }),
-      el("div", { class: "k-arow__meta", text: `${a.meta} · ${money(a.value)}` }),
+      // addAsset writes value: null when the optional estimated-value field is
+      // left blank, which rendered "Home · " with a separator and nothing after.
+      el("div", { class: "k-arow__meta", text: a.value != null ? `${a.meta} · ${money(a.value)}` : a.meta }),
     ]),
     el("span", { class: `k-arow__st k-arow__st--${st.cls}`, text: st.label }),
   ]);
@@ -429,6 +429,3 @@ export async function renderKeepEntity(params, id) {
   ], { split: true });
   mount(view);
 }
-
-// Value & depreciation panel for the asset detail page. Depreciating types show
-// a milestone actual-cash-value (ACV) schedule; non-depreciating types show a
