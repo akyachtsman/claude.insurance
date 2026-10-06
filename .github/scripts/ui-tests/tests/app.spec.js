@@ -60,8 +60,22 @@ import { resolve } from 'path';
 // it records nothing, so that test can only ever count as SCHEDULED.
 // The gate's cases build their fixture specs from the text between the two
 // marker lines below, so keep the block self-contained and the markers intact.
+// LOCAL: arm the readiness-response record BEFORE the test body navigates.
+// An auto fixture sets up ahead of the body, so the listener is attached while
+// `page` is still on about:blank — which is the whole point.
+const _authReadyWatch = [async ({ page }, use) => {
+  authReadySeen = false;
+  const onResponse = (r) => {
+    if (AUTH_READY_REQUEST && r.url().includes(AUTH_READY_REQUEST)) authReadySeen = true;
+  };
+  page.on('response', onResponse);
+  await use();
+  page.off('response', onResponse);
+}, { auto: true }];
+
 // >>> render-witness
 const test = base.extend({
+  _authReadyWatch,
   renderWitness: async ({ page }, use, testInfo) => {
     // Records NOTHING at setup: the body's own call is the witness (#384).
     let recorded = false;
@@ -190,6 +204,18 @@ const AUTH_READY_REQUEST  = process.env.TEST_AUTH_READY_REQUEST  || null;
 // the login screen shares.
 const AUTH_SUCCESS_SELECTOR = process.env.TEST_AUTH_SUCCESS_SELECTOR || null;
 
+// LOCAL, absent upstream (Codex P2 on #253, reproduced before fixing).
+// `page.waitForResponse()` resolves only on a FUTURE response — Playwright does
+// not replay ones already received — and every caller arms it AFTER awaiting
+// `page.goto()`. So a readiness request that completes DURING navigation is
+// missed and the wait times out at LOAD_SETTLE_MS, failing S2/S3/S4 with
+// "never resolved" on a request that did in fact arrive. Measured: with
+// TEST_AUTH_READY_REQUEST=tokens.css, S4 failed at 25000ms.
+// The SELECTOR path has no such race — waitForSelector with state:'attached'
+// matches an element already present — which is why only this branch needs it.
+// The fix is a record armed at FIXTURE time, before the test body navigates.
+let authReadySeen = false;
+
 async function awaitAuthReady(page) {
   if (!AUTH_READY_SELECTOR && !AUTH_READY_REQUEST) {
     await page.waitForLoadState('networkidle', { timeout: LOAD_SETTLE_MS }).catch(() => {});
@@ -199,7 +225,11 @@ async function awaitAuthReady(page) {
     if (AUTH_READY_SELECTOR) {
       await page.waitForSelector(AUTH_READY_SELECTOR, { timeout: LOAD_SETTLE_MS, state: 'attached' });
     } else {
-      await page.waitForResponse((r) => r.url().includes(AUTH_READY_REQUEST), { timeout: LOAD_SETTLE_MS });
+      // Already arrived during navigation? Then the condition HAS resolved, and
+      // waiting for a second occurrence would hang on a one-shot request.
+      if (!authReadySeen) {
+        await page.waitForResponse((r) => r.url().includes(AUTH_READY_REQUEST), { timeout: LOAD_SETTLE_MS });
+      }
     }
     return 'proven';
   } catch {
