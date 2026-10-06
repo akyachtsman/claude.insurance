@@ -44,6 +44,16 @@ const json = (body: unknown, status = 200) =>
 
 // Every failure returns this one shape (FR-17). The page shows a quiet notice
 // and the rest of the Keep is unaffected; it never renders a null as an answer.
+// THE WIRE CONTRACT, and it is a contract: js/keep/logic/help.js consumes these
+// exact keys and these exact reason strings, and contract.test.mjs pins both
+// halves together. Each side was separately correct and separately tested in an
+// earlier draft while disagreeing about `retryAfter` (seconds vs minutes),
+// `usedRecords` (list vs count) and every reason name — which is how nav.js and
+// its stamper stayed broken through three correct-looking fixes on PR #251.
+//
+// Reasons the consumer knows: unavailable · rate_limited · incomplete ·
+// records_error · invalid · malformed. Anything else falls through to its
+// generic notice, so a new failure gets a NAME here and a line there, together.
 const unavailable = (reason: string, extra: Record<string, unknown> = {}) =>
   json({ answer: null, reason, ...extra });
 
@@ -117,8 +127,8 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) return unavailable("misconfigured");
-  if (!ANTHROPIC_API_KEY) return unavailable("no_provider_key");
+  if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) return unavailable("unavailable");       // consumer-known name
+  if (!ANTHROPIC_API_KEY) return unavailable("unavailable");  // FR-17: the client needs a notice, not a cause
 
   let payload: { question?: string };
   try { payload = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
@@ -171,13 +181,21 @@ Deno.serve(async (req: Request) => {
     // lockout with every refused attempt. Past this point the row STAYS,
     // whatever the provider does, because the call has been paid for.
     await admin.from("help_queries").delete().eq("id", slot.id);
-    return unavailable("rate_limited", { retryAfterMinutes: 60 });
+    return unavailable("rate_limited", { retryAfter: 3600 });  // SECONDS — the consumer builds its wait line from this
   }
 
   const topics = await loadGuide();
   if (!topics) return unavailable("unavailable");
 
-  const facts = await ownRecords(admin, owner);
+  // A read ERROR and an empty result must stay distinguishable: telling a client
+  // they hold no policies because a SELECT failed is the invented answer FR-12
+  // forbids, and the consumer has a separate notice for exactly this.
+  let facts: RecordFact[];
+  try {
+    facts = await ownRecords(admin, owner);
+  } catch {
+    return unavailable("records_error");
+  }
   const { system, messages } = buildPrompt({ question, topics, facts });
 
   let answer: string | null = null;
@@ -195,19 +213,21 @@ Deno.serve(async (req: Request) => {
     // is a realistic outcome rather than a theoretical one.
     // The reservation is NOT released on any path below: the call was made and
     // therefore billed, whatever came back.
-    if (res.stop_reason !== "end_turn") return unavailable(`stopped_${res.stop_reason}`);
+    if (res.stop_reason !== "end_turn") return unavailable("incomplete");
     // Extract by BLOCK TYPE, never content[0]: with thinking on, the first block
     // is a thinking block and content[0].text is undefined.
     answer = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim() || null;
   } catch {
-    return unavailable("provider_error");
+    return unavailable("unavailable");
   }
-  if (!answer) return unavailable("empty_answer");
+  if (!answer) return unavailable("incomplete");
 
   return json({
     answer,
     usedTopics: topics.map((t) => t.id),
-    usedRecords: facts.length,
-    reason: null,
+    // Display LINES, not a count: FR-11 is "name what you drew on" so the client
+    // can check it, and "3 records" is not checkable.
+    usedRecords: facts.map((f) => `${f.name} — ${f.label}: ${f.value}`),
+    reason: facts.length ? "answered" : "no_records",
   });
 });
