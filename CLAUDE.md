@@ -100,7 +100,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 |---|---|
 | Validate HTML | `npx html-validate index.html` |
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
-| Unit tests | `node --test $(find js -name '*.test.mjs')` |
+| Unit tests | `node --test $(find js supabase/functions -name '*.test.mjs')` |
 | Contrast guardrail | `node .github/scripts/check-contrast.js` |
 | Job bounds guard | `python3 .github/scripts/check-job-bounds.py` |
 | Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |

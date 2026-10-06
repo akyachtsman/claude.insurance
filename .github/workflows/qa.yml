@@ -157,7 +157,13 @@ jobs:
       # Explicit file list keeps discovery off the Playwright specs and off
       # node_modules under .github/scripts.
       - name: Unit tests
-        run: node --test $(find js -name '*.test.mjs')
+        # `js` AND `supabase/functions`: the Help desk's prompt builder is a Deno
+        # module, Deno is installed in neither this runner nor the agent sandbox,
+        # and that module is where feature 003's fact/advice boundary is written.
+        # A safety boundary whose only test nobody can execute is not tested.
+        # Node 22 strips TypeScript types natively, so its *.node.test.mjs twin
+        # imports the .ts unchanged — no build step, no second copy of the logic.
+        run: node --test $(find js supabase/functions -name '*.test.mjs')
 
       - name: Validate HTML
         run: npx --yes html-validate@11.5.6 index.html
