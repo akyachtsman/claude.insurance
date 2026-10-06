@@ -128,27 +128,51 @@ async function loadGuide(): Promise<HelpTopic[] | null> {
  *  resolved from their JWT — never by anything in the request body. Flattened to
  *  label/value pairs so the model receives VALUES, not a coverage summary it is
  *  invited to interpret (plan, Key decision 3, layer 2). */
+// ⚠️ COLUMN NAMES COME FROM THE TABLES, NOT FROM THE VIEWS' NESTED SHAPE.
+// This shipped selecting `assets.kind` and `policies.policy_number`; neither
+// exists (they are `type` and `number` — js/supabase.js renames them on the way
+// through, which is where the wrong names came from). PostgREST answers a
+// missing column with `{ data: null, error }`, the error was dropped on the
+// floor by `?? []`, and the function returned early before it ever read
+// policies — so EVERY client's records read as "nothing on file yet", on a
+// feature whose premise is answering from their records. schema.test.mjs is now
+// a gate on exactly this, and reproduced it before the fix.
+//
+// Errors are propagated rather than coerced to an empty list. A throw here lands
+// in the caller's try/catch and becomes `records_error`, which the client has its
+// own notice for — because "your SELECT failed" and "you hold no policies" are
+// different answers, and saying the second when the first is true is the invented
+// answer FR-12 forbids. The old code stated that rule in a comment one screen
+// down while doing the opposite here.
 async function ownRecords(admin: ReturnType<typeof createClient>, owner: string): Promise<RecordFact[]> {
   const facts: RecordFact[] = [];
-  const { data: entities } = await admin.from("entities").select("id, name, kind").eq("owner", owner);
-  for (const e of entities ?? []) {
+  const read = <T>(res: { data: T[] | null; error: { message: string } | null }, what: string): T[] => {
+    if (res.error) throw new Error(`${what}: ${res.error.message}`);
+    return res.data ?? [];
+  };
+
+  const entities = read(
+    await admin.from("entities").select("id, name, kind").eq("owner", owner), "entities");
+  for (const e of entities) {
     facts.push({ kind: "entity", name: e.name, label: "type", value: String(e.kind) });
   }
-  const ids = (entities ?? []).map((e: { id: string }) => e.id);
+  const ids = entities.map((e: { id: string }) => e.id);
   if (!ids.length) return facts;
 
-  const { data: assets } = await admin.from("assets").select("id, name, kind, value, entity_id").in("entity_id", ids);
-  for (const a of assets ?? []) {
-    facts.push({ kind: "asset", name: a.name, label: "type", value: String(a.kind) });
+  const assets = read(
+    await admin.from("assets").select("id, name, type, value, entity_id").in("entity_id", ids), "assets");
+  for (const a of assets) {
+    facts.push({ kind: "asset", name: a.name, label: "type", value: String(a.type) });
     if (a.value != null) facts.push({ kind: "asset", name: a.name, label: "value on file", value: `$${a.value}` });
   }
-  const assetIds = (assets ?? []).map((a: { id: string }) => a.id);
+  const assetIds = assets.map((a: { id: string }) => a.id);
   if (!assetIds.length) return facts;
 
-  const { data: policies } = await admin.from("policies")
-    .select("line, carrier, policy_number, renewal_date, premium_amount, asset_id").in("asset_id", assetIds);
-  const assetName = new Map((assets ?? []).map((a: { id: string; name: string }) => [a.id, a.name]));
-  for (const p of policies ?? []) {
+  const policies = read(await admin.from("policies")
+    .select("line, carrier, number, renewal_date, premium_amount, premium_period, asset_id")
+    .in("asset_id", assetIds), "policies");
+  const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
+  for (const p of policies) {
     const on = assetName.get(p.asset_id) ?? "an asset";
     facts.push({ kind: "policy", name: p.line, label: "covers", value: String(on) });
     if (p.carrier) facts.push({ kind: "policy", name: p.line, label: "carrier", value: p.carrier });
@@ -157,7 +181,7 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
     // data-scope paragraph listed it as disclosed. Reading a number back is the
     // plainest FR-8 fact there is, so the fix is to surface it, not to stop
     // selecting it — and the documented scope is now accurate either way.
-    if (p.policy_number) facts.push({ kind: "policy", name: p.line, label: "policy number", value: String(p.policy_number) });
+    if (p.number) facts.push({ kind: "policy", name: p.line, label: "policy number", value: String(p.number) });
     // Absent is stated as absent. `null` renewal is a real state in this schema
     // and the repo's rule is that it is never rendered as a confident value.
     facts.push({
@@ -165,7 +189,10 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
       value: p.renewal_date ? String(p.renewal_date) : "no renewal date on file",
     });
     if (p.premium_amount != null) {
-      facts.push({ kind: "policy", name: p.line, label: "premium", value: `$${p.premium_amount}` });
+      // The period is carried because "$2,400" alone is ambiguous between a year
+      // and a month, and a client reading a premium back needs to know which.
+      const per = p.premium_period ? ` / ${p.premium_period}` : "";
+      facts.push({ kind: "policy", name: p.line, label: "premium", value: `$${p.premium_amount}${per}` });
     }
   }
   return facts;
@@ -223,24 +250,29 @@ Deno.serve(async (req: Request) => {
   // insert would fail the NOT NULL rather than silently mis-attribute.
   if (slotErr || !slot) return unavailable("unavailable");
 
+  // EVERY exit from here until the provider call goes through `releaseAnd`, and
+  // nothing after it does. Nothing has been billed yet on this side of the line,
+  // so holding the row would let a transient failure eat the caller's hourly
+  // allowance and the shared daily one — leaving the feature rate-limited after
+  // its dependency recovered. Making it one helper rather than four open-coded
+  // deletes is what lets a test assert the rule instead of trusting it: see
+  // contract.test.mjs, which fails on a bare `unavailable(` in this region. Two
+  // of the four paths did not release before that test existed.
+  const releaseAnd = async (reason: string, extra: Record<string, unknown> = {}) => {
+    await admin.from("help_queries").delete().eq("id", slot.id);
+    return unavailable(reason, extra);
+  };
+
   const { count, error: countErr } = await admin.from("help_queries")
     .select("id", { count: "exact", head: true }).eq("owner", owner).gte("asked_at", since);
-  if (countErr) {
-    // Nothing has been billed, so release — same reasoning as the over-cap path
-    // below, which this previously contradicted by keeping the row. Keeping it
-    // meant 21 transient PostgREST errors in an hour locked the caller out for an
-    // hour having made zero model calls.
-    await admin.from("help_queries").delete().eq("id", slot.id);
-    return unavailable("unavailable");
-  }
-  if ((count ?? 0) > HOURLY_CAP) {
-    // Over the cap and nothing has been billed yet, so release the reservation.
-    // Keeping it would make a user who hammers the endpoint extend their own
-    // lockout with every refused attempt. Past this point the row STAYS,
-    // whatever the provider does, because the call has been paid for.
-    await admin.from("help_queries").delete().eq("id", slot.id);
-    return unavailable("rate_limited", { retryAfter: 3600 });  // SECONDS — the consumer builds its wait line from this
-  }
+  // A count that could not run has billed nothing — it must not cost the caller
+  // an hour. (21 transient PostgREST errors used to lock them out having made
+  // zero model calls.)
+  if (countErr) return await releaseAnd("unavailable");
+  // Over the cap, likewise: keeping the row would make a user who hammers the
+  // endpoint extend their own lockout with every refused attempt.
+  // SECONDS — the consumer builds its wait line from retryAfter.
+  if ((count ?? 0) > HOURLY_CAP) return await releaseAnd("rate_limited", { retryAfter: 3600 });
 
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { count: total, error: totalErr } = await admin.from("help_queries")
@@ -256,23 +288,26 @@ Deno.serve(async (req: Request) => {
   // Fails CLOSED, like the reservation: a cap that cannot be counted must never
   // read as "under the cap".
   if (totalErr || (total ?? 0) > DAILY_TOTAL_CAP) {
-    await admin.from("help_queries").delete().eq("id", slot.id);
-    return unavailable(totalErr ? "unavailable" : "rate_limited", totalErr ? {} : { retryAfter: 3600 });
+    return await releaseAnd(totalErr ? "unavailable" : "rate_limited", totalErr ? {} : { retryAfter: 3600 });
   }
 
   const topics = await loadGuide();
-  if (!topics?.length) return unavailable("unavailable");   // `[]` is truthy; see loadGuide
+  if (!topics?.length) return await releaseAnd("unavailable");   // `[]` is truthy; see loadGuide
 
   // A read ERROR and an empty result must stay distinguishable: telling a client
   // they hold no policies because a SELECT failed is the invented answer FR-12
-  // forbids, and the consumer has a separate notice for exactly this.
+  // forbids, and the consumer has a separate notice for exactly this. ownRecords
+  // throws on a query error rather than returning [] for precisely this reason.
   let facts: RecordFact[];
   try {
     facts = await ownRecords(admin, owner);
   } catch {
-    return unavailable("records_error");
+    return await releaseAnd("records_error");
   }
   const { system, messages } = buildPrompt({ question, topics, facts });
+
+  // ─── THE BILLING LINE. Past here the reservation STAYS, whatever comes back,
+  // because the call has been paid for. No `releaseAnd` below this point. ───
 
   let answer: string | null = null;
   try {

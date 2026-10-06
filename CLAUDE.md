@@ -219,13 +219,22 @@ profile**, never by listing a directory.
   sends the question the client typed, the `content/help-guide.json` corpus, and
   a **compact digest** of that client's own records to the Claude API to ground
   the answer. The digest is **exactly these columns** (`help-ask/index.ts`):
-  entities `name, kind`; assets `name, kind, value`; policies `line, carrier,
-  policy_number, renewal_date, premium_amount`. Policy numbers are in because
-  "read back what's on my file" is a question the desk is *for* — and until
-  2026-10-06 that column was **selected and then discarded**, so this paragraph
-  over-stated what crossed the boundary while the feature under-delivered. Both
-  halves fixed by surfacing it; re-check the claim against `ownRecords`'s
-  `facts.push` calls, not just its `select`. What this means in practice:
+  entities `name, kind`; assets `name, type, value`; policies `line, carrier,
+  number, renewal_date, premium_amount, premium_period`. Policy numbers are in
+  because "read back what's on my file" is a question the desk is *for* — and
+  until 2026-10-06 that column was **selected and then discarded**, so this
+  paragraph over-stated what crossed the boundary while the feature
+  under-delivered. Re-check this list against `ownRecords`'s `facts.push` calls,
+  not just its `select`.
+  ⚠️ **Take the names from the TABLES, not from the nested shape the views
+  consume.** This function shipped selecting `assets.kind` and
+  `policies.policy_number`; the columns are `type` and `number` (`js/supabase.js`
+  renames them on the way through, which is where the wrong names came from).
+  PostgREST answers a missing column with `{ data: null, error }`, the error was
+  discarded, and every client's records read as "nothing on file yet" — on a
+  feature whose premise is answering from their records. `supabase/functions/
+  help-ask/schema.test.mjs` is now a gate on it, and reproduced the bug before
+  the fix. What this means in practice:
   - It is **owner-scoped server-side**, from the JWT — never from the request
     body. The browser already holds those rows under RLS so sending them with the
     question would be simpler, and is the one shape that cannot be made safe: a

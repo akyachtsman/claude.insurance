@@ -111,3 +111,46 @@ test("a success payload shaped as the function sends it keeps its records and to
   assert.deepEqual(shaped.records, ["Personal auto — renews: 12 March 2027"]);
   assert.equal(shaped.answer, "Your auto policy renews on 12 March.");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE BILLING LINE. Between reserving the throttle slot and calling the model,
+// nothing has been billed, so every exit must release the reservation — or a
+// transient corpus/database failure eats the caller's hourly allowance AND the
+// shared daily one, and the feature stays rate-limited after its dependency
+// recovers. Two of the four pre-provider exits did not release; Codex found one.
+//
+// Asserted structurally rather than by eye: every such exit goes through
+// `releaseAnd`, so a bare `unavailable(` in that region is the defect itself.
+// ─────────────────────────────────────────────────────────────────────────────
+test("every exit between reserving the slot and calling the model releases the reservation", () => {
+  // The region runs from where the helper is DEFINED (which is where a slot
+  // exists to release) to the provider call. The exit just above it —
+  // `if (slotErr || !slot)` — is deliberately outside: the reservation itself
+  // failed there, so there is nothing to give back.
+  const helperAt = fnSrc.indexOf("const releaseAnd");
+  const bill = fnSrc.indexOf("messages.create(");
+  assert.ok(helperAt > 0, "releaseAnd is gone — the release rule has no single place to live");
+  assert.ok(bill > helperAt, "could not locate the provider call after the helper — did the parse break?");
+
+  // The helper's own body legitimately calls unavailable(); everything else must
+  // go through the helper.
+  const helperEnd = fnSrc.indexOf("};", helperAt) + 2;
+  const checked = fnSrc.slice(helperEnd, bill);
+
+  const bare = [...checked.matchAll(/return\s+unavailable\(\s*"(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(bare, [],
+    `these pre-provider exits return without releasing the reservation: ${JSON.stringify(bare)} — ` +
+    `use releaseAnd(...) instead, or the caller pays an hour of quota for a failure that cost nothing`);
+
+  assert.ok(/releaseAnd\(/.test(checked), "nothing in the region calls releaseAnd — did the parse break?");
+});
+
+test("nothing AFTER the model call releases the reservation", () => {
+  // The mirror: past the billing line the call has been paid for, so the row
+  // stays whatever comes back. A release here would hand back free retries on
+  // exactly the failures a caller can provoke.
+  const bill = fnSrc.indexOf("messages.create(");
+  assert.ok(bill > 0, "could not locate the provider call");
+  assert.ok(!/releaseAnd\(|help_queries"\)\s*\.delete\(/.test(fnSrc.slice(bill)),
+    "the reservation is released after the model call — that call was billed");
+});
