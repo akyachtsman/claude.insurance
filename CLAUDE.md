@@ -332,9 +332,15 @@ profile**, never by listing a directory.
   client's data. What it costs is spend: `HOURLY_CAP` is per ACCOUNT, so 20 paid
   asks per account an hour, and about twenty accounts exhaust the shared
   `DAILY_TOTAL_CAP` and refuse the desk to every real client for a day.
-  **Half-fixed in code:** `help-ask` now requires a `profiles` row (service-role
-  provisioned, i.e. broker-invited) before it will reserve a slot or spend
-  anything, so the help desk is invite-only in fact whatever the setting says.
+  **Half-fixed in code, and that half needs a migration to actually bite:**
+  `help-ask` requires a `profiles` row before it will reserve a slot or spend
+  anything. ⚠️ But `authenticated` holds INSERT on `profiles` with
+  `with check (id = auth.uid())`, so a self-signed-up caller can create that row
+  in one PostgREST call — gating on a row the client can write is not a gate.
+  `supabase/proposed/20261006_profiles_no_client_insert.sql` revokes it; safe
+  because nothing in `js/` inserts a profile and no trigger creates one (both
+  verified against the live project). Until it is applied the check is defence in
+  depth, not a boundary.
   **The other half is an owner action:** turn off "Allow new users to sign up"
   in Supabase Auth, or the Security card stays untrue. Deliberately NOT reworded
   to match the current setting — the wording describes the intended state, and

@@ -212,14 +212,28 @@ function renderFacts(facts: RecordFact[]): string {
   let dropped = 0;
   facts.forEach((f, i) => {
     if (i >= FACT_LIMITS.count || budget <= 0) { dropped += 1; return; }
-    const line = `- [${recordTag(i)}] ${clip(f.kind)}: ${clip(f.name)} — ${clip(f.label)}: ${clip(f.value)}`;
+    // ⚠️ EVERY CLIENT-WRITTEN VALUE IS JSON-ENCODED, which is a REDESIGN and not
+    // a fourth patch — `global.md` → *Review Rounds Have to Terminate*: "when the
+    // same mechanism fails again across rounds, that mechanism is in the wrong
+    // place". The mechanism that kept failing was *sanitise client text with a
+    // regex, then concatenate it into a line*, and it failed three passes running:
+    //   · round 1: the delimiter scrub was exact-match, so `</question >` escaped;
+    //   · the fix for that was a regex that backtracks catastrophically (14.8s on
+    //     a 100k name, against a ~2s CPU limit) — the fix introduced the next bug;
+    //   · and all along a newline in a NAME forged a whole second record line,
+    //     because the scrub only ever looked for one forbidden substring.
+    // Each patch defended the hole that had just been demonstrated. JSON.stringify
+    // ends the class instead: the value's boundary becomes syntactic rather than
+    // lexical, so no content can create structure — not a newline, not a
+    // delimiter, not a separator, not something nobody has thought of yet. The
+    // scrub and the flatten stay as defence in depth and for readability; they are
+    // no longer what makes this safe.
+    const q = (v: string) => JSON.stringify(clip(v));
+    const line = `- [${recordTag(i)}] ${clip(f.kind)} ${q(f.name)} ${q(f.label)}: ${q(f.value)}`;
     if (line.length > budget) { dropped += 1; return; }
     budget -= line.length + 1;
     lines.push(line);
   });
-  // Stated, not silent. "Nothing more on file" and "more on file than I was
-  // shown" are different answers, and this repo's rule is that absent data is
-  // never rendered as a confident statement in either direction.
   if (dropped) lines.push(`(${dropped} further record lines on file, not shown here)`);
   return "THEIR RECORDS\n" + lines.join("\n");
 }

@@ -254,10 +254,19 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // 20 paid asks an hour. About twenty such accounts exhaust DAILY_TOTAL_CAP and
   // the desk is refused to every real client for a day.
   //
-  // `profiles` rows are service-role provisioned (the broker invites), so
-  // requiring one makes this invite-only in fact and not only in the marketing
-  // copy. Turning sign-up off in the dashboard is the other half and is the
-  // owner's to do; this half holds even if it is ever turned back on.
+  // ⚠️ THIS CHECK ONLY HOLDS ONCE `supabase/proposed/20261006_profiles_no_client_insert.sql`
+  // IS APPLIED, and the first version of this comment claimed otherwise.
+  // `authenticated` currently holds INSERT on `public.profiles` with a
+  // `with check (id = auth.uid())` policy, so a self-signed-up caller can create
+  // the very row this reads — gating on a row the client can write is not a gate.
+  // Measured on the live project; found by a security review of the commit that
+  // added the check. That migration revokes the grant and drops the policy, which
+  // is safe because nothing in `js/` inserts a profile and no trigger creates one
+  // (verified both). Until it is applied this is defence in depth and not a
+  // boundary, which is why the migration is part of the same owner gate.
+  //
+  // Turning sign-up off in the dashboard is the other half and is the owner's to
+  // do; this half then holds even if it is ever turned back on.
   //
   // Returns the generic notice rather than a new reason: a stranger is owed
   // nothing more specific, and FR-17 means the client never sees a cause anyway.

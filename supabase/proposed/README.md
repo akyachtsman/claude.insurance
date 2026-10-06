@@ -15,6 +15,7 @@ same change that applies it.
 |---|---|
 | `20261005_enhancement_request_stage_guard.sql` | Closes a real authorization hole (below). Needs owner approval + `apply_migration`. |
 | `20261005_profiles_role_not_self_assignable.sql` | Closes a **live privilege escalation**: any signed-in client can set its own `profiles.role` to `broker`. Needs owner approval + `apply_migration`. |
+| `20261006_profiles_no_client_insert.sql` | **Security.** Revokes the client INSERT on `profiles`, without which `help-ask`'s invite check is bypassable in one PostgREST call. Needs owner approval + `apply_migration`. |
 | `20261006_help_queries.sql` | **Not a fix — a new table.** The state feature 003's help-desk throttle counts (FR-16). Nothing is insecure for want of it; the help desk simply cannot ship until it is applied. Needs owner approval + `apply_migration`. |
 
 ## 20261005_enhancement_request_stage_guard.sql
@@ -105,6 +106,33 @@ revoke removes capability the app never used.
 runs it, run the post-apply probe in the file's footer **as a client session**
 (service-role bypasses RLS and would report a false pass), and drop its row from
 the table above.
+
+## 20261006_profiles_no_client_insert.sql
+
+Revokes `insert` on `public.profiles` from `authenticated` and drops the
+`profiles insert own` policy.
+
+**Why.** `help-ask` refuses a caller with no `profiles` row, so that the Help
+desk's per-client spend cap is a per-INVITED-client cap — public sign-up is ON
+(`disable_signup: false`, measured 2026-10-06), so accounts are freely creatable
+and a per-account cap bounds nothing.
+
+⚠️ **That check does not hold until this is applied, and the first version of it
+claimed otherwise.** `authenticated` holds INSERT on `profiles` with a
+`with check (id = auth.uid())` policy, so `supabase.from("profiles").insert({ id: uid })`
+creates the very row the check looks for. Gating on a row the client can write is
+not a gate. Found by an automated security review of the commit that added it.
+
+**Why revoking is safe, verified not assumed:** nothing in `js/` inserts a
+profile (the only writes are a SELECT in `loadTree()` and `savePrefs()`'s UPDATE
+of two preference columns), and `pg_trigger` has no non-internal trigger on
+`auth.users` or `profiles` — this project has no `handle_new_user`, so a row
+appears only from an explicit insert. With such a trigger, revoking the client
+grant would have closed nothing.
+
+Distinct from `20261005_profiles_role_not_self_assignable.sql`: that one is
+privilege escalation on an existing row, this one is account creation. Either
+can be applied without the other.
 
 ## 20261006_help_queries.sql
 
