@@ -21,7 +21,12 @@ import { dirname, join } from "node:path";
 import { answerShape, FAILURE_NOTICE, ANSWER_REASONS } from "../../../js/keep/logic/help.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fnSrc = readFileSync(join(here, "index.ts"), "utf8");
+// handler.ts, not index.ts: the logic moved there so it could be EXECUTED
+// (see handler.test.mjs). A source scrape left pointing at the old file would
+// still parse, still pass, and assert nothing — which is the failure mode this
+// whole file exists to prevent, so the parse-health assertions below matter
+// more than ever.
+const fnSrc = readFileSync(join(here, "handler.ts"), "utf8");
 
 // Every `unavailable("x")` the function can return.
 const emitted = [...fnSrc.matchAll(/\bunavailable\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
@@ -145,14 +150,46 @@ test("every exit between reserving the slot and calling the model releases the r
   assert.ok(/releaseAnd\(/.test(checked), "nothing in the region calls releaseAnd — did the parse break?");
 });
 
-test("nothing AFTER the model call releases the reservation", () => {
-  // The mirror: past the billing line the call has been paid for, so the row
-  // stays whatever comes back. A release here would hand back free retries on
-  // exactly the failures a caller can provoke.
+test("past the model call, ONLY a provider HTTP error releases the reservation", () => {
+  // This test used to say "nothing after the model call releases", which was too
+  // coarse and asserted a wrong rule as if it were right. The line is not the
+  // call, it is whether the provider BILLED:
+  //
+  //   · an HTTP-status error (bad key, unknown model, exhausted credit, 429,
+  //     529) is a REJECTED request — no tokens, no charge — so the reservation
+  //     goes back, or the caller pays an hour of quota for the provider's
+  //     refusal, and 400 such failures take the desk down for everyone;
+  //   · a connection error or timeout carries no status, and the request may
+  //     have been served with the response lost, so billing is UNKNOWN and the
+  //     row stays;
+  //   · max_tokens, a refusal, an empty answer and a trailer-only reply all
+  //     produced output. Billed. The row stays.
   const bill = fnSrc.indexOf("messages.create(");
   assert.ok(bill > 0, "could not locate the provider call");
-  assert.ok(!/releaseAnd\(|help_queries"\)\s*\.delete\(/.test(fnSrc.slice(bill)),
-    "the reservation is released after the model call — that call was billed");
+  const after = fnSrc.slice(bill);
+
+  const releases = [...after.matchAll(/releaseAnd\(/g)];
+  assert.equal(releases.length, 1, `expected exactly one post-call release, found ${releases.length}`);
+
+  // It must be the status-guarded one, not just any release that happens to sit
+  // in the catch.
+  const guard = after.slice(0, releases[0].index);
+  assert.ok(/status[\s\S]{0,200}typeof status === "number"/.test(guard),
+    "the post-call release is not guarded by a provider HTTP status — a billed failure would refund quota");
+
+  // The three BILLED outcomes must each still return without releasing.
+  for (const path of [/stop_reason[\s\S]{0,120}?return (\w+)\("incomplete"/,
+                      /if \(!answer\) return (\w+)\("incomplete"/,
+                      /if \(!split\.answer\) return (\w+)\("incomplete"/]) {
+    const m = path.exec(after);
+    assert.ok(m, `could not locate a billed-outcome exit (${path}) — did the parse break?`);
+    assert.equal(m[1], "unavailable",
+      `a billed outcome returns via ${m[1]}(...) — output was generated, so the reservation must stand`);
+  }
+
+  // And no raw delete sneaking past the helper.
+  assert.ok(!/help_queries"\)\s*\.delete\(/.test(after),
+    "a raw delete after the model call bypasses the one place this rule is stated");
 });
 
 test("the daily cap derives its retryAfter instead of reusing the hourly 3600", () => {

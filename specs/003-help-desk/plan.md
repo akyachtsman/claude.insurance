@@ -23,9 +23,16 @@ is a permanently ambiguous record.
 
 So: the endpoint is **`help-ask`**, a new slug that also matches what the feature
 is called everywhere else after the rename. `desk-ask` stays unambiguously
-retired and its deletion stays a separate, closable owner item. JWT verification
-stays ON (unlike `notify-enhancement`), because this endpoint spends money per
-call and reads the caller's own records.
+retired and its deletion stays a separate, closable owner item.
+
+⚠️ **JWT verification is OFF at the gateway (`--no-verify-jwt`), revised
+2026-10-06.** This section first said it "stays ON ... because this endpoint
+spends money per call". That reasoning was wrong: the handler resolves the caller
+from their JWT and 401s before the first database write and long before the
+provider call, so the gateway flag adds no protection — while it CAN reject the
+CORS preflight that `functions.invoke` forces, which would make the feature
+permanently unreachable in a way FR-17 renders identically to "not deployed".
+`supabase/config.toml` now carries the flag so a redeploy cannot flip it back.
 
 ## Key decision 2 — records are read server-side, never sent by the client
 
@@ -109,7 +116,10 @@ id uuid pk, owner uuid not null default auth.uid() -> auth.users on delete casca
 asked_at timestamptz not null default now(), question text not null (btrim, <=500)
 ```
 
-RLS: select own, insert own, both `to authenticated`; column-level grants;
+RLS enabled with **no policies and no client grants at all** (revised 2026-10-06 — this
+line said `select own, insert own ... column-level grants`, which two review rounds removed:
+the insert grant made the aggregate cap a global DoS, and the select policy fenced
+nothing on a shared demo account). Service-role only;
 index on `(owner, asked_at)` for the throttle window. No update, no delete.
 
 ## Tasks

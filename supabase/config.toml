@@ -1,0 +1,25 @@
+# Supabase project config, versioned so a deploy flag is not a sentence in a
+# comment that the next person has to remember.
+#
+# `verify_jwt = false` for help-ask is NOT "no auth": handler.ts resolves the
+# caller from their JWT and returns 401 before the first database write and long
+# before the provider call, and handler.test.mjs asserts that a request with no
+# Authorization header never reaches the database. What the gateway flag adds is
+# a check on the CORS PREFLIGHT, which carries no Authorization header — so with
+# it on, a browser `functions.invoke` can fail before the handler ever runs, and
+# FR-17 renders that identically to "not deployed yet".
+#
+# Without this file the flag lived only in a comment and in the PR description:
+# any redeploy with default options (the Supabase MCP deploy tool defaults
+# verify_jwt to true) would have silently turned it back on, and the symptom
+# would have been the feature quietly not working.
+project_id = "bdsegmjcgfmgzuxwiplj"
+
+[functions.help-ask]
+verify_jwt = false
+
+# notify-enhancement is deployed the same way and for its own reasons — it
+# accepts a service-role caller as well as a signed-in one, and implements both
+# checks itself. Recorded here so the next deploy does not flip it either.
+[functions.notify-enhancement]
+verify_jwt = false

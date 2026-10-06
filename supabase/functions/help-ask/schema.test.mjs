@@ -24,7 +24,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fnSrc = readFileSync(join(here, "index.ts"), "utf8");
+// handler.ts, not index.ts: the logic moved there so it could be EXECUTED
+// (see handler.test.mjs). A source scrape left pointing at the old file would
+// still parse, still pass, and assert nothing — which is the failure mode this
+// whole file exists to prevent, so the parse-health assertions below matter
+// more than ever.
+const fnSrc = readFileSync(join(here, "handler.ts"), "utf8");
 const MIG = join(here, "..", "..", "migrations");
 const PROPOSED = join(here, "..", "..", "proposed");
 

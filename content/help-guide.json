@@ -117,7 +117,7 @@
       "title": "Security and privacy",
       "route": "#/keep/security",
       "nav": "Account menu \u2192 Security & privacy",
-      "body": "How your account is protected and who can see your records: access is invite-only, and your entities, assets and policies are visible to you and your licensed broker.",
+      "body": "How your account is protected and who can see your records: access is by broker invitation, and your entities, assets and policies are visible to you and your licensed broker. One exception, and the Help desk is it: when you ask a question here, your question and a summary of your own records are sent to our AI provider (Anthropic) to answer it. No other client's records are ever included.",
       "ask": "Who can see my information?"
     }
   ]

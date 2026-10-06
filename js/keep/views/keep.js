@@ -435,7 +435,13 @@ export function renderKeepAccount() {
 const SECURITY_CARDS = [
   { ic: "lock", t: "Encrypted in transit", b: "Everything you view and send travels over an encrypted HTTPS/TLS connection — never in the clear." },
   { ic: "shield", t: "Encrypted at rest", b: "Your records are stored in a database that is encrypted on disk, so the underlying files are unreadable if ever accessed." },
-  { ic: "user", t: "Private to you", b: "Row-level security means only you — and your licensed broker — can ever read your entities, assets and policies. No other client can see your data." },
+  // ⚠️ This card said "only you — and your licensed broker — can ever read your
+  // entities, assets and policies". Feature 003 made that false: the Help desk
+  // sends a digest of the asking client's own records to an AI provider to ground
+  // its answer. Stating it is not optional — the Keep's security page is where a
+  // client goes to find out exactly this, and the help corpus quotes it back.
+  { ic: "user", t: "Private to you", b: "Row-level security means only you and your licensed broker can read your entities, assets and policies. No other client can ever see your data." },
+  { ic: "spark", t: "The Help desk uses AI", b: "When you ask the Help desk a question, your question and a summary of your own records are sent to our AI provider (Anthropic) to answer it. Nothing else in the Keep sends your records anywhere, and no other client's records are ever included." },
   { ic: "mail", t: "Invite-only access", b: "Accounts exist only by broker invitation. There is no public sign-up to your portal." },
   { ic: "check", t: "Least privilege", b: "The public website can only submit a request — it can never read client data. Privileged keys stay on our servers and never reach your browser." },
   { ic: "briefcase", t: "Never sold", b: "Your information is used only to advise you on coverage. We never sell or share it for marketing." },

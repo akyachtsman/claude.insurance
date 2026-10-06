@@ -2459,6 +2459,13 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
 
   // 6. A real question resolves to an answer OR the notice — never to nothing,
   //    and never to the Looking… placeholder left standing.
+  //
+  //    Discard console noise from the ask HERE, scoped to this step, rather than
+  //    text-filtering at the end: a failed function request is logged by the
+  //    browser and is a handled state, but a filter broad enough to cover it also
+  //    hides a 404 on the corpus or a stylesheet. Everything logged before this
+  //    line was asserted strictly above.
+  consoleErrors.length = 0;
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
@@ -2488,13 +2495,17 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
       'An answer rendered without the broker channel — FR-8\'s remedy must not depend on the model').toHaveCount(1);
   }
 
-  // Console-error gate. pageErrors stays strict: a 404 from a not-yet-deployed
-  // function does NOT raise an uncaught exception, so anything here is a real
-  // defect. consoleErrors is cleared around the ask instead of text-filtered,
-  // for S9's reason — the browser logs a failed function request as a console
-  // error, and FR-17's whole point is that this is a HANDLED state, already
-  // asserted in step 6 by the notice being what rendered.
+  // Console-error gate. pageErrors stays strict throughout: a 404 from a
+  // not-yet-deployed function does NOT raise an uncaught exception, so anything
+  // there is a real defect.
+  //
+  // consoleErrors was TEXT-FILTERED over the whole test
+  // (`/help-ask|functions\/v1|Failed to load resource/`), which this comment
+  // already claimed it was not — and that last alternative swallowed a failed
+  // load of ANY resource: the corpus, a stylesheet, the module graph. Scoped
+  // clearing is the fix and S9 is the precedent: everything before the ask is
+  // asserted strictly, and only the ask's own request noise is discarded, since
+  // FR-17 makes that a HANDLED state already asserted in step 6.
   expect(pageErrors, `Uncaught page errors: ${pageErrors.join('; ')}`).toHaveLength(0);
-  expect(consoleErrors.filter(t => !/help-ask|functions\/v1|Failed to load resource/.test(t)),
-    `Unexpected console errors: ${consoleErrors.join('; ')}`).toHaveLength(0);
+  expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join('; ')}`).toHaveLength(0);
 });

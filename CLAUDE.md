@@ -258,7 +258,9 @@ profile**, never by listing a directory.
     this constraint, not an implementation detail.
   - **Spend is capped before the call, not after:** 20 asks per client per hour
     **and 400 across all clients per day**, reserved in `help_queries` *ahead* of
-    the model call and released only if nothing was billed. A failed model call
+    the model call and released if nothing was billed — which includes a provider
+    HTTP error (a rejected request generates no tokens), but NOT a timeout, where
+    billing is unknown and must resolve the same way as billed. A failed model call
     is still billed, so recording usage on success only is a bypass. A throttle
     that cannot count **fails closed**. The aggregate cap is not redundant: the
     per-client one is keyed on `owner`, and this file publishes three demo
@@ -313,6 +315,30 @@ profile**, never by listing a directory.
   express "this column may not change"). Needs owner approval. Verify by
   re-running the probe in that file's footer **as a client session**;
   service-role bypasses RLS and reports a false pass.
+- **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
+  (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
+  `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.
+  No trigger or policy in `supabase/migrations/` enforces invitation. So anyone
+  can create an account against this project, confirm a mailbox, and sign in —
+  and `js/main.js`'s Keep guard only requires a session.
+  **What it contradicts, in the product's own words:** the Security page card
+  "Invite-only access — Accounts exist only by broker invitation. There is no
+  public sign-up to your portal." (`js/keep/views/keep.js`), this file's own
+  "invite-only client portal", and `content/help-guide.json`'s security topic —
+  which the Help desk is grounded on, so the desk would repeat the claim to a
+  client who asked.
+  **Blast radius is narrow but not nil.** RLS keys every table on
+  `owner = auth.uid()`, so a self-made account sees an empty Keep and no other
+  client's data. What it costs is spend: `HOURLY_CAP` is per ACCOUNT, so 20 paid
+  asks per account an hour, and about twenty accounts exhaust the shared
+  `DAILY_TOTAL_CAP` and refuse the desk to every real client for a day.
+  **Half-fixed in code:** `help-ask` now requires a `profiles` row (service-role
+  provisioned, i.e. broker-invited) before it will reserve a slot or spend
+  anything, so the help desk is invite-only in fact whatever the setting says.
+  **The other half is an owner action:** turn off "Allow new users to sign up"
+  in Supabase Auth, or the Security card stays untrue. Deliberately NOT reworded
+  to match the current setting — the wording describes the intended state, and
+  the config is what is wrong.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
