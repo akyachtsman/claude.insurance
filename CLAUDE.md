@@ -107,6 +107,8 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
+| Python compiles clean | `python3 .github/scripts/check-py-warnings.py` |
+| ui-suite env parity | `python3 .github/scripts/check-ui-suite-env.py --kit-dir .github/scripts/ui-tests` |
 
 **Required watchers (`.github/workflow-ref-required.json`).** The guard checks
 two different things and only that file supplies the second: rule 1 is that
@@ -216,6 +218,37 @@ goes red when that happens, so the date above matters.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
+### Auth-gate readiness: proven, not windowed (wired 2026-10-06)
+
+`test.md` → *Playwright* makes "no auth gate found" a **window** unless the
+project turns it into a proof: the kit settles, looks, and reports absence, and
+absence at time T is not absence at T+1 — so an app whose gate-deciding request
+is still in flight produces a green on auth that was never exercised.
+
+This repo had the defect in its plumbed-through form, which is worse than not
+having the feature: `.github/scripts/ui-tests/tests/app.spec.js` already carried
+`awaitAuthReady()` reading `TEST_AUTH_READY_SELECTOR` / `TEST_AUTH_READY_REQUEST`,
+and **neither `qa.yml` nor the `ui-suite` composite passed them**, so the
+function could only ever take its `'windowed'` branch. The code's own comment
+promises *"A CONFIGURED CONDITION THAT NEVER RESOLVES IS LOUD, not a silent
+fallback"* — a promise it could not keep, because nothing could configure it.
+Found by `check-ui-suite-env.py`, which exists for exactly this (#320), on its
+first run here.
+
+Now wired: `qa.yml` passes `vars.TEST_AUTH_READY_SELECTOR`,
+`vars.TEST_AUTH_READY_REQUEST` and `vars.TEST_AUTH_SUCCESS_SELECTOR` into the
+composite. They are **repository variables, not secrets** — a masked selector is
+unreadable in a failure message.
+
+⚠️ **Still unset, so the answer is still `windowed` — the plumbing is fixed, the
+proof is not.** To get a decided answer, set as repository *variables*:
+`TEST_AUTH_READY_SELECTOR` to a selector matching **either** outcome (the login
+card `.k-authcard` **or** the authenticated shell `.k-h1`) — one naming only the
+gate times out on every signed-in run — and optionally
+`TEST_AUTH_SUCCESS_SELECTOR` to something only the signed-in view shows (`.k-h1`),
+which S2 then requires visible after submitting the credential. A configured
+condition that never resolves FAILS rather than falling back, by design.
+
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
 - **Origin-aware back (always):** any back / return / cancel control MUST return the user to the page they actually navigated *from*, not a hardcoded destination. The router records the previous route; back controls navigate to it, falling back to the hierarchical parent only when there's no prior in-app page (e.g. a deep link or fresh load). Never assume the parent in the breadcrumb is where the user came from (they may have arrived from a notification, search, or the documents view). Applies to every new feature or button.
@@ -312,7 +345,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | S5–S9 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S9 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
-| `check-contrast.js` carries `css/tokens.css` | This repo's design contract predates the `styles/` Repo Structure Standard. Upstream's path is **kept alongside**, not replaced, so the file stays a superset and the next refresh diffs cleanly. Reported upstream: `CANDIDATES` should be configurable. |
+| ~~`check-contrast.js` carries `css/tokens.css`~~ **RESOLVED — adopted upstream** | No longer a divergence. The template now checks `styles/tokens.css` **or** `css/tokens.css` by default and takes `--tokens <file>` for anything else, which is exactly what was reported. Row kept only so the next refresh does not re-add it as a finding; delete it after one more sync. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
@@ -339,11 +372,19 @@ table is reasoning from a six-week-old rulebook:
 | `test.md` → *Playwright* | 2026-09-24 |
 | `git.md` → *Fallback reviewer when Codex is down* | 2026-09-29 |
 
-This was established from the **stamps in the live directive text**, not from a
-commit diff: `claude.directives` is not in this session's GitHub scope, so the
-SHA delta could not be computed from here and the per-section provenance
-archaeology that `/audit-repo` asks for could not be run on those files. The
-stamps are sufficient to prove staleness; they do not tell you what else moved.
+⚠️ **The sentence that used to sit here was wrong, and wrong in a way
+`global.md` names explicitly.** It read: *"`claude.directives` is not in this
+session's GitHub scope, so the SHA delta could not be computed from here."* It
+can be. `claude.directives` is a **public** repo, and `global.md` →
+*Repository Scope* draws the line this confused: **ACT scope** is hard-limited
+to this session's repo, **READ scope is unrestricted for public repos**, and
+that section says in terms *"NEVER claim a public repo 'can't be seen' — that
+confuses ACT scope with READ scope."* `/refresh-repo` Phases 2–3 run over git
+transport for exactly this reason. Verified 2026-10-06: one `add_repo` call
+reported read access already available, a shallow clone succeeded, and the
+file-level delta came back in one `git diff`. What is genuinely unavailable for
+an unattached repo is the **GitHub API** surface — issues, PRs, the github MCP
+— never git reads.
 Two consequences already found and handled: *Diagrams & connectors* duplicates
 this repo's local connector standard (now deferring to it, with two missing
 provisions restored), and *Charts & data display* mandates the native `dataviz`

@@ -63,9 +63,12 @@ jobs:
       - uses: ./.github/actions/secret-scan
 
       # ── Contrast guardrail ───────────────────────────────────────────────────
-      # WCAG AA check against css/tokens.css (this project's design tokens — this
-      # repo predates the styles/ Repo Structure Standard; check-contrast.js
-      # carries BOTH paths as candidates, so it is a superset, not a fork).
+      # WCAG AA check against this project's design tokens — styles/tokens.css or
+      # css/tokens.css by default; elsewhere, append `--tokens <file>` (repeat it
+      # per theme file). Exits with a notice (no failure) until /design-intake
+      # creates tokens.css.
+      # This repo uses css/tokens.css, which UPSTREAM NOW CARRIES BY DEFAULT — the
+      # divergence that used to live in CLAUDE.md is adopted, not local any more.
       - name: Contrast guardrail (WCAG AA)
         run: node .github/scripts/check-contrast.js
 
@@ -94,6 +97,26 @@ jobs:
         # localhost server, so the page that broke is never opened there.
         # Deliberately conservative: it under-reports rather than cry wolf.
         run: node .github/scripts/check-undefined-calls.js
+
+      - name: Tracked Python compiles without warnings
+        # A `\` in a plain (non-raw) docstring is invisible on 3.11, a
+        # SyntaxWarning on 3.12, and a SyntaxError on 3.15 — at which point the
+        # guard carrying it stops running and stops checking. This compiles every
+        # tracked .py with warnings promoted to errors, so the class cannot come
+        # back silently on a future interpreter. Cheap: no imports, no execution.
+        run: python3 .github/scripts/check-py-warnings.py
+
+      - name: ui-suite composite env parity
+        # The composite's viewport checks IMPORT the Playwright config, so a
+        # variable added to its run step and not to the check steps makes the
+        # check read a DIFFERENT config from the one the suite runs: green check,
+        # different run. This compares the steps, and checks every process.env
+        # read in the kit is wired from an input. A variable that genuinely
+        # arrives another way goes in .github/ui-suite-env-exempt.json as
+        # {"NAME": "how it arrives"}, never in the script, so the next template
+        # refresh keeps it. --kit-dir is the same UI_TESTS_DIR the ui-suite runs:
+        # a moved kit left the guard scanning the default (Codex, #395).
+        run: python3 .github/scripts/check-ui-suite-env.py --kit-dir "$UI_TESTS_DIR"
 
       - name: Workflow cross-reference guard
         # Every `workflow_run.workflows:` entry must name a real workflow. GitHub
@@ -372,6 +395,12 @@ jobs:
           app-url: http://localhost:8080
           test-auth-credential: ${{ secrets.TEST_AUTH_CREDENTIAL }}
           test-auth-email: ${{ secrets.TEST_AUTH_EMAIL }}
+          # VARIABLES, not secrets: selectors and a URL substring, and a masked one
+          # is unreadable in a failure message. Empty keeps the windowed answer (#320)
+          # and S2 reading the gate clearing as success (#379).
+          test-auth-ready-selector: ${{ vars.TEST_AUTH_READY_SELECTOR }}
+          test-auth-ready-request: ${{ vars.TEST_AUTH_READY_REQUEST }}
+          test-auth-success-selector: ${{ vars.TEST_AUTH_SUCCESS_SELECTOR }}
           artifact-name: playwright-results-local
           app-pages: ${{ vars.APP_PAGES }}
           start-local-server: 'true'
