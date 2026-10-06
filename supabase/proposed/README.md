@@ -141,23 +141,36 @@ history erasable. Only the service-role key, which bypasses RLS, can prune it.
 project, so a table with flawless RLS and no `GRANT` returns 42501 on every
 call — RLS narrows privileges, it never confers them. (Column-form precedent:
 `20260624171640_public_leads_and_rule_settings.sql` grants `anon` INSERT on a
-column list for exactly this reason.) Scoping the INSERT grant to `(question)`
-alone is what keeps `owner` and `asked_at` on their defaults:
+column list for exactly this reason.) The client's privilege is
+**read-your-own-rows and nothing else**:
 
 ```sql
 grant select (id, owner, asked_at, question) on public.help_queries to authenticated;
-grant insert (question) on public.help_queries to authenticated;
+grant select, insert, delete on public.help_queries to service_role;
 ```
 
-A column the client holds no INSERT privilege on cannot be named in the
-statement at all, so the browser can neither forge the row's owner nor backdate
-it out of the throttle window. `help_queries insert own`'s
-`with check (owner = auth.uid())` blocks a forged owner independently — two
-layers, same reasoning as the append-only surface above. Both policies are
-scoped `to authenticated`, because an unscoped policy also applies to `anon`.
+⚠️ **The client INSERT grant was removed on 2026-10-06, before this file ever
+shipped.** The first draft granted `insert (question)` to `authenticated` and
+argued carefully for the column scoping. The grant was never needed — nothing in
+`js/` writes this table, and the only writer is the `help-ask` Edge Function
+under the service-role key, which bypasses RLS and grants alike.
+
+What turned dead privilege into a defect was the function's **aggregate** daily
+cap, added the same day. Under the per-owner cap, a direct PostgREST insert was
+bounded self-harm: the rows counted against your own hour, so the attack was to
+lock yourself out. The aggregate cap counts *everyone's* rows — so the same call
+became a cheap global denial of service: one insert of `DAILY_TOTAL_CAP + 1`
+rows, no provider cost, and the help desk is off for every client for 24 hours.
+Two independent security reviews flagged it within a minute of that cap being
+pushed. Filtering the count on a server-only column would also work; removing the
+write surface is better than counting around it.
+
+The only policy left is `help_queries select own`. There is no INSERT, UPDATE or
+DELETE policy **and** no matching grant — both layers — and it is scoped
+`to authenticated`, because an unscoped policy also applies to `anon`.
 
 **One consequence for T5.** `default auth.uid()` evaluates to NULL under the
-service-role key and `owner` is `not null`, so a service-role insert must pass
+service-role key and `owner` is `not null`, so the function's insert must pass
 `owner` explicitly — the caller id resolved from the JWT per **FR-14**, never a
 value from the request body. Only a client-session insert gets the owner for
 free from the default.

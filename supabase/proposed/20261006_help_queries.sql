@@ -26,23 +26,42 @@
 -- table-wide must not by itself make history erasable. Only the service-role
 -- key, which bypasses RLS, can prune this table.
 --
--- WHY COLUMN-LEVEL GRANTS. Supabase's auto-expose is off in this project, so a
--- table with flawless RLS and no GRANT returns 42501 on every call: RLS narrows
--- privileges, it never confers them. (Precedent for the column form:
--- 20260624171640_public_leads_and_rule_settings.sql grants anon INSERT on a
--- column list for exactly this reason; 20260628083000_enhancement_requests_grants.sql
--- is the table-level form.) Scoping the INSERT grant to (question) alone is what
--- keeps `owner` and `asked_at` on their defaults: a column the client holds no
--- INSERT privilege on cannot be named in the statement at all, so the browser
--- can neither forge the row's owner nor backdate it out of the throttle window.
--- The `with check (owner = auth.uid())` policy below independently blocks a
--- forged owner — two layers, same reason as above.
+-- ⚠️ WHY THE CLIENT HAS NO INSERT EITHER — CHANGED 2026-10-06, and the reasoning
+-- matters because the first draft of this file granted `insert (question)` to
+-- `authenticated` and argued carefully for the column scoping.
+--
+-- The grant was never needed: NOTHING in js/ writes this table. The only writer
+-- is the help-ask Edge Function under the service-role key, which bypasses both
+-- RLS and these grants. The grant existed because the table was designed as
+-- "client-writable, carefully constrained" rather than "server-only".
+--
+-- What made it a defect rather than dead privilege is the function's AGGREGATE
+-- daily cap, added the same day. The per-owner cap made a direct PostgREST
+-- insert bounded self-harm — the rows counted against your own hour, so the
+-- attack was to lock yourself out. The aggregate cap counts EVERYONE's rows, so
+-- the same insert became a cheap global denial of service: one PostgREST call
+-- with 401 rows, no provider cost, and the help desk is off for every client for
+-- 24 hours. Two independent security reviews flagged it within a minute of the
+-- cap being pushed.
+--
+-- Filtering the aggregate count on a server-only column would also work. Taking
+-- the grant away is better: it removes the write surface instead of counting
+-- around it, and leaves nothing for a later migration to re-widen by accident.
+--
+-- WHY GRANTS AT ALL, for the SELECT that remains. Supabase's auto-expose is off
+-- in this project, so a table with flawless RLS and no GRANT returns 42501 on
+-- every call: RLS narrows privileges, it never confers them. (Precedent for the
+-- column form: 20260624171640_public_leads_and_rule_settings.sql grants anon
+-- INSERT on a column list for exactly this reason;
+-- 20260628083000_enhancement_requests_grants.sql is the table-level form.)
 --
 -- NOTE FOR T5 (supabase/functions/help-ask). `default auth.uid()` evaluates to
--- NULL under the service-role key and `owner` is NOT NULL, so a service-role
+-- NULL under the service-role key and `owner` is NOT NULL, so the function's
 -- insert MUST pass `owner` explicitly — the caller id resolved from the JWT, per
--- FR-14, never a value from the request body. Only a client-session insert gets
--- the owner for free from the default.
+-- FR-14, never a value from the request body. With the client INSERT grant gone
+-- this is the ONLY way a row is ever created, so the default is now decorative;
+-- it is kept because dropping NOT NULL or the default would weaken the row shape
+-- for no gain.
 --
 -- NOT APPLIED. CLAUDE.md requires explicit owner approval for migrations; this
 -- file is the plan's T13 gate. Move it to supabase/migrations/ in the same
@@ -70,26 +89,33 @@ alter table public.help_queries enable row level security;
 -- which is the safe direction for a table the client can read back.
 grant select (id, owner, asked_at, question) on public.help_queries to authenticated;
 
--- INSERT is scoped to `question` and nothing else. `owner` and `asked_at` are
--- absent from this list by design — see the header. There is deliberately NO
--- update and NO delete grant: the throttle is only sound if a client cannot
--- delete or backdate its own history.
-grant insert (question) on public.help_queries to authenticated;
+-- NO INSERT, NO UPDATE, NO DELETE for `authenticated` — see the header. The
+-- client's privilege on this table is read-your-own-rows and nothing else, so
+-- the throttle's history is not merely append-only to a client, it is untouchable
+-- by one.
+--
+-- The writer is the service role. Supabase grants it table privileges in the
+-- public schema by default (every other table here relies on that, and
+-- notify-enhancement writes under the same key), but it is stated explicitly
+-- rather than inherited: this is the only path that writes the table, and an
+-- inherited privilege is one a platform default change can remove silently.
+grant select, insert, delete on public.help_queries to service_role;
+-- DELETE is for the function's own release paths — over the cap, or a count that
+-- could not run — where nothing has been billed and the reservation must go back.
 
--- RLS is enabled above, so the table is default-deny; these are the only two
--- paths out of it. Both are scoped `to authenticated` — an unscoped policy
+-- RLS is enabled above, so the table is default-deny; this is the only path out
+-- of it for a client. It is scoped `to authenticated` — an unscoped policy
 -- applies to every role, `anon` included, and the help desk sits behind the
--- Keep's auth gate (FR-1). There is deliberately no UPDATE and no DELETE
--- policy, which is the second of the two append-only layers.
+-- Keep's auth gate (FR-1). There is deliberately no INSERT, UPDATE or DELETE
+-- policy: with no matching grant either, that is both layers.
 create policy "help_queries select own" on public.help_queries
   for select to authenticated using (owner = auth.uid());
-create policy "help_queries insert own" on public.help_queries
-  for insert to authenticated with check (owner = auth.uid());
--- The SELECT policy is load-bearing for writes too, not just reads: PostgREST
--- returns the inserted row by default, and `insert ... returning` under RLS
--- needs a SELECT policy that admits the new row. Dropping "help_queries select
--- own" as "the client never reads its history" would make every insert appear
--- to fail. The new row's owner is auth.uid(), so the policy admits it.
+-- NOTE: the SELECT policy is NOT load-bearing for the function's writes, though
+-- an earlier version of this comment said it was. `insert ... returning` needs a
+-- SELECT policy that admits the new row only when the inserter is subject to
+-- RLS; the function inserts under the service-role key, which bypasses RLS for
+-- the whole statement, RETURNING included. This policy exists purely so a client
+-- can read its own history back.
 
 -- The throttle counts one owner's rows inside a time window, so (owner,
 -- asked_at) is the access path and this index is not optional at the scale a
@@ -118,25 +144,36 @@ create index if not exists help_queries_owner_asked_at_idx
 --   there they SUCCEED and wipe or rewrite the log. Assert on SQLSTATE, not on
 --   message text.)
 --
---   1. Client inserts its own row — expect SUCCESS, 1 row:
---        insert into public.help_queries (question)
---          values ('How do I add a business entity?');
---      then confirm the defaults filled in the caller, not the client:
---        select owner = auth.uid() as owner_is_me, asked_at is not null
+--   0. SEED a row to probe against. The client can no longer write this table,
+--      so do this ONCE as service-role (or by asking a question through the
+--      deployed function) before running steps 1-5 as a client:
+--        insert into public.help_queries (owner, question)
+--          values ('<the client uuid>', 'probe row');
+--      then confirm the function's own shape held:
+--        select owner is not null, asked_at is not null
 --          from public.help_queries order by asked_at desc limit 1;   -- t, t
 --
---   2. Client forges the owner — expect FAILURE, SQLSTATE 42501
---      insufficient_privilege (the INSERT grant does not cover `owner`):
+--   1. Client inserts — expect FAILURE, SQLSTATE 42501 insufficient_privilege
+--      (there is no INSERT grant for `authenticated` at all):
+--        insert into public.help_queries (question)
+--          values ('How do I add a business entity?');
+--      Via PostgREST the equivalent call is
+--        supabase.from("help_queries").insert({ question: "..." })
+--      ⚠️ THIS STEP IS INVERTED FROM THE FIRST DRAFT, where it expected SUCCESS.
+--      A client insert that succeeds means the INSERT grant came back, and the
+--      function's AGGREGATE daily cap counts every row in the table — so one
+--      PostgREST call with DAILY_TOTAL_CAP+1 rows turns the help desk off for
+--      every client for 24 hours, at no provider cost. Assert the failure.
+--
+--   2. Client forges an owner — expect FAILURE, 42501, for the same reason:
 --        insert into public.help_queries (owner, question)
 --          values ('00000000-0000-0000-0000-000000000000', 'forged');
---      Via PostgREST the equivalent call is
---        supabase.from("help_queries").insert({ owner: "<other uuid>", question: "forged" })
---      Both the column grant and "help_queries insert own" reject it; the grant
---      is what rejects it first.
+--      Rejected before any policy is consulted, because the privilege is absent
+--      rather than narrowed.
 --
 --   3. Client deletes — expect FAILURE, 42501 (no DELETE grant):
 --        delete from public.help_queries;
---      THEN assert the step-1 row is still present:
+--      THEN assert the step-0 row is still present:
 --        select count(*) from public.help_queries;   -- unchanged
 --      That second assertion is the one that matters. If the DELETE grant were
 --      ever restored, the absent DELETE policy would turn this into a 0-row
@@ -149,10 +186,10 @@ create index if not exists help_queries_owner_asked_at_idx
 --      0-row no-op, so assert asked_at is unchanged, not merely that the call
 --      errored.
 --
---   5. Cross-owner read (needs a SECOND client session) — expect the step-1 row
+--   5. Cross-owner read (needs a SECOND client session) — expect the step-0 row
 --      to be invisible:
 --        select count(*) from public.help_queries;   -- 0, or that session's own
---      rows only; never the row inserted in step 1.
+--      rows only; never the row seeded in step 0.
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- TWO FOLLOW-UPS this migration deliberately does NOT carry, recorded here so
@@ -167,14 +204,9 @@ create index if not exists help_queries_owner_asked_at_idx
 --      so in any processing record. Dropping `question` entirely is the cheaper
 --      answer if nobody is actually going to read it.
 --
---   B. THE INSERT GRANT IS NOT RATE-LIMITED BY THIS TABLE. A client holds
---      `insert (question)` through PostgREST, so they can add rows directly,
---      without going through the Edge Function and without costing the owner a
---      provider call. That is bounded self-harm — every such row counts against
---      THEIR OWN hourly cap, so the attack is to lock yourself out — but it does
---      grow storage, and it feeds the aggregate daily cap, which is shared. The
---      grant cannot simply be revoked: the function inserts under the service
---      key, but `help_queries insert own` + the column grant are what stop a
---      client from inserting rows attributed to someone else, and the SELECT
---      policy is genuinely required for `insert … returning`. Revisit with a
---      per-owner row cap or a statement trigger if it is ever abused.
+--   B. ~~THE CLIENT INSERT GRANT~~ — RESOLVED, in this file, before it shipped.
+--      This note used to say the grant was bounded self-harm and could not
+--      simply be revoked. Both halves were wrong: the aggregate daily cap made
+--      it a cheap global DoS, and the grant was never needed, because nothing in
+--      js/ writes this table and the function writes as service_role. Revoked.
+--      Kept here as a record of the reasoning, not as an open item.

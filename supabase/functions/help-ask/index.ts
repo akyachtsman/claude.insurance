@@ -245,6 +245,14 @@ Deno.serve(async (req: Request) => {
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { count: total, error: totalErr } = await admin.from("help_queries")
     .select("id", { count: "exact", head: true }).gte("asked_at", dayAgo);
+  // Counts EVERY row in the window, which is only safe because `authenticated`
+  // holds no INSERT on this table — the migration revoked it for exactly this
+  // reason. With a client insert grant, one PostgREST call writing
+  // DAILY_TOTAL_CAP+1 rows would turn the desk off for every client for a day at
+  // no provider cost, which is a far better attack than the per-owner cap's
+  // "lock yourself out". If that grant ever comes back, this count has to filter
+  // on something the client cannot write.
+  //
   // Fails CLOSED, like the reservation: a cap that cannot be counted must never
   // read as "under the cap".
   if (totalErr || (total ?? 0) > DAILY_TOTAL_CAP) {
