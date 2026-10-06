@@ -14,6 +14,7 @@ import {
   renderKeepRequest, renderKeepRequests,
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./keep/views/keep.js";
+import { renderKeepHelp } from "./keep/views/help-view.js";
 import { getSession, ensureData } from "./supabase.js";
 import { createNavStack, createHistorySignal } from "./nav.js";
 
@@ -130,6 +131,8 @@ async function dispatchKeep(rest) {
       return renderKeepAccount();
     case "security":
       return renderKeepSecurity();
+    case "help":
+      return renderKeepHelp();
     default:
       return renderKeepLanding();
   }

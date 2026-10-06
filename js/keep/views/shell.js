@@ -393,6 +393,7 @@ function accountMenu() {
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
     el("a", { attrs: { href: "#/keep/security" } }, [icon("shield", { size: 18 }), el("span", { text: "Security & privacy" })]),
     el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
+    el("a", { attrs: { href: "#/keep/help" } }, [icon("spark", { size: 18 }), el("span", { text: "Help" })]),
     el("div", { class: "k-menu__sep" }),
     signOutButton("k-menu__item k-menu__danger"),
   ]);
@@ -442,6 +443,7 @@ const KEEP_LABELS = {
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
   "#/keep/requests": "my requests",
+  "#/keep/help": "help",
   "#/keep/account": "account",
   "#/keep/security": "security",
 };

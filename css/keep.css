@@ -723,6 +723,42 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 .k-prq__subj { font: 700 15px var(--font-display); color: var(--color-text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-prq__wait { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 6px; }
 
+/* ── Help desk (#/keep/help) ─────────────────────────────────────────────────── */
+.k-help__chips { margin-bottom: var(--space-5); }
+/* The ask box. `align-items: stretch` so the button matches the input's height
+   without either carrying a hard-coded one. */
+.k-help__form { display: flex; align-items: stretch; gap: var(--space-3); }
+.k-help__input { flex: 1; min-width: 0; min-height: 54px; border: 2px solid var(--color-border); border-radius: var(--radius-md); padding: 0 var(--space-4); font: 600 16px var(--font-sans); color: var(--color-text-primary); background: #fbfaff; }
+.k-help__input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
+.k-help__input[disabled] { opacity: .6; }
+.k-help__ask { flex: none; border-radius: var(--radius-md); }
+.k-help__ask[disabled] { opacity: .55; cursor: not-allowed; transform: none; }
+.k-help__out { margin-top: var(--space-5); }
+/* The question, echoed above its answer — a second ask must not leave the reader
+   guessing which one they are looking at. */
+.k-help__q { font: 700 15px var(--font-display); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+/* pre-line, not nowrap: the answer may carry line breaks between points, and
+   collapsing them runs separate points into one paragraph (help-view.js says so
+   at the call site too). */
+.k-help__a { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5) var(--space-5); box-shadow: var(--shadow-lg); }
+.k-help__a p { font: 500 16px var(--font-sans); line-height: 1.6; color: var(--color-text-primary); white-space: pre-line; }
+/* What it drew on (FR-11). A column so a long topic title cannot collide with
+   the record line beside it. */
+.k-help__src { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: var(--space-4); }
+.k-help__src .k-lbl { margin-bottom: 2px; }
+/* FR-10's label. Muted but never hidden — it ships on every answer and as the
+   page's opening line. */
+.k-help__ai { font: 600 13px var(--font-sans); color: var(--color-text-secondary); margin-top: var(--space-4); line-height: 1.5; }
+.k-help__out > .k-help__ai:only-child { margin-top: 0; }
+/* The broker hand-off (FR-8), tinted so it reads as the next step rather than as
+   more answer. */
+.k-help__broker { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); background: var(--color-accent-light); border-radius: var(--radius-lg); padding: 14px 18px; margin-top: var(--space-4); }
+.k-help__broker p { font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
+/* A failure the client can act on, not a stack trace. */
+.k-help__notice { display: flex; align-items: flex-start; gap: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 14px 18px; }
+.k-help__notice .icon { color: var(--color-gap); flex: none; margin-top: 2px; }
+.k-help__notice p { font: 600 14px var(--font-sans); color: var(--color-text-primary); line-height: 1.5; }
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
   .k-pg { grid-template-columns: 1fr 1fr; }
@@ -732,6 +768,8 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
   .k-eband__who { flex-basis: 100%; }
   .k-eband__hero { text-align: left; }
   .k-search__in { width: 160px; }
+  .k-help__form { flex-direction: column; }
+  .k-help__ask { align-self: flex-start; }
 }
 @media (max-width: 480px) {
   .k-search__in { width: 44px; padding-right: 0; }

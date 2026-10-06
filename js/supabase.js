@@ -391,6 +391,57 @@ export async function addEnhancementRequest({ subject, message, policyId, assetI
   return { ok: true, id: data.id };
 }
 
+// ── Help desk (feature 003) ─────────────────────────────────────────────────
+// Asks the desk-ask Edge Function. Sends ONLY the question: the function reads
+// this client's records server-side, scoped to the owner id it resolves from the
+// JWT, because a request body is client-controlled and grounding an answer on
+// body-supplied records is the IDOR feature 002's review found.
+//
+// Returns the RAW payload; js/keep/logic/help.js → answerShape() normalises it.
+// Every failure returns that same shape rather than throwing, so the view has
+// one path (FR-17) and a null answer can never render as text.
+export async function askHelp(question, { signal } = {}) {
+  try {
+    const { data, error } = await supabase.functions.invoke("desk-ask", {
+      body: { question },
+      ...(signal ? { signal } : {}),
+    });
+    // An aborted request is the user navigating away or asking again — not a
+    // failure to report, and not an answer either.
+    if (signal?.aborted) return { answer: null, reason: "aborted" };
+    if (error) {
+      // 410 is the retired stub still being deployed; a network failure and a
+      // 5xx are the same thing to a client. All three are "not available", and
+      // the caller does not need to know which (FR-17).
+      console.warn("askHelp failed —", error.message);
+      return { answer: null, reason: "unavailable" };
+    }
+    return data || { answer: null, reason: "malformed" };
+  } catch (e) {
+    if (signal?.aborted) return { answer: null, reason: "aborted" };
+    console.warn("askHelp threw —", e && e.message);
+    return { answer: null, reason: "unavailable" };
+  }
+}
+
+// The help corpus. Fetched once and cached: it seeds the suggestion chips and
+// the credited-source titles, and it is the SAME file the Edge Function reads,
+// so chips, prompt and credits cannot drift from one another.
+let helpGuideCache = null;
+export async function loadHelpGuide() {
+  if (helpGuideCache) return helpGuideCache;
+  try {
+    const res = await fetch("content/help-guide.json");
+    if (!res.ok) return { topics: [] };
+    const data = await res.json();
+    helpGuideCache = data && Array.isArray(data.topics) ? data : { topics: [] };
+    return helpGuideCache;
+  } catch {
+    // The page must still render without chips rather than white-screening.
+    return { topics: [] };
+  }
+}
+
 export async function loadEnhancementRequests() {
   const { data, error } = await supabase.from("enhancement_requests").select("*").order("created_at", { ascending: false });
   if (error) { console.warn("loadEnhancementRequests failed —", error.message); return []; }
