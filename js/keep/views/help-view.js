@@ -41,9 +41,18 @@ export async function renderKeepHelp() {
   // racing it — two answers arriving out of order would render the older one.
   let inFlight = null;
 
+  // The chips are disabled too, not just the input and the button. Aborting the
+  // in-flight request only drops the BROWSER's side of it: the Edge Function has
+  // already reserved a throttle row and may have started the provider call, and
+  // that keeps running. So a second ask does not replace the first, it adds to
+  // it — the UI said "one in flight" while the client was billed for several and
+  // burned several throttle slots. Populated by renderChips() below, which runs
+  // after this is defined.
+  const chipButtons = [];
   function setBusy(busy) {
     submit.disabled = busy;
     input.disabled = busy;
+    for (const b of chipButtons) b.disabled = busy;
     submit.querySelector("span").textContent = busy ? "Asking…" : "Ask";
   }
 
@@ -137,10 +146,13 @@ export async function renderKeepHelp() {
   // 44px target, disabled state). Reused rather than restyled: a second chip
   // class drifts from the first the moment either is touched.
   const chips = suggestionChips(guide);
-  const chipRow = chips.length
-    ? el("div", { class: "k-chiprow k-help__chips" }, chips.map((c) =>
-        el("button", { class: "k-chiptog", attrs: { type: "button" },
-          on: { click: () => { input.value = c.ask; ask(c.ask); } }, text: c.ask })))
+  chipButtons.push(...chips.map((c) =>
+    el("button", { class: "k-chiptog", attrs: { type: "button" },
+      // The `disabled` set by setBusy() stops this firing at all; the guard is
+      // belt and braces for a click already dispatched when it was set.
+      on: { click: () => { if (inFlight) return; input.value = c.ask; ask(c.ask); } }, text: c.ask })));
+  const chipRow = chipButtons.length
+    ? el("div", { class: "k-chiprow k-help__chips" }, chipButtons)
     : null;
 
   // `mid` (880px): an answer is prose, and prose set to the Keep's full 1200px

@@ -191,8 +191,26 @@ function renderFacts(facts: RecordFact[]): string {
   // Each line carries a tag so the model can name WHICH records it used, the
   // same way topic ids let it name which screens. Without one the only thing the
   // function could send back was all of them — see index.ts's usedRecords.
-  return "THEIR RECORDS\n" + facts.map((f, i) =>
-    `- [${recordTag(i)}] ${deFence(f.kind)}: ${deFence(f.name)} — ${deFence(f.label)}: ${deFence(f.value)}`).join("\n");
+  //
+  // Bounded three ways (FACT_LIMITS): per field, by line count, and by total
+  // characters. The tags keep their ORIGINAL indices when lines are dropped, so
+  // a credited tag still resolves to the right fact — renumbering here would
+  // silently re-point every credit past the cut.
+  const lines: string[] = [];
+  let budget = FACT_LIMITS.totalChars;
+  let dropped = 0;
+  facts.forEach((f, i) => {
+    if (i >= FACT_LIMITS.count || budget <= 0) { dropped += 1; return; }
+    const line = `- [${recordTag(i)}] ${clip(f.kind)}: ${clip(f.name)} — ${clip(f.label)}: ${clip(f.value)}`;
+    if (line.length > budget) { dropped += 1; return; }
+    budget -= line.length + 1;
+    lines.push(line);
+  });
+  // Stated, not silent. "Nothing more on file" and "more on file than I was
+  // shown" are different answers, and this repo's rule is that absent data is
+  // never rendered as a confident statement in either direction.
+  if (dropped) lines.push(`(${dropped} further record lines on file, not shown here)`);
+  return "THEIR RECORDS\n" + lines.join("\n");
 }
 
 export function buildPrompt(input: PromptInput): BuiltPrompt {
@@ -214,6 +232,32 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
 // Exported for the test, so an assertion about the delimiters cannot drift from
 // what the builder actually emits.
 export const DELIMITERS = { open: Q_OPEN, close: Q_CLOSE };
+
+/** Bounds on client-written text reaching the provider.
+ *
+ *  `entities.name` and `assets.name` are unconstrained Postgres `text` and
+ *  clients hold full CRUD on their own rows, so the length of what goes into
+ *  this prompt is chosen by the client — directly through PostgREST if the UI
+ *  ever limited it, which it does not. Unbounded, one oversized name makes EVERY
+ *  later question for that account either blow the model's context or cost a
+ *  fortune in input tokens; on the shared demo credential this file's own notes
+ *  describe, one visitor does it to everyone.
+ *
+ *  The repo already sets this precedent in the other direction: `leads`
+ *  constrains `contact_name` to 120 characters. These are the same bound applied
+ *  where the schema does not.
+ *
+ *  Truncating rather than rejecting: a client with a long asset name has done
+ *  something odd, not something hostile, and refusing to answer any question at
+ *  all would be the wrong response to a verbose label. */
+export const FACT_LIMITS = Object.freeze({ field: 120, totalChars: 16_000, count: 400 });
+
+// Scrub FIRST, then clip: deFence() changes length, so clipping first would let
+// a long forged delimiter survive by pushing its tail past the cut.
+function clip(s: string): string {
+  const v = deFence(s);
+  return v.length <= FACT_LIMITS.field ? v : `${v.slice(0, FACT_LIMITS.field - 1)}…`;
+}
 export const TRAILER = { sources: SOURCES_PREFIX, records: RECORDS_PREFIX, refused: REFUSED_PREFIX };
 
 export interface SplitAnswer {
