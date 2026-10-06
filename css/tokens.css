@@ -58,9 +58,22 @@
   --maxw-wide: 1120px;
   --maxw-prose: 640px;
   --maxw-keep: 1320px; /* the Keep is a data app — a wider frame than the marketing site */
-}
 
-[data-theme="harbor"] {
+  /* ── Colour tokens (Direction C / "harbor") ────────────────────────────────
+     Moved here from a `[data-theme="harbor"]` block on 2026-10-06. `harbor` is
+     this project's ONLY theme and is always set on the root <html>, so the block
+     was unconditional in practice — but check-contrast.js refuses to measure a
+     token declared outside a top-level `:root`, because whether it applies
+     depends on the selector, the media query and the cascade, none of which a
+     static gate resolves. Refusing is correct: the PREVIOUS gate reported
+     "9/9 pairs meet WCAG AA" without establishing that these declarations apply
+     at all, so that green was itself fail-open.
+     Verified behaviour-preserving: all 56 computed token values, plus the body's
+     background and text colour, are byte-identical before and after (headless
+     chromium against the rendered page). There was zero overlap between the two
+     blocks, and no second theme exists.
+     A SECOND theme does not come back here — per design.md, each theme gets its
+     own file, and check-contrast.js takes `--tokens <file>` per theme. */
   --color-bg: #F1F5FF;
   --color-surface: #FFFFFF;
   --color-border: #E3EBFA;

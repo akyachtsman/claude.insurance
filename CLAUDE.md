@@ -251,12 +251,23 @@ unreadable in a failure message.
 
 ⚠️ **Still unset, so the answer is still `windowed` — the plumbing is fixed, the
 proof is not.** To get a decided answer, set as repository *variables*:
-`TEST_AUTH_READY_SELECTOR` to a selector matching **either** outcome (the login
-card `.k-authcard` **or** the authenticated shell `.k-h1`) — one naming only the
-gate times out on every signed-in run — and optionally
-`TEST_AUTH_SUCCESS_SELECTOR` to something only the signed-in view shows (`.k-h1`),
-which S2 then requires visible after submitting the credential. A configured
-condition that never resolves FAILS rather than falling back, by design.
+`TEST_AUTH_READY_SELECTOR` to a selector matching **either** outcome:
+`.k-authcard, .k-welcome__h` — the login card **or** the signed-in home heading.
+One naming only the gate times out on every signed-in run.
+
+⚠️ **NOT `.k-h1` — an earlier version of this very paragraph said to use it, and
+that would have turned `qa-live` red on the first run after the variable was
+set.** `.k-h1` appears on Entities, Policies, Documents, Account, Assets and the
+add/request forms, and on **neither** the login card (its title is `.k-atitle`)
+nor the signed-in home view, which is where a successful login lands —
+`go("#/keep")` → `el("h1", { class: "k-welcome__h", … })` (`js/keep/views/keep.js:165`).
+S9 already asserts `.k-welcome__h` for exactly this reason, with its own comment
+saying why not the bare text.
+
+`TEST_AUTH_SUCCESS_SELECTOR` is **optional and arguably redundant here**: S9
+already proves the dashboard renders after a real login. If you set it, use
+`.k-welcome__h`. A configured condition that never resolves FAILS rather than
+falling back, by design — which is why the wrong selector is loud, not silent.
 
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
@@ -315,11 +326,17 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard`, `.k-error`, `.k-h1` |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only) |
 
-⚠️ **Every selector in that row was verified against the rendered page on
-2026-10-05** (headless chromium, local static server) — not read off the
-source. `home` was `.app-header h1`, which matches **nothing**: there is no
+⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
+2026-10-05** (headless chromium, local static server) — not read off the source.
+**The Keep selectors were not, and one of them was wrong.** They were added under
+the same heading without being rendered, because the Keep needs a live backend the
+sandbox browser cannot reach — and `.k-h1` was listed as the dashboard heading when
+the dashboard uses `.k-welcome__h`. Corrected 2026-10-06 from the source
+(`js/keep/views/keep.js:165`) and from S9, which already asserted the right one.
+A claim of verification that covers only part of a row is the same defect as the
+dead selector it was written to fix. `home` was `.app-header h1`, which matches **nothing**: there is no
 `.app-header` anywhere in `js/`, `css/` or `index.html`, and the home `h1` is
 `main > section.hero > … > h1.hero__title`. `.site-header` exists but is the
 nav bar and contains no `h1`. This is the same dead-selector failure as the
@@ -339,7 +356,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S6 | Commercial qualification flow | As S5 but choose "For my business"; industry-first questioning; contact via phone only → summary lists ≥1 `.need` and the "not a quote" disclaimer | Commercial branch stalls, no needs computed, or disclaimer missing |
 | S7 | Summary empty state | Deep-link `#/summary` with no prior answers → a friendly "No summary yet" empty state (the store is in-memory) | Blank page, crash, or JS error instead of the empty state |
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
-| S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-h1` "Welcome back"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
+| S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-welcome__h`, "Welcome back, …"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
@@ -359,14 +376,14 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
+| `renderWitness` extended to S5–S9 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S9 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
-### ⚠️ This rulebook is stale — run `/refresh-repo` (recorded 2026-10-05)
+### ✅ Rulebook synced 2026-10-06 (was six weeks / 43 commits stale)
 
-`.claude/directive-sync.json` records the last sync as `1d57879` @ **2026-08-26**,
-and the divergence table above is written against that state. The upstream
-directives now carry **nine sections whose owner rulings postdate it**, so the
-table is reasoning from a six-week-old rulebook:
+Synced to `bbfdcfc` on 2026-10-06, from `1d57879` @ 2026-08-26 — 43 commits. The
+nine sections below are the owner rulings that had accumulated in that window;
+they are now read and in force, and are listed so the provenance stays visible:
 
 | section | ruling |
 |---|---|
