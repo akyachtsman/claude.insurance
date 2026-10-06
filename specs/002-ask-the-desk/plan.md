@@ -704,6 +704,12 @@ any of them existed)*
 
 ## Consistency
 
+Checked mechanically, not by eye — the first version of this table claimed
+"every requirement traces to a task" while three requirements had no row, so the
+claim was doing the work the check should have. All 21 FRs and all 8 SCs below
+are present, verified by extracting the ids from `spec.md` and diffing them
+against this table.
+
 | Requirement | Task(s) |
 |---|---|
 | FR-1, FR-4 | T1, T2, T9 |
@@ -714,9 +720,9 @@ any of them existed)*
 | FR-8, A-4 | T4 (`status='asked'` in `using`), T7 (zero-row = failure) |
 | FR-9, SC-2 | T16 (claim-then-send), T15c (resend + not-notified state — the read path without which the stamp guarantees nothing) |
 | FR-10 | T10 |
-| FR-11, FR-15 | T17 (grounding), T18 (call), T15b (explicit, collapsible) |
+| FR-11, FR-15 | T17 (grounding), T18 (call), T15 (b: explicit, collapsible) |
 | FR-12 | Key decision 3 — nothing writes a draft; T4 gives no column for one; biconditional CHECK closes the hidden-draft slot — **conditional on T0a** |
-| FR-13 | T15b |
+| FR-13 | T15 (b: draft labelled machine-generated) |
 | FR-14 | T8 (client maps every failure), T18 (every failure returns `{draft:null}`) |
 | FR-16 | T11, T12 |
 | FR-17, SC-7 | T13 (both empty states) |
@@ -729,6 +735,23 @@ any of them existed)*
 | SC-4 | T18 |
 | SC-5, SC-6 | T4 — **conditional on T0a**; without it SC-6 cannot be claimed |
 | SC-8 | T1 (`validateAnswer` included), T3 (prompt), T24 |
+| A-4 (one answer, never editable) | T4 (`status='asked'` in `using`), T7 |
+
+The spec's other three assumptions are **not** task-traced, deliberately, and
+the first version of this table was inconsistent in tracing A-4 alone without
+saying why. A-1 (broker checks every answer), A-2 (question volume is low) and
+A-3 (English only) are statements about the world this feature is built for, not
+behaviour it implements — nothing in the code can make them true or false. A-4
+is different in kind: it is a stated *invariant*, so it needs an enforcement
+point, and until this revision it had none.
+
+**Four tasks carry no requirement row**, which is correct rather than an
+oversight: T0b (rebase onto #251), T19 (styles), T20 (`MODULES` manifest) and
+T21 (docs + accepted residuals). They serve the repo's standing obligations —
+the manifest guard, the design tokens, CLAUDE.md currency — not this feature's
+requirements. T20 in particular is *functional* despite reading like
+bookkeeping: on this branch there is no manifest guard yet, so omitting it
+passes every gate and ships unstamped modules against stale caches.
 
 **Contradictions found — three, all now fixed.** The previous version said
 "none", which was wrong on all three counts:
