@@ -39,19 +39,36 @@ rows with the service-role key**, filtered by the resolved id. The client sends
 only its question. This is the same reasoning as feature 002's IDOR finding,
 applied before the bug rather than after.
 
-## Key decision 3 — the refusal boundary lives in three places, not one
+## Key decision 3 — the refusal boundary: one independent layer, two mitigations
 
-The spec's fact/advice boundary (FR-8) is enforced:
+**Restated 2026-10-06, because the original claim was overstated** and a QA pass
+was right to say so. It read "the refusal boundary lives in three places, not
+one" and called them "three independent layers". Only one of the three is
+independent, and the honest version is more useful than the flattering one:
 
 1. **In the prompt** — the rules, with worked examples from the spec's table.
+   Model-dependent by nature. A mitigation, not an enforcement point.
 2. **In the grounding** — records are passed as *values*, never as a coverage
-   summary the model is invited to interpret.
-3. **In the UI** — FR-10's AI-generated label and broker line are rendered by
-   the view regardless of what comes back, so a model that ignores rule 1 still
-   cannot present itself as broker advice.
+   summary the model is invited to interpret. **Not independent of 1:** it
+   changes what the model is *handed*, not what it may *emit*, and the same
+   single inference resolves both. It lowers the odds; it cannot catch a
+   violation. Worth keeping, worth not overclaiming.
+3. **In the UI** — the AI-generated label (FR-10) and the broker channel are
+   rendered by the view on every answer, regardless of the payload. **This is
+   the independent layer**, and the only one that still holds when the model
+   ignores everything above it.
 
-A-4 says none of these is sufficient alone. Three independent layers is the
-design, not belt-and-braces.
+Layer 3 only became true of the broker channel on 2026-10-06. It had been
+rendered off `brokerHandoff`, which traced back through `reason: "refused"` and
+the trailer to **the model itself** — so the *remedy* for a refusal was
+model-controlled end to end. Both error directions were reachable, and one was
+worse than having no hand-off at all: a model that answered a coverage question
+*and* set the marker put "this one needs your broker" underneath a coverage
+determination, which reads as broker-endorsed. Measured. The channel is
+unconditional now and the flag is deleted rather than left unread.
+
+A-4 says none of these is sufficient alone. That remains true; what changed is
+the count of layers that can actually enforce anything, which is one.
 
 ## Key decision 4 — model and cost
 

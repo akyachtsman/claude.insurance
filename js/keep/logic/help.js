@@ -40,9 +40,18 @@ export const CHIP_LIMIT = 6;
 export const TOPIC_FIELDS = Object.freeze(["id", "title", "route", "nav", "body", "ask"]);
 
 // Reasons that come WITH an answer. `refused` is a coverage determination the
-// assistant declined (FR-8) — the refusal text is the answer, and the view adds
-// the broker channel off `brokerHandoff`. `no_records` is FR-12's "nothing on
-// file yet", which is a correct answer, not a failure.
+// assistant declined (FR-8) — the refusal text IS the answer. `no_records` is
+// FR-12's "nothing on file yet", which is a correct answer, not a failure.
+//
+// ⚠️ `refused` does NOT gate the broker hand-off, and this shape used to carry a
+// `brokerHandoff` flag that said it did. The view now renders the hand-off on
+// every answer, because the flag was model-controlled end to end: a model that
+// declined in prose without the marker left the client refused with no broker
+// channel, and one that answered a coverage question AND set the marker put
+// "this needs your broker" under a coverage determination, which reads as
+// broker-endorsed. The flag is gone rather than left unread — an unread field
+// that looks like a feature is what that defect was made of. `reason` still
+// carries the distinction for anything that genuinely needs it.
 export const ANSWER_REASONS = Object.freeze(["answered", "refused", "no_records"]);
 
 // Reasons there is NO answer, with the plain-language line the view shows in its
@@ -208,10 +217,7 @@ function failureKey(payload, rawAnswer, reason) {
 //     reason:      one of ANSWER_REASONS when ok, else a key of FAILURE_NOTICE —
 //                  never a raw string off the wire,
 //     notice:      the plain-language line to show INSTEAD of an answer; "" when ok,
-//     retryAfter:  seconds the function asked us to wait, or null,
-//     brokerHandoff: true when the answer is a refused coverage determination
-//                  (FR-8), so the view offers the broker channel without having
-//                  to read the answer's wording }
+//     retryAfter:  seconds the function asked us to wait, or null }
 //
 // The absent-data rule (CLAUDE.md; policyKind/renewalCounts are the precedent)
 // is enforced here: a null, blank or non-text answer yields ok:false and
@@ -236,7 +242,6 @@ export function answerShape(payload) {
       reason: key,
       notice: key === "rate_limited" ? rateLimitNotice(retryAfter) : FAILURE_NOTICE[key],
       retryAfter,
-      brokerHandoff: false,
     };
   }
 
@@ -251,7 +256,6 @@ export function answerShape(payload) {
     reason: kind,
     notice: "",
     retryAfter: null,
-    brokerHandoff: kind === "refused",
   };
 }
 

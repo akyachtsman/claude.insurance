@@ -75,9 +75,20 @@ test("retryAfter is sent in SECONDS, which is the unit the consumer reads", () =
   assert.ok(Number(m[1]) >= 60, `retryAfter ${m[1]} looks like minutes, not seconds`);
 });
 
-test("usedRecords is sent as a list, which is what the consumer maps over", () => {
-  assert.ok(/usedRecords:\s*facts\.map/.test(fnSrc),
-    "usedRecords must be a list of display lines; a count cannot satisfy FR-11's 'name what you used'");
+test("usedRecords is sent as a list of the records actually used, not all of them", () => {
+  // TWO bugs, and this assertion used to pin the second one as correct. The
+  // first is real: `retryAfterMinutes`-style, a COUNT cannot satisfy FR-11's
+  // "name what you drew on" because "3 records" is not checkable — the consumer
+  // maps over this. The second is that the fix for it sent `facts.map(...)`,
+  // every record on file, on every answer. That is the same defect already found
+  // and fixed for `usedTopics`, and this test asserted the exact expression that
+  // caused it, so fixing the function would have failed a test whose message
+  // said the fix was wrong.
+  assert.ok(!/usedRecords:\s*\w+\.length/.test(fnSrc), "usedRecords must not be a count");
+  assert.ok(!/usedRecords:\s*facts\.map/.test(fnSrc),
+    "usedRecords: facts.map(...) credits EVERY record on every answer — the usedTopics defect, in the half that was left behind");
+  assert.ok(/recordIds[\s\S]{0,400}?recordIndex\(/.test(fnSrc),
+    "usedRecords must be resolved from the model's record tags via recordIndex(), the way usedTopics is resolved from its ids");
 });
 
 test("a rate_limited payload shaped as the function sends it yields a usable wait", () => {

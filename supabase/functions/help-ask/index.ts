@@ -8,9 +8,27 @@
 // unambiguously retired and its deletion stays a separate, closable item;
 // "help-ask" also matches what the feature is now called everywhere else.
 //
-// Unlike `notify-enhancement`, this function KEEPS Supabase's JWT verification
-// on: it spends money per call and reads the caller's own records, so an
-// unauthenticated path is not something to opt out of.
+// ⚠️ DEPLOY WITH `--no-verify-jwt`. That reads backwards for an endpoint that
+// spends money per call, so here is the reasoning in full.
+//
+// The gateway flag adds NOTHING this function does not already do: the handler
+// resolves the caller from their JWT and returns 401 before the first database
+// write and long before the model call, so with the flag off an unauthenticated
+// request still costs exactly one 401 and zero dollars.
+//
+// What the flag can do is break the feature in a way nobody can see.
+// `supabase.functions.invoke` sends `Authorization` and `Content-Type:
+// application/json`, neither CORS-safelisted, so the browser MUST send a
+// preflight OPTIONS — and a preflight never carries `Authorization`. If the
+// gateway enforces the flag on that preflight, the POST never leaves the
+// browser. NOT VERIFIED HERE (the function is undeployed and the sandbox browser
+// has no egress), which is exactly why it is not worth risking: FR-17 renders
+// every failure as the same quiet notice, and S10 passes on the notice branch by
+// design, so "deployed and permanently unreachable" is indistinguishable from
+// "not deployed yet" from the client, the suite and the UI alike.
+//
+// A flag that adds no protection and can silently disable the feature is not a
+// trade-off. `notify-enhancement` is deployed the same way, for its own reasons.
 //
 // THE RULE THIS FILE EXISTS TO HOLD: records are read SERVER-SIDE, scoped to the
 // caller's own owner id resolved from their JWT. The browser already holds those
@@ -26,7 +44,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 // 0.131.0) rather than recalled — an earlier draft of this line pinned 0.69.0
 // from memory, which would have been found at deploy time, not here.
 import Anthropic from "npm:@anthropic-ai/sdk@0.131.0";
-import { buildPrompt, splitTrailer, type HelpTopic, type RecordFact } from "./prompt.ts";
+import { buildPrompt, splitTrailer, recordIndex, type HelpTopic, type RecordFact } from "./prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -38,6 +56,18 @@ const APP_URL = Deno.env.get("APP_URL") ?? "https://akyachtsman.github.io/claude
 // credential, so the JWT gate AUTHENTICATES and does nothing about spend. An
 // Anthropic Console workspace limit is the backstop if this has a bug.
 const HOURLY_CAP = 20;
+// AGGREGATE cap, and it is not redundant with the per-client one. HOURLY_CAP is
+// keyed on `owner`, so it bounds spend per ACCOUNT — and this project publishes
+// three demo credentials sharing one password (60 paid calls/hour from published
+// secrets alone), while Supabase Auth self-signup, if enabled, makes the number
+// of accounts unbounded and the per-client cap with it. A new account holds no
+// records, which is a valid state here (FR-12), so the call still proceeds.
+//
+// The trade-off, stated rather than hidden: one abuser can exhaust this and take
+// the help desk down for every real client. That is the same trade the Anthropic
+// Console spend limit makes as the backstop — this one just makes it earlier,
+// cheaper, and visible as "unavailable" rather than as a bill.
+const DAILY_TOTAL_CAP = 400;
 const QUESTION_MAX = 500;
 
 const CORS = {
@@ -73,7 +103,12 @@ const unavailable = (reason: string, extra: Record<string, unknown> = {}) =>
 // knowledge of the screens at all.
 let guideCache: HelpTopic[] | null = null;
 async function loadGuide(): Promise<HelpTopic[] | null> {
-  if (guideCache) return guideCache;
+  // `?.length`, not a truthiness check: `guideCache` is an ARRAY, so `[]` is
+  // truthy and a corpus whose entries all failed the field filter cached itself
+  // as "loaded" for the life of the isolate. Measured: the caller's `if (!topics)`
+  // guard passed too, renderTopics emitted "(no matching screens)", and the model
+  // answered from records alone — the one outcome the comment above forbids.
+  if (guideCache?.length) return guideCache;
   try {
     const res = await fetch(`${APP_URL}/content/help-guide.json`, { headers: { "Cache-Control": "no-cache" } });
     if (!res.ok) return null;
@@ -117,6 +152,12 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
     const on = assetName.get(p.asset_id) ?? "an asset";
     facts.push({ kind: "policy", name: p.line, label: "covers", value: String(on) });
     if (p.carrier) facts.push({ kind: "policy", name: p.line, label: "carrier", value: p.carrier });
+    // Selected since the first draft and never surfaced, so "what is my policy
+    // number?" answered "your records don't say" while CLAUDE.md's Anthropic
+    // data-scope paragraph listed it as disclosed. Reading a number back is the
+    // plainest FR-8 fact there is, so the fix is to surface it, not to stop
+    // selecting it — and the documented scope is now accurate either way.
+    if (p.policy_number) facts.push({ kind: "policy", name: p.line, label: "policy number", value: String(p.policy_number) });
     // Absent is stated as absent. `null` renewal is a real state in this schema
     // and the repo's rule is that it is never rendered as a confident value.
     facts.push({
@@ -136,11 +177,15 @@ Deno.serve(async (req: Request) => {
   if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) return unavailable("unavailable");       // consumer-known name
   if (!ANTHROPIC_API_KEY) return unavailable("unavailable");  // FR-17: the client needs a notice, not a cause
 
+  // These return the SHAPED payload at 200, not `{error}` at 400. A non-2xx makes
+  // supabase-js surface an error with no body, so the client fell through to its
+  // generic "unavailable" and `FAILURE_NOTICE.invalid` — a line written for
+  // exactly this, "That question couldn't be read" — was unreachable code.
   let payload: { question?: string };
-  try { payload = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
+  try { payload = await req.json(); } catch { return unavailable("invalid"); }
   const question = String(payload?.question ?? "").trim();
-  if (!question) return json({ error: "empty_question" }, 400);
-  if (question.length > QUESTION_MAX) return json({ error: "question_too_long" }, 400);
+  if (!question) return unavailable("invalid");
+  if (question.length > QUESTION_MAX) return unavailable("invalid");
 
   // Caller identity comes from the JWT and nowhere else.
   const authz = req.headers.get("Authorization") ?? "";
@@ -180,7 +225,14 @@ Deno.serve(async (req: Request) => {
 
   const { count, error: countErr } = await admin.from("help_queries")
     .select("id", { count: "exact", head: true }).eq("owner", owner).gte("asked_at", since);
-  if (countErr) return unavailable("unavailable");
+  if (countErr) {
+    // Nothing has been billed, so release — same reasoning as the over-cap path
+    // below, which this previously contradicted by keeping the row. Keeping it
+    // meant 21 transient PostgREST errors in an hour locked the caller out for an
+    // hour having made zero model calls.
+    await admin.from("help_queries").delete().eq("id", slot.id);
+    return unavailable("unavailable");
+  }
   if ((count ?? 0) > HOURLY_CAP) {
     // Over the cap and nothing has been billed yet, so release the reservation.
     // Keeping it would make a user who hammers the endpoint extend their own
@@ -190,8 +242,18 @@ Deno.serve(async (req: Request) => {
     return unavailable("rate_limited", { retryAfter: 3600 });  // SECONDS — the consumer builds its wait line from this
   }
 
+  const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
+  const { count: total, error: totalErr } = await admin.from("help_queries")
+    .select("id", { count: "exact", head: true }).gte("asked_at", dayAgo);
+  // Fails CLOSED, like the reservation: a cap that cannot be counted must never
+  // read as "under the cap".
+  if (totalErr || (total ?? 0) > DAILY_TOTAL_CAP) {
+    await admin.from("help_queries").delete().eq("id", slot.id);
+    return unavailable(totalErr ? "unavailable" : "rate_limited", totalErr ? {} : { retryAfter: 3600 });
+  }
+
   const topics = await loadGuide();
-  if (!topics) return unavailable("unavailable");
+  if (!topics?.length) return unavailable("unavailable");   // `[]` is truthy; see loadGuide
 
   // A read ERROR and an empty result must stay distinguishable: telling a client
   // they hold no policies because a SELECT failed is the invented answer FR-12
@@ -245,13 +307,23 @@ Deno.serve(async (req: Request) => {
   // defect, and this one already shipped once as `#/keep/asset/:id`.
   const sent = new Set(topics.map((t) => t.id));
   const usedTopics = split.sourceIds.filter((id) => sent.has(id));
+  // The SAME fix as usedTopics, applied to the half that was left behind.
+  // `facts.map(...)` credited EVERY record on every answer: ask "where do I add a
+  // business entity?" — answered from the corpus, touching no records — and the
+  // client was told their renewal dates and premiums were the basis for an answer
+  // about a button, on the refusal path too. Resolved through the same trailer,
+  // and an unresolvable tag credits nothing rather than crediting record 0.
+  const usedRecords = split.recordIds
+    .map((tag) => facts[recordIndex(tag)])
+    .filter((f): f is RecordFact => Boolean(f))
+    .map((f) => `${f.name} — ${f.label}: ${f.value}`);
 
   return json({
     answer: split.answer,
     usedTopics,
     // Display LINES, not a count: FR-11 is "name what you drew on" so the client
     // can check it, and "3 records" is not checkable.
-    usedRecords: facts.map((f) => `${f.name} — ${f.label}: ${f.value}`),
+    usedRecords,
     // `refused` drives FR-8's hand-off, so it wins over the records distinction:
     // a declined coverage question is a refusal whether or not records were read.
     reason: split.refused ? "refused" : facts.length ? "answered" : "no_records",

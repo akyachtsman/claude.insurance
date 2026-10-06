@@ -2470,13 +2470,22 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   // The ask box must come back for a second question either way.
   await expect(input, 'The ask box stayed disabled after the request settled').toBeEnabled();
 
-  // 7. FR-10, second state: when the answer branch IS taken, the label ships
-  //    with it. Skipped — not failed — when the notice branch was taken,
-  //    because pre-deploy that is the correct outcome and asserting an answer
-  //    would red the suite on a state the owner gate explains.
+  // 7. The AI-generated label and the broker channel are on screen in BOTH
+  //    branches — neither is gated on anything the model says. The hand-off used
+  //    to render off a model-set flag, which meant a model could both answer a
+  //    coverage question and attach "this needs your broker" underneath it.
+  await expect(page.locator('.k-help__ai'), 'The AI-generated label is absent after an ask').toBeVisible();
+
+  //    The trailer protocol must never reach the client. This is the one failure
+  //    of that parsing a client would actually see, and five decorated marker
+  //    shapes leaked it before the sentinels — so assert it on the live answer,
+  //    not only in the unit tests.
+  await expect(page.locator('.k-page--help'), 'A trailer marker leaked into the rendered page')
+    .not.toContainText(/\[\[(SOURCES|RECORDS|REFUSED)\]\]/i);
+
   if (await page.locator('.k-help__a').count()) {
-    await expect(page.locator('.k-help__a').locator('xpath=following-sibling::p[contains(@class,"k-help__ai")]'),
-      'An answer rendered without the AI-generated label').toHaveCount(1);
+    await expect(page.locator('.k-help__broker'),
+      'An answer rendered without the broker channel — FR-8\'s remedy must not depend on the model').toHaveCount(1);
   }
 
   // Console-error gate. pageErrors stays strict: a 404 from a not-yet-deployed

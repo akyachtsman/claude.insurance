@@ -245,7 +245,7 @@ test("answerShape: a good answer is renderable and credited", () => {
   assert.equal(s.reason, "answered");
   assert.equal(s.notice, "");
   assert.equal(s.retryAfter, null);
-  assert.equal(s.brokerHandoff, false);
+  assert.ok(!("brokerHandoff" in s), "brokerHandoff is gone — the hand-off is unconditional in the view");
 });
 
 test("answerShape: absent credits come back as arrays, never undefined", () => {
@@ -267,13 +267,14 @@ test("answerShape: credits accept {id}/{label} objects and drop junk", () => {
   assert.deepEqual(s.records, ["Asset · Tesla Model Y", "Policy · Flood (NFIP)"]);
 });
 
-test("answerShape: a refused coverage question keeps its answer and flags the broker hand-off", () => {
-  // FR-8: the refusal text is the answer; the view adds the broker channel off
-  // this flag rather than sniffing the answer's wording.
+test("answerShape: a refused coverage question keeps its answer, and carries no hand-off flag", () => {
+  // FR-8: the refusal text IS the answer. The view renders the broker channel on
+  // every answer rather than off a flag the model controls — see ANSWER_REASONS
+  // in help.js for why that flag was removed rather than left unread.
   const s = answerShape(ok({ answer: "That is a coverage question for your broker.", reason: "refused" }));
   assert.equal(s.ok, true);
   assert.equal(s.reason, "refused");
-  assert.equal(s.brokerHandoff, true);
+  assert.ok(!("brokerHandoff" in s), "brokerHandoff is gone; `reason` carries the distinction");
   assert.equal(s.notice, "");
 });
 
@@ -324,7 +325,7 @@ for (const [name, payload, reason] of FAILURES) {
     assert.ok(s.notice.length > 0, "a failure must give the client a line to read");
     assert.deepEqual(s.topics, []);
     assert.deepEqual(s.records, []);
-    assert.equal(s.brokerHandoff, false);
+    assert.ok(!("brokerHandoff" in s));
   });
 }
 

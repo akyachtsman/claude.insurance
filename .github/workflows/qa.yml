@@ -199,7 +199,12 @@ jobs:
           # index.html, so a PR touching nothing but js/ or css/ set ui=false and
           # skipped the browser job entirely — on an app that is almost entirely
           # js/ and css/.
-          UI_PATHS: '(\.html$|^js/|^css/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
+          # ^content/ is in because the app RENDERS it: content/help-guide.json
+          # seeds the Help desk's chips and its credited-source links, and
+          # content/questionnaire.json builds the whole qualify flow. A
+          # corpus-only PR set ui=false and skipped the browser job entirely —
+          # the same class of gap this regex was already widened once to fix.
+          UI_PATHS: '(\.html$|^js/|^css/|^content/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
         run: |
           # This job gates the LOCAL suite, which serves the repo root as static
           # files, so it needs a static entry point. Enabling it for a repo with

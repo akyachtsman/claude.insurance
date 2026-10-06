@@ -3,9 +3,11 @@
 // Ask a question in plain language, get an answer from the app's help guide and
 // your own records. The page's job beyond rendering is FR-10 and FR-8's UI half:
 // it labels every answer AI-generated and offers the broker channel, and it does
-// so UNCONDITIONALLY — never off a flag the model controls. That is the third of
-// the three independent places the fact/advice boundary is enforced (plan, Key
-// decision 3), and it is the one that still holds when the other two fail.
+// so UNCONDITIONALLY — never off a flag the model controls. Of the three places
+// the fact/advice boundary is defended (plan, Key decision 3), this is the ONLY
+// independent one: the prompt rules and the shape of the grounding both resolve
+// through the same single inference, so they lower the odds and cannot catch a
+// violation. This file is what still holds when that inference goes wrong.
 import { el, mount } from "../../dom.js";
 import { icon } from "../../icons.js";
 import { askHelp, loadHelpGuide } from "../../supabase.js";
@@ -46,10 +48,17 @@ export async function renderKeepHelp() {
   }
 
   function renderNotice(shaped) {
-    answerRegion.replaceChildren(el("div", { class: "k-help__notice" }, [
-      icon("alert", { size: 18 }),
-      el("p", { text: shaped.notice }),
-    ]));
+    answerRegion.replaceChildren(
+      el("div", { class: "k-help__notice" }, [
+        icon("alert", { size: 18 }),
+        el("p", { text: shaped.notice }),
+      ]),
+      // The standing label lives IN this region, so replacing the region removed
+      // it — leaving the failure state as the one screen with no AI-generated
+      // line on it. Re-rendered rather than moved out, so there is still exactly
+      // one on screen in every state.
+      el("p", { class: "k-help__ai", text: AI_NOTE }),
+    );
   }
 
   function renderAnswer(shaped, question) {
@@ -70,14 +79,25 @@ export async function renderKeepHelp() {
       ]));
     }
 
-    // FR-8's hand-off. Shown when the assistant declined a coverage question,
-    // which `brokerHandoff` carries so the view never has to read the answer text.
-    if (shaped.brokerHandoff) {
-      blocks.push(el("div", { class: "k-help__broker" }, [
-        el("p", { text: "This one needs your broker — they can give you a coverage answer in writing." }),
-        el("a", { class: "k-ilink", attrs: { href: "#/keep/insurance" }, text: "Open a policy to send a request" }),
-      ]));
-    }
+    // FR-8's hand-off, on EVERY answer — not off `shaped.brokerHandoff`.
+    //
+    // That flag is model-controlled end to end: the model emits the REFUSED
+    // marker, the function turns it into `reason: "refused"`, help.js turns that
+    // into `brokerHandoff`, and this block appeared. Both error directions are
+    // reachable and one is worse than having no hand-off at all:
+    //   · declines in prose, omits the marker → the client is refused with no
+    //     broker channel, so FR-8's remedy is silently absent;
+    //   · answers a coverage question AND emits the marker → "This one needs your
+    //     broker" renders UNDERNEATH a coverage determination, which reads as
+    //     broker-endorsed. Measured. And a client can ask for that marker.
+    // Unconditional removes both, and a standing "your broker can put it in
+    // writing" is the right thing on an insurance help desk anyway. `reason`
+    // still carries the distinction for anyone who needs it; nothing the model
+    // says decides what the client is offered.
+    blocks.push(el("div", { class: "k-help__broker" }, [
+      el("p", { text: "Coverage questions — whether something is covered, or whether a limit is enough — are your broker's to answer in writing." }),
+      el("a", { class: "k-ilink", attrs: { href: "#/keep/insurance" }, text: "Open a policy to send a request" }),
+    ]));
 
     // FR-10, rendered on EVERY answer regardless of what came back. A model that
     // ignored its instructions cannot remove this line, which is the point.

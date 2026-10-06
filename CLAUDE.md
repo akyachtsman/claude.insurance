@@ -80,10 +80,15 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
   `notify-renewal` functions are still to come.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
-    endpoint. JWT verification stays **ON** (unlike `notify-enhancement`): it
-    spends money per call and reads the caller's own records. Written and merged,
-    **not yet deployed**; it needs the `help_queries` migration applied and
-    `ANTHROPIC_API_KEY` set first (owner gate). Until then `#/keep/help` renders
+    endpoint. **Deploy with `--no-verify-jwt`**, like `notify-enhancement`: the
+    function resolves the caller from their JWT and 401s before the first DB
+    write and long before the model call, so the gateway flag adds no protection
+    — and if it enforces on the CORS preflight (which `supabase.functions.invoke`
+    forces, by sending `Authorization` and a JSON content type), the POST never
+    leaves the browser. Not verifiable from here, and FR-17 makes that failure
+    look exactly like "not deployed yet", which is why it is not worth the risk.
+    Written and merged, **not yet deployed**; it needs the `help_queries`
+    migration applied and `ANTHROPIC_API_KEY` set first (owner gate). Until then `#/keep/help` renders
     and every ask shows the plain "not available" notice — FR-17's single failure
     path, which is why the page is shippable ahead of the deploy.
   - ⚠️ **`desk-ask` is a retired stub, not part of this system — and NOT an
@@ -216,8 +221,11 @@ profile**, never by listing a directory.
   the answer. The digest is **exactly these columns** (`help-ask/index.ts`):
   entities `name, kind`; assets `name, kind, value`; policies `line, carrier,
   policy_number, renewal_date, premium_amount`. Policy numbers are in because
-  "read back what's on my file" is a question the desk is *for*. What this means
-  in practice:
+  "read back what's on my file" is a question the desk is *for* — and until
+  2026-10-06 that column was **selected and then discarded**, so this paragraph
+  over-stated what crossed the boundary while the feature under-delivered. Both
+  halves fixed by surfacing it; re-check the claim against `ownRecords`'s
+  `facts.push` calls, not just its `select`. What this means in practice:
   - It is **owner-scoped server-side**, from the JWT — never from the request
     body. The browser already holds those rows under RLS so sending them with the
     question would be simpler, and is the one shape that cannot be made safe: a
@@ -231,10 +239,32 @@ profile**, never by listing a directory.
     and unit-tested, so everything that leaves the project is reviewable in one
     file. Widening the `select` widens what is disclosed; treat it as a change to
     this constraint, not an implementation detail.
-  - **Spend is capped before the call, not after:** 20 asks per client per hour,
-    reserved in `help_queries` *ahead* of the model call and released only if
-    nothing was billed. A failed model call is still billed, so recording usage
-    on success only is a bypass. A throttle that cannot count **fails closed**.
+  - **Spend is capped before the call, not after:** 20 asks per client per hour
+    **and 400 across all clients per day**, reserved in `help_queries` *ahead* of
+    the model call and released only if nothing was billed. A failed model call
+    is still billed, so recording usage on success only is a bypass. A throttle
+    that cannot count **fails closed**. The aggregate cap is not redundant: the
+    per-client one is keyed on `owner`, and this file publishes three demo
+    credentials — while Supabase Auth **self-signup, if enabled, makes the number
+    of accounts unbounded and that cap with it. Check before deploying.** The
+    trade-off is stated in the code: one abuser can take the desk down for
+    everyone, which is the same trade the Console spend limit makes, earlier.
+  - **Client text is quoted AND scrubbed on both channels.** The question is
+    wrapped in `<question>` delimiters; so, in effect, are the records — entity
+    and asset *names* are client-written free text (clients hold full CRUD on
+    their own), and they render ahead of the question with no length cap and are
+    re-injected into every future answer, which made them the **better** channel
+    of the two until `deFence()` was applied to them. `deFence` is deliberately
+    whitespace- and attribute-tolerant: the exact-match version it replaced was
+    defeated by `</question >`, `</ question>`, `</question\n>` and
+    `</QUESTION\t>`, all four measured.
+  - **CORS stays `Access-Control-Allow-Origin: *`, deliberately.** Credentials
+    travel in an `Authorization` header, not cookies, and `Allow-Credentials` is
+    unset, so there is no ambient-credential CSRF and a hostile page cannot read
+    the token cross-origin. Echoing one origin would be mild hardening; it was
+    not taken in the same change as the `--no-verify-jwt` decision, because
+    stacking two origin-sensitive failure modes into one undeployed function is
+    how a deploy fails for a reason nobody can distinguish.
   - An Anthropic Console workspace spend limit is the backstop if that has a bug.
 - **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
   there is no lead-reading path in the static app. ⚠️ The second half of this

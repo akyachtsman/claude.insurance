@@ -153,3 +153,28 @@ create index if not exists help_queries_owner_asked_at_idx
 --      to be invisible:
 --        select count(*) from public.help_queries;   -- 0, or that session's own
 --      rows only; never the row inserted in step 1.
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- TWO FOLLOW-UPS this migration deliberately does NOT carry, recorded here so
+-- they are decided rather than forgotten.
+--
+--   A. NO RETENTION. `question` stores the client's own free text indefinitely,
+--      and a client may well type a name, an address or a claim detail into a
+--      help box. The throttle needs only `owner` + `asked_at`; the text is kept
+--      because a help desk that cannot be read back cannot be improved. Nothing
+--      here expires it. A TTL needs pg_cron, which is a separate production
+--      change; until one exists, treat this table as holding client PII and say
+--      so in any processing record. Dropping `question` entirely is the cheaper
+--      answer if nobody is actually going to read it.
+--
+--   B. THE INSERT GRANT IS NOT RATE-LIMITED BY THIS TABLE. A client holds
+--      `insert (question)` through PostgREST, so they can add rows directly,
+--      without going through the Edge Function and without costing the owner a
+--      provider call. That is bounded self-harm — every such row counts against
+--      THEIR OWN hourly cap, so the attack is to lock yourself out — but it does
+--      grow storage, and it feeds the aggregate daily cap, which is shared. The
+--      grant cannot simply be revoked: the function inserts under the service
+--      key, but `help_queries insert own` + the column grant are what stop a
+--      client from inserting rows attributed to someone else, and the SELECT
+--      policy is genuinely required for `insert … returning`. Revisit with a
+--      per-owner row cap or a statement trigger if it is ever abused.
