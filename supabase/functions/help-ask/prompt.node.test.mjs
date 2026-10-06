@@ -11,7 +11,7 @@
 // you change one, change the other.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPrompt, DELIMITERS } from "./prompt.ts";
+import { buildPrompt, splitTrailer, DELIMITERS, TRAILER } from "./prompt.ts";
 
 // Prose in the system prompt is hard-wrapped, so an exact-substring assertion
 // breaks the moment a sentence reflows across a line — which has bitten this
@@ -82,4 +82,104 @@ test("malformed input does not throw", () => {
   const p = buildPrompt({ question: undefined, topics: undefined, facts: undefined });
   assert.ok(p.system.length > 0);
   assert.equal(p.messages.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// splitTrailer — the one piece of model-output parsing in this feature.
+//
+// The failure that matters here is a marker LEAKING into the client-visible
+// answer, so every case below asserts the exact answer text, not just the ids.
+// ---------------------------------------------------------------------------
+
+test("the system prompt asks for the trailer, and renders topic ids so it can be answered", () => {
+  const { system, messages } = buildPrompt({ question: "q", topics: [topic], facts: [] });
+  assert.ok(says(system, TRAILER.sources), "the prompt never asks for a SOURCES line");
+  assert.ok(says(system, TRAILER.refused), "the prompt never asks for a REFUSED line");
+  // The ids travel in the USER message with the corpus, not the system prompt —
+  // which is where the first version of this assertion looked, and why it failed.
+  const sent = messages.map((m) => m.content).join("\n");
+  assert.ok(sent.includes(`[${topic.id}]`),
+    "topic ids are not rendered — the model cannot name an id it was never shown");
+  assert.ok(says(system, "stripped before the client sees anything"),
+    "the prompt does not tell the model the trailer is not part of its answer");
+});
+
+test("splitTrailer: reads the ids and strips the trailer from the answer", () => {
+  const r = splitTrailer("Open the Policies screen.\n\nSOURCES: insurance, policy");
+  assert.equal(r.answer, "Open the Policies screen.");
+  assert.deepEqual(r.sourceIds, ["insurance", "policy"]);
+  assert.equal(r.refused, false);
+});
+
+test("splitTrailer: REFUSED drives FR-8, and may come in either order", () => {
+  for (const raw of [
+    "Your broker owns that.\n\nSOURCES: policy\nREFUSED: yes",
+    "Your broker owns that.\n\nREFUSED: yes\nSOURCES: policy",
+  ]) {
+    const r = splitTrailer(raw);
+    assert.equal(r.answer, "Your broker owns that.");
+    assert.deepEqual(r.sourceIds, ["policy"]);
+    assert.equal(r.refused, true);
+  }
+});
+
+test("splitTrailer: a missing trailer costs the credits, never the answer", () => {
+  const r = splitTrailer("Just an answer, no trailer.");
+  assert.equal(r.answer, "Just an answer, no trailer.");
+  assert.deepEqual(r.sourceIds, []);
+  assert.equal(r.refused, false);
+});
+
+test("splitTrailer: `none` is the protocol's empty, not a topic id", () => {
+  for (const v of ["none", "None", "n/a", "-", ""]) {
+    assert.deepEqual(splitTrailer(`A.\nSOURCES: ${v}`).sourceIds, [], `"${v}" leaked through as an id`);
+  }
+});
+
+test("splitTrailer: a marker inside the answer is prose, and is left alone", () => {
+  // The alternative is a regex that edits what the client reads.
+  const raw = "I saw SOURCES: in the docs.\nThat is the last line.";
+  const r = splitTrailer(raw);
+  assert.equal(r.answer, raw, "a mid-answer marker was consumed as protocol");
+  assert.deepEqual(r.sourceIds, []);
+});
+
+test("splitTrailer: a marker followed by more answer text is not a trailer", () => {
+  const raw = "Mid.\nSOURCES: home\nMore answer after.";
+  assert.equal(splitTrailer(raw).answer, raw);
+  assert.deepEqual(splitTrailer(raw).sourceIds, []);
+});
+
+test("splitTrailer: a fenced trailer is consumed whole, fences included", () => {
+  const r = splitTrailer("Open Policies.\n```\nSOURCES: insurance\nREFUSED: yes\n```");
+  assert.equal(r.answer, "Open Policies.", "a dangling ``` was left in the answer");
+  assert.deepEqual(r.sourceIds, ["insurance"]);
+  assert.equal(r.refused, true);
+});
+
+test("splitTrailer: a code block that ENDS an answer keeps its closing fence", () => {
+  // The mirror of the case above, and the reason the fence handling is
+  // conditional rather than "pop any trailing fence".
+  const r = splitTrailer("Here is the shape:\n```\n{ a: 1 }\n```\nSOURCES: home");
+  assert.equal(r.answer, "Here is the shape:\n```\n{ a: 1 }\n```");
+  assert.deepEqual(r.sourceIds, ["home"]);
+});
+
+test("splitTrailer: ids are debracketed, deduped, and keep the model's order", () => {
+  const r = splitTrailer("A.\nSOURCES: [list], home, list, [home]");
+  assert.deepEqual(r.sourceIds, ["list", "home"]);
+});
+
+test("splitTrailer: a reply that is ONLY a trailer yields no answer", () => {
+  // index.ts turns this into `incomplete` rather than an empty answer bubble.
+  assert.equal(splitTrailer("SOURCES: home\nREFUSED: yes").answer, "");
+});
+
+test("splitTrailer: malformed input does not throw", () => {
+  for (const v of [null, undefined, "", 7, {}, []]) {
+    const r = splitTrailer(v);
+    assert.equal(typeof r.answer, "string");
+    assert.ok(Array.isArray(r.sourceIds));
+    assert.equal(typeof r.refused, "boolean");
+  }
 });

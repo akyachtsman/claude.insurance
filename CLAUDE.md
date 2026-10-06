@@ -311,6 +311,38 @@ already proves the dashboard renders after a real login. If you set it, use
 `.k-welcome__h`. A configured condition that never resolves FAILS rather than
 falling back, by design — which is why the wrong selector is loud, not silent.
 
+### ⚠️ OPEN — the Keep's app bar overflows horizontally from 761px to 1044px
+
+**Measured 2026-10-06** (headless chromium, local static server, the offline
+stub harness). Not introduced by feature 003 — `#/keep`, `#/keep/documents` and
+`#/keep/help` all overflow identically, with the same culprits and the same
+`scrollWidth: 1045` — and recorded here so it is not rediscovered or mistaken
+for a Help-desk defect.
+
+`.k-bar__in` lays out brand (175px) + `.k-nav` (450px) + `.k-bar__rt` (352px)
+with no wrap and no shrink, so the bar needs **1045px**. `.k-nav` is hidden only
+below 760px (`@media (max-width: 760px)`), which is why the band starts one pixel
+above that line and ends exactly where the viewport reaches the bar's intrinsic
+width:
+
+| viewport | result |
+|---|---|
+| 390, 600, 740, 759, 760 | ok (nav hidden) |
+| **761 … 1040** | **OVERFLOW, `scrollWidth` 1045 every time** |
+| 1045, 1046, 1100, 1280 | ok |
+
+**It covers the Playwright `tablet` profile (810px),** which CLAUDE.md's measured
+ceiling says runs locally — so this is reachable by the suite today. S4 checks
+overflow at **390px only**, where the nav is already hidden, which is why it has
+never gone red.
+
+**Deliberately NOT fixed in the 003 PR**, because there is no minimal fix:
+raising the hide breakpoint to 1044px would strip the main nav for every tablet
+user with no hamburger to replace it, and shrinking the 240px search box saves
+80px against a ~235px shortfall. It needs a design answer about the Keep's
+chrome at tablet width, and that is a change to every Keep page, not to this
+feature. Verify any fix across the whole band, not at one width.
+
 ## Project-Specific Coding Standards
 - **Collapsible reveals (always):** any control that *expands* to show extra content — a button that reveals a panel, an inline expander, an accordion — MUST give the user an obvious way to collapse it back. Use a toggle with a rotating chevron/back arrow and `aria-expanded`, and never leave revealed content with no way to close it. Dropdowns/menus must also close on click-outside and Escape. Applies to every new feature or expanded button.
 - **Origin-aware back (always):** any back / return / cancel control MUST return the user to the page they actually navigated *from*, not a hardcoded destination. The router records the previous route; back controls navigate to it, falling back to the hierarchical parent only when there's no prior in-app page (e.g. a deep link or fresh load). Never assume the parent in the breadcrumb is where the user came from (they may have arrived from a notification, search, or the documents view). Applies to every new feature or button.

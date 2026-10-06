@@ -26,7 +26,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 // 0.131.0) rather than recalled — an earlier draft of this line pinned 0.69.0
 // from memory, which would have been found at deploy time, not here.
 import Anthropic from "npm:@anthropic-ai/sdk@0.131.0";
-import { buildPrompt, type HelpTopic, type RecordFact } from "./prompt.ts";
+import { buildPrompt, splitTrailer, type HelpTopic, type RecordFact } from "./prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -228,12 +228,32 @@ Deno.serve(async (req: Request) => {
   }
   if (!answer) return unavailable("incomplete");
 
+  // The trailer carries the two things this function cannot know by itself:
+  // WHICH help topics the answer drew on, and whether it declined a coverage
+  // determination. Both were previously supplied wrongly — `usedTopics` credited
+  // ALL topics on every answer, and `refused` was never emitted at all, so FR-8's
+  // broker hand-off in the view was unreachable. Found by rendering the page.
+  const split = splitTrailer(answer);
+  // Stripping the trailer can leave nothing — a reply that is only protocol is
+  // not an answer, and must not render as an empty bubble.
+  if (!split.answer) return unavailable("incomplete");
+
+  // Intersected with the ids actually SENT, here and not in prompt.ts, because
+  // this is the only place that holds the corpus. A hallucinated id is dropped
+  // rather than trusted; the browser drops unknown ids again in creditedTopics(),
+  // which is belt-and-braces on purpose — a dead credit link is a client-visible
+  // defect, and this one already shipped once as `#/keep/asset/:id`.
+  const sent = new Set(topics.map((t) => t.id));
+  const usedTopics = split.sourceIds.filter((id) => sent.has(id));
+
   return json({
-    answer,
-    usedTopics: topics.map((t) => t.id),
+    answer: split.answer,
+    usedTopics,
     // Display LINES, not a count: FR-11 is "name what you drew on" so the client
     // can check it, and "3 records" is not checkable.
     usedRecords: facts.map((f) => `${f.name} — ${f.label}: ${f.value}`),
-    reason: facts.length ? "answered" : "no_records",
+    // `refused` drives FR-8's hand-off, so it wins over the records distinction:
+    // a declined coverage question is a refusal whether or not records were read.
+    reason: split.refused ? "refused" : facts.length ? "answered" : "no_records",
   });
 });

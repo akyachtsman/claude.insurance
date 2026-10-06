@@ -475,3 +475,32 @@ test("content/help-guide.json: every topic is well formed and seeds its chip", {
   // back to the client (FR-11).
   assert.equal(creditedTopics(guide, ids).length, guide.topics.length);
 });
+
+// Every topic's `route` is an address a CLIENT IS SENT TO, so it has to be
+// navigable — which is a stricter thing than "the router has a case for it".
+// Found by rendering the page: three topics shipped `#/keep/asset/:id` and
+// `#/keep/policy/:id`, whose `case` in dispatchKeep exists and whose link is
+// still dead, because `:id` arrives as the literal string ":id" and resolves to
+// no record. CLAUDE.md claimed these had been "checked against js/main.js" —
+// true, and the wrong check. This one is the right check, and it runs.
+const MAIN_PATH = new URL("../../main.js", import.meta.url);
+
+test("content/help-guide.json: every route is a navigable static Keep address", { skip: existsSync(GUIDE_PATH) ? false : "content/help-guide.json not present (T1)" }, () => {
+  const guide = JSON.parse(readFileSync(GUIDE_PATH, "utf8"));
+  const main = readFileSync(MAIN_PATH, "utf8");
+
+  // The sub-routes dispatchKeep actually answers, read out of its switch rather
+  // than hand-listed here — a list copied from the router drifts from it.
+  const keepBlock = main.slice(main.indexOf("async function dispatchKeep"));
+  const cases = new Set([...keepBlock.matchAll(/case "([a-z-]+)":/g)].map((m) => m[1]));
+  assert.ok(cases.size > 5, `dispatchKeep cases not found by the parser (got ${cases.size}) — this test is only as good as its parse`);
+  assert.ok(cases.has("help"), "dispatchKeep has no `help` case — the Help desk route is not wired");
+
+  for (const t of guide.topics) {
+    assert.ok(t.route.startsWith("#/keep"), `${t.id}: route is outside the Keep — ${t.route}`);
+    assert.ok(!t.route.includes(":"), `${t.id}: route carries a parameter placeholder — ${t.route} is not an address a client can be sent to. Point it at the list the item is picked from; \`nav\` and \`body\` carry the "open one" step.`);
+    const sub = t.route.replace(/^#\/keep\/?/, "").split("/")[0];
+    if (sub === "") continue;                      // "#/keep" — the landing route
+    assert.ok(cases.has(sub), `${t.id}: route ${t.route} has no case in dispatchKeep`);
+  }
+});

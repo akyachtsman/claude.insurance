@@ -25,13 +25,31 @@ const fnSrc = readFileSync(join(here, "index.ts"), "utf8");
 
 // Every `unavailable("x")` the function can return.
 const emitted = [...fnSrc.matchAll(/\bunavailable\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
-// Every success `reason:` literal in its final json() payload.
-const successReasons = [...fnSrc.matchAll(/reason:\s*facts\.length\s*\?\s*"([a-z_]+)"\s*:\s*"([a-z_]+)"/g)]
-  .flatMap((m) => [m[1], m[2]]);
+// Every success `reason:` literal in the final json() payload. SHAPE-INDEPENDENT
+// on purpose: the first version of this matched one exact ternary
+// (`facts.length ? "a" : "b"`) and went silently empty the moment a third reason
+// was added to it — so the only thing that noticed was the "did the parse break?"
+// assertion below, which is the only reason this is not now a hole. A scraper
+// that quietly finds nothing is worse than no scraper, because it reads green.
+const payload = fnSrc.slice(fnSrc.lastIndexOf("return json({"));
+const reasonAt = payload.indexOf("reason:");
+const closeAt = payload.indexOf("\n  });", reasonAt);
+const reasonExpr = reasonAt < 0 ? "" : payload.slice(reasonAt, closeAt < 0 ? undefined : closeAt);
+const successReasons = [...reasonExpr.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
 
 test("the function emits at least one failure reason and one success reason", () => {
   assert.ok(emitted.length > 0, "no unavailable() calls found — did the parse break?");
-  assert.ok(successReasons.length > 0, "no success reason found — did the payload shape change?");
+  assert.ok(reasonAt >= 0, "the final json() payload has no `reason:` property — did the parse break?");
+  assert.ok(successReasons.length > 0,
+    `no success reason found in ${JSON.stringify(reasonExpr.slice(0, 120))} — did the payload shape change?`);
+});
+
+// FR-8's hand-off exists in the view only because this reason can arrive. It was
+// unreachable before the trailer shipped: the function never emitted `refused`,
+// so `brokerHandoff` in help.js was dead code that read as a working feature.
+test("the function can emit `refused`, which is what drives FR-8's broker hand-off", () => {
+  assert.ok(successReasons.includes("refused"),
+    `the payload cannot emit "refused" (found ${JSON.stringify(successReasons)}), so the view's broker hand-off is unreachable`);
 });
 
 test("every failure reason the function emits is one the consumer has a notice for", () => {

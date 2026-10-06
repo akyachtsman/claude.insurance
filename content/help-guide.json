@@ -51,7 +51,7 @@
     {
       "id": "asset",
       "title": "An asset's detail",
-      "route": "#/keep/asset/:id",
+      "route": "#/keep/assets",
       "nav": "Assets \u2192 open one",
       "body": "Everything about one asset: its value and depreciation schedule, the policies covering it, and a coverage analysis showing gaps against what we would expect for that asset type.",
       "ask": "How do I check one asset?"
@@ -75,7 +75,7 @@
     {
       "id": "policy",
       "title": "A policy's detail",
-      "route": "#/keep/policy/:id",
+      "route": "#/keep/insurance",
       "nav": "Policies \u2192 open one",
       "body": "One policy in full: coverages and limits, renewal reminders, documents to download, and the form to request an enhancement.",
       "ask": "How do I look at one policy?"
@@ -91,7 +91,7 @@
     {
       "id": "request",
       "title": "Request an enhancement",
-      "route": "#/keep/policy/:id",
+      "route": "#/keep/insurance",
       "nav": "Policies \u2192 open one \u2192 Request",
       "body": "Asks your broker to change cover on a policy \u2014 raise a limit, add an item, adjust a deductible. Your broker reviews it and sends it to underwriting.",
       "ask": "How do I ask to change my cover?"

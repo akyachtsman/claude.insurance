@@ -70,10 +70,6 @@ export async function renderKeepHelp() {
       ]));
     }
 
-    // FR-10, rendered on EVERY answer regardless of what came back. A model that
-    // ignored its instructions cannot remove this line, which is the point.
-    blocks.push(el("p", { class: "k-help__ai", text: AI_NOTE }));
-
     // FR-8's hand-off. Shown when the assistant declined a coverage question,
     // which `brokerHandoff` carries so the view never has to read the answer text.
     if (shaped.brokerHandoff) {
@@ -82,6 +78,10 @@ export async function renderKeepHelp() {
         el("a", { class: "k-ilink", attrs: { href: "#/keep/insurance" }, text: "Open a policy to send a request" }),
       ]));
     }
+
+    // FR-10, rendered on EVERY answer regardless of what came back. A model that
+    // ignored its instructions cannot remove this line, which is the point.
+    blocks.push(el("p", { class: "k-help__ai", text: AI_NOTE }));
     answerRegion.replaceChildren(...blocks);
   }
 
@@ -123,6 +123,10 @@ export async function renderKeepHelp() {
           on: { click: () => { input.value = c.ask; ask(c.ask); } }, text: c.ask })))
     : null;
 
+  // `mid` (880px): an answer is prose, and prose set to the Keep's full 1200px
+  // measure runs past a comfortable line length — the ask box stretches with it
+  // and ends up a 1100px-wide single-line input. Measured at 1280px before the
+  // change.
   mount(page("help", [
     originBackRow(),
     el("h1", { class: "k-h1", text: "Help" }),
@@ -131,5 +135,5 @@ export async function renderKeepHelp() {
     form,
     error,
     answerRegion,
-  ]));
+  ], { mid: true }));
 }
