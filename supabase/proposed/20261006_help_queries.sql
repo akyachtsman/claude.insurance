@@ -1,11 +1,11 @@
 -- Help-desk query log: one row per answered question, and the state the
--- desk-ask throttle counts.
+-- help-ask throttle counts.
 --
 -- Feature 003 (specs/003-help-desk/), task T4. Satisfies FR-16 ("the endpoint
 -- is throttled per client") and carries the "Throttle, not trust" half of the
 -- plan's Key decision 4.
 --
--- WHY THE THROTTLE NEEDS STATE AT ALL. desk-ask is a paid endpoint: every
+-- WHY THE THROTTLE NEEDS STATE AT ALL. help-ask is a paid endpoint: every
 -- answered question spends provider tokens. This repo is public and CLAUDE.md
 -- publishes the demo credential — the login screen prefills it — so the JWT
 -- gate in front of the function establishes WHO is calling and nothing more. It
@@ -38,7 +38,7 @@
 -- The `with check (owner = auth.uid())` policy below independently blocks a
 -- forged owner — two layers, same reason as above.
 --
--- NOTE FOR T5 (supabase/functions/desk-ask). `default auth.uid()` evaluates to
+-- NOTE FOR T5 (supabase/functions/help-ask). `default auth.uid()` evaluates to
 -- NULL under the service-role key and `owner` is NOT NULL, so a service-role
 -- insert MUST pass `owner` explicitly — the caller id resolved from the JWT, per
 -- FR-14, never a value from the request body. Only a client-session insert gets
@@ -108,7 +108,7 @@ create index if not exists help_queries_owner_asked_at_idx
 -- DESTRUCTIVE: that also discards every recorded question, which is the
 -- throttle's entire memory, so every client starts the following hour with a
 -- fresh quota. It does NOT leave the feature half-working: per the plan's
--- failure-mode table, a missing help_queries makes desk-ask fail closed with
+-- failure-mode table, a missing help_queries makes help-ask fail closed with
 -- {answer:null, reason:"unavailable"} and the help page renders its quiet
 -- notice (FR-17). The inverse disables the help desk; it does not unmeter it.
 

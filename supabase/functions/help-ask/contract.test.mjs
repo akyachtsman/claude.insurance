@@ -1,4 +1,4 @@
-// contract.test.mjs — pins the desk-ask wire format to what js/keep/logic/help.js
+// contract.test.mjs — pins the help-ask wire format to what js/keep/logic/help.js
 // actually consumes.
 //
 // WHY THIS FILE EXISTS. The function and the logic module are two halves of one

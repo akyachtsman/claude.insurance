@@ -24,11 +24,11 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 
 ## Application Architecture
 - `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
-- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep` = landing/home, `#/keep/login`, `#/keep/list` = My Entities, `#/keep/entities` = Relationships map, `#/keep/entity/:id`, `#/keep/asset/:id`, `#/keep/policy/:id`, `#/keep/add-asset`, `#/keep/add-entity`, `#/keep/documents`, `#/keep/insurance` = all policies, `#/keep/requests` = My requests, `#/keep/request/:id`, `#/keep/assets` = all assets, `#/keep/grid`, `#/keep/account`, `#/keep/security`). A route guard sends unauthenticated Keep routes to login. Origin-aware back via a router nav stack (`js/nav.js`). Toggles `body.in-keep` to swap site chrome.
+- `js/main.js` — hash router: public (`#/`, `#/residential`, `#/commercial`, `#/coverage/:id`, `#/qualify`, `#/summary`) + the Keep (`#/keep` = landing/home, `#/keep/login`, `#/keep/list` = My Entities, `#/keep/entities` = Relationships map, `#/keep/entity/:id`, `#/keep/asset/:id`, `#/keep/policy/:id`, `#/keep/add-asset`, `#/keep/add-entity`, `#/keep/documents`, `#/keep/insurance` = all policies, `#/keep/requests` = My requests, `#/keep/request/:id`, `#/keep/assets` = all assets, `#/keep/grid`, `#/keep/help` = Help desk, `#/keep/account`, `#/keep/security`). A route guard sends unauthenticated Keep routes to login. Origin-aware back via a router nav stack (`js/nav.js`). Toggles `body.in-keep` to swap site chrome.
 - `js/views/` — public marketing views: `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`.
 - `js/keep/` — the Keep feature, split by layer:
-  - `js/keep/views/` (rendering) — `keep.js` (entry: login, landing/home with renewals report + at-a-glance boxes, documents, account, security, add-entity), `entities.js` (My Entities list/cards/map + entity detail + card drag-reorder), `assets.js` (assets table + asset detail + add-asset), `policies-view.js` (policy detail + request form + My requests), `shell.js` (shared chrome: app frame, header menus, search, back-nav, doc download, formatters), `relmap-view.js` (Relationships-map SVG engine).
-  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `asset-meta` (`ASSET_META` — the
+  - `js/keep/views/` (rendering) — `keep.js` (entry: login, landing/home with renewals report + at-a-glance boxes, documents, account, security, add-entity), `entities.js` (My Entities list/cards/map + entity detail + card drag-reorder), `assets.js` (assets table + asset detail + add-asset), `policies-view.js` (policy detail + request form + My requests), `shell.js` (shared chrome: app frame, header menus, search, back-nav, doc download, formatters), `relmap-view.js` (Relationships-map SVG engine), `help-view.js` (the Help desk page).
+  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `help` (Help-desk question validation, suggestion chips, answer shaping), `asset-meta` (`ASSET_META` — the
     only one of these on the render path). The offline fixture is **not** here:
     it lives in `js/keep/fixtures/sample.mjs`, deliberately outside `logic/`.
 - **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/logic/asset-meta.js` holds `ASSET_META` (asset-type icon/colour/label — on the render path);
@@ -56,7 +56,12 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   reveal/count-up observers
 - `js/test-settings.mjs` — test-only fixture (reads `content/rule-defaults.json`
   so the unit tests exercise the real seed values); never in `index.html`
-- `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`)
+- `content/` — `coverage.json` (hub topics), `questionnaire.json` (branched schema + glossary), `rule-defaults.json` (seed thresholds mirroring `rule_settings`), `help-guide.json`
+  (the Help desk's 15-topic corpus — **read by both halves**: the browser for the
+  suggestion chips and the credited-source titles, the `help-ask` Edge Function
+  for the prompt, so chips, prompt and credits cannot drift apart. Every topic's
+  `route` must resolve to a real `case` in `dispatchKeep`; all 15 were checked
+  against `js/main.js` when it was written)
 - `css/` — `tokens.css` (design tokens), `base.css`, `components.css`,
   `forms.css`, `views.css`, `motion.css` (public site) + `keep.css` (portal,
   `k-` prefixed); self-hosted OFL fonts in `css/fonts/`
@@ -74,7 +79,18 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 - `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
   and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
   `notify-renewal` functions are still to come.
-  - ⚠️ **`desk-ask` is a retired stub, not part of this system.** It is still
+  - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
+    endpoint. JWT verification stays **ON** (unlike `notify-enhancement`): it
+    spends money per call and reads the caller's own records. Written and merged,
+    **not yet deployed**; it needs the `help_queries` migration applied and
+    `ANTHROPIC_API_KEY` set first (owner gate). Until then `#/keep/help` renders
+    and every ask shows the plain "not available" notice — FR-17's single failure
+    path, which is why the page is shippable ahead of the deploy.
+  - ⚠️ **`desk-ask` is a retired stub, not part of this system — and NOT an
+    older name for `help-ask` above.** The two are easy to confuse because 003
+    was first planned to deploy straight over this stub (`specs/003-help-desk/plan.md`,
+    Key decision 1, revised); that was rejected precisely so this record could
+    stay unambiguous. `desk-ask` is still
     deployed here and reads ACTIVE, which an earlier version of this line listed
     alongside `notify-enhancement` as though both were working features. Its
     source (fetched 2026-10-05) is a 410 responder whose own comment says it
@@ -193,7 +209,33 @@ profile**, never by listing a directory.
   root** and enters `js/vendor/` itself — do not `cd` there first. Before that
   `cd` existed the block wrote to the root and left the deployed bundle
   untouched, so a security refresh would have verified a file nobody serves.
-- **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client.
+- **Secrets stay server-side:** the email provider key lives only in the Edge Functions (`notify-enhancement` today; `notify-lead` when it ships). No service-role key is ever shipped to the client. `ANTHROPIC_API_KEY` (feature 003) is the same: an Edge Function secret only, never a client one — a browser-held model key is a blank cheque drawn on the owner's account, readable by anyone who opens devtools.
+- **Anthropic is a sub-processor as of feature 003 (the Help desk).** `help-ask`
+  sends the question the client typed, the `content/help-guide.json` corpus, and
+  a **compact digest** of that client's own records to the Claude API to ground
+  the answer. The digest is **exactly these columns** (`help-ask/index.ts`):
+  entities `name, kind`; assets `name, kind, value`; policies `line, carrier,
+  policy_number, renewal_date, premium_amount`. Policy numbers are in because
+  "read back what's on my file" is a question the desk is *for*. What this means
+  in practice:
+  - It is **owner-scoped server-side**, from the JWT — never from the request
+    body. The browser already holds those rows under RLS so sending them with the
+    question would be simpler, and is the one shape that cannot be made safe: a
+    crafted body is a request to ground an answer on records the caller does not
+    own. (Feature 002's review found exactly that as an IDOR.)
+  - **No contact details, no credentials, no document contents and no other
+    client's rows** go in the digest — the column list above is the whole of it,
+    and the row **ids never cross the boundary** — the join keys stay inside the
+    function, and `prompt.ts`'s `RecordFact` is `{kind, name, label, value}`.
+    `supabase/functions/help-ask/prompt.ts` renders it. That module is pure
+    and unit-tested, so everything that leaves the project is reviewable in one
+    file. Widening the `select` widens what is disclosed; treat it as a change to
+    this constraint, not an implementation detail.
+  - **Spend is capped before the call, not after:** 20 asks per client per hour,
+    reserved in `help_queries` *ahead* of the model call and released only if
+    nothing was billed. A failed model call is still billed, so recording usage
+    on success only is a bypass. A throttle that cannot count **fails closed**.
+  - An Anthropic Console workspace spend limit is the backstop if that has a bug.
 - **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
   there is no lead-reading path in the static app. ⚠️ The second half of this
   line used to read "so no privileged read path exists in the static app",
@@ -326,7 +368,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only) |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states) |
 
 ⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
 2026-10-05** (headless chromium, local static server) — not read off the source.
@@ -357,6 +399,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S7 | Summary empty state | Deep-link `#/summary` with no prior answers → a friendly "No summary yet" empty state (the store is in-memory) | Blank page, crash, or JS error instead of the empty state |
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
 | S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-welcome__h`, "Welcome back, …"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
+| S10 | Help desk page | Signed in, open `#/keep/help` → heading `.k-h1` "Help", the AI-generated label (`.k-help__ai`) present **before** any question is asked, suggestion chips (`.k-chiptog`) and the ask box (`.k-help__input`). Submitting a blank question shows `.k-error` and sends nothing. Submitting a real question yields **either** an answer (`.k-help__a`) or the unavailable notice (`.k-help__notice`) — never a blank region, and the `.k-help__ai` label is present in the answer case too | The AI-generated label is missing in either state, a blank question reaches the endpoint, or the answer region stays empty after an ask |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
@@ -368,7 +411,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 |---|---|
 | `LIVE_TARGET` in `app.spec.js` | **Load-bearing; absent upstream.** Skips S2/S3/S9 when `APP_URL` is localhost. Without it those scenarios run against a static server with no backend and fail — and since #244 made `qa.yml`'s ui-tests job **blocking**, that reds every push to `main`. |
 | `readCredentialFromClaude()` | Upstream is env-only (`ce2140a`). Kept so local runs work without the secret; the credential is already in this file's UI Test Configuration table, so reading it here exposes nothing new. |
-| S5–S9 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S9 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
+| S5–S10 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S10 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
 | ~~`check-contrast.js` carries `css/tokens.css`~~ **RESOLVED — adopted upstream** | No longer a divergence. The template now checks `styles/tokens.css` **or** `css/tokens.css` by default and takes `--tokens <file>` for anything else, which is exactly what was reported. Row kept only so the next refresh does not re-add it as a finding; delete it after one more sync. |
@@ -377,7 +420,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
 | `awaitAuthReady` consults an already-arrived response | **Absent upstream; a real bug in the upstream kit, found by Codex on #253 and reproduced before fixing.** `page.waitForResponse()` resolves only on a FUTURE response — Playwright does not replay ones already received — and every caller arms it AFTER awaiting `page.goto()`. So a readiness request that completes DURING navigation is missed and the wait times out, failing S2/S3/S4 with *"never resolved"* on a request that did arrive. Measured: `TEST_AUTH_READY_REQUEST=tokens.css` failed S4 at 25000ms; with the fix it passes in 6.8s, and the SELECTOR and default paths are unchanged. The fix is an `auto` fixture recording matching responses from before the body navigates, plus a check ahead of the wait. The SELECTOR path never had this race (`waitForSelector` with `state:'attached'` matches an element already present), which is why only the REQUEST branch is touched. **Report upstream at the next `/refresh-repo`** — the whole kit has it, and a refresh that takes the kit verbatim would delete this. |
-| `renderWitness` extended to S5–S9 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S9 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
+| `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
 ### ✅ Rulebook synced 2026-10-06 (was six weeks / 43 commits stale)

@@ -1,10 +1,16 @@
-// desk-ask — the Help desk endpoint (feature 003).
+// help-ask — the Help desk endpoint (feature 003).
 //
-// This slot previously held a retired 410 stub, deployed by mistake into the
-// wrong project and neutralised. CLAUDE.md carried "delete it" as a pending
-// owner decision; repurposing it closes that at no cost. The slot already
-// verifies JWTs, which this feature needs and `notify-enhancement` deliberately
-// does not.
+// A NEW function slug, deliberately not the retired `desk-ask` stub this feature
+// was first drafted over. Deploying on top of that stub would have shipped 003
+// and removed the dead endpoint in one owner action, which is tempting — but it
+// also silently changes what a deployed name means, and this repo has been bitten
+// repeatedly by a record that still reads as current. `desk-ask` stays
+// unambiguously retired and its deletion stays a separate, closable item;
+// "help-ask" also matches what the feature is now called everywhere else.
+//
+// Unlike `notify-enhancement`, this function KEEPS Supabase's JWT verification
+// on: it spends money per call and reads the caller's own records, so an
+// unauthenticated path is not something to opt out of.
 //
 // THE RULE THIS FILE EXISTS TO HOLD: records are read SERVER-SIDE, scoped to the
 // caller's own owner id resolved from their JWT. The browser already holds those

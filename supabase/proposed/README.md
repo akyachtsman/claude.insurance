@@ -115,10 +115,10 @@ they do: CLAUDE.md requires explicit owner approval for migrations.
 
 **What it is.** One row per answered help-desk question
 (`id`, `owner`, `asked_at`, `question`), plus the RLS, column grants and index
-around it. It is the state the `desk-ask` throttle counts, satisfying **FR-16**
+around it. It is the state the `help-ask` throttle counts, satisfying **FR-16**
 ("the endpoint is throttled per client").
 
-**Why the throttle needs state at all** (the plan's Key decision 4). `desk-ask`
+**Why the throttle needs state at all** (the plan's Key decision 4). `help-ask`
 is a paid endpoint — every answered question spends provider tokens. This repo
 is public and CLAUDE.md publishes the demo credential, which the login screen
 prefills, so the JWT gate in front of the function establishes *who* is calling

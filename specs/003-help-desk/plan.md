@@ -3,18 +3,29 @@
 Spec: `specs/003-help-desk/spec.md`. Stack unchanged — vanilla ES modules, no
 build, Supabase + RLS, one Edge Function.
 
-## Key decision 1 — `desk-ask` becomes this feature's endpoint
+## Key decision 1 — a NEW `help-ask` function, not the retired `desk-ask` stub
 
-The repo already carries a retired `desk-ask` Edge Function: deployed, ACTIVE,
-JWT-verified, and a 410 responder whose own comment says it "was deployed by
-mistake into the wrong project and has been neutralized… Safe to delete
-entirely." CLAUDE.md records deleting it as a pending owner decision.
+**Revised 2026-10-06.** This decision originally read *"`desk-ask` becomes this
+feature's endpoint"*: the repo carries a retired `desk-ask` Edge Function —
+deployed, ACTIVE, JWT-verified, a 410 responder whose own comment says it "was
+deployed by mistake into the wrong project and has been neutralized… Safe to
+delete entirely" — and CLAUDE.md records deleting it as a pending owner decision.
+Deploying 003 on top of it would have shipped the feature and removed the dead
+endpoint in ONE owner action.
 
-Repurposing that slot instead of deleting it resolves that item and costs
-nothing: the name fits, the function is already JWT-verified (which this feature
-needs, unlike `notify-enhancement`), and no client code references the stub.
-Its source is vendored into `supabase/functions/desk-ask/` for the first time —
-the stub was deliberately never committed.
+That trade was rejected. Overwriting a deployed name silently changes what that
+name means, and between merge and deploy the repo would hold a `desk-ask` source
+that does not match the `desk-ask` that is live — the exact "a stale record reads
+as current" failure this repo has been bitten by three times in recent sessions
+(the Playwright ceiling, the `.app-header h1` selector, the `js/format.js` line).
+The cost of the clean split is one extra owner action; the cost of the collision
+is a permanently ambiguous record.
+
+So: the endpoint is **`help-ask`**, a new slug that also matches what the feature
+is called everywhere else after the rename. `desk-ask` stays unambiguously
+retired and its deletion stays a separate, closable owner item. JWT verification
+stays ON (unlike `notify-enhancement`), because this endpoint spends money per
+call and reads the caller's own records.
 
 ## Key decision 2 — records are read server-side, never sent by the client
 
@@ -103,12 +114,12 @@ No DOM, no network.
 `supabase/proposed/20261006_help_queries.sql`, with inverse + client-session
 probe, matching the two files already there.
 
-**T5 — `supabase/functions/desk-ask/index.ts`** · depends: T1
-Replaces the stub. CORS, JWT caller resolution, throttle check, owner-scoped
+**T5 — `supabase/functions/help-ask/index.ts`** · depends: T1
+CORS, JWT caller resolution, throttle check, owner-scoped
 record read, prompt build, Claude call, `{answer, usedTopics, usedRecords}`.
 Every failure returns a shaped `{answer:null, reason}` — FR-17.
 
-**T6 — `supabase/functions/desk-ask/prompt.ts` + test** · depends: T1
+**T6 — `supabase/functions/help-ask/prompt.ts` + test** · depends: T1
 Pure `buildPrompt(question, guide, records)`. The spec's refusal table goes in
 verbatim as worked examples. Client text inside `<question>` delimiters.
 
@@ -125,14 +136,14 @@ Heading, chips, ask box, answer region, the FR-10 label rendered unconditionally
 **T10 — styles** · depends: T8 — `css/keep.css`, tokens only.
 
 **T11 — manifest + docs** · depends: T9
-`index.html` MODULES; CLAUDE.md architecture, routes, the `desk-ask` entry
-(no longer a retired stub), and Security Constraints: Anthropic as a new
+`index.html` MODULES; CLAUDE.md architecture, routes, a `help-ask` entry beside
+the `desk-ask` one (which stays, still retired), and Security Constraints: Anthropic as a new
 sub-processor, the `ANTHROPIC_API_KEY` secret, the throttled endpoint.
 
 **T12 — S10 scenario** · depends: T9 — a row in CLAUDE.md's scenario table.
 
 **T13 — owner gate** · depends: T11 · **owner approval**
-Apply T4's migration → set `ANTHROPIC_API_KEY` → deploy `desk-ask` → merge →
+Apply T4's migration → set `ANTHROPIC_API_KEY` → deploy `help-ask` → merge →
 verify. Merging first ships a help page against a table that does not exist.
 
 **T14 — gates** · depends: T2, T10, T12 — all 11 Required Commands.

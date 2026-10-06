@@ -1,4 +1,4 @@
-// desk-ask/prompt.ts — builds the Help desk's prompt. PURE: no network, no
+// help-ask/prompt.ts — builds the Help desk's prompt. PURE: no network, no
 // Deno.env, no SDK import, so prompt.test.ts can exercise it without a key.
 //
 // This module carries feature 003's safety story. The spec's fact/advice

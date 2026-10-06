@@ -392,7 +392,7 @@ export async function addEnhancementRequest({ subject, message, policyId, assetI
 }
 
 // ── Help desk (feature 003) ─────────────────────────────────────────────────
-// Asks the desk-ask Edge Function. Sends ONLY the question: the function reads
+// Asks the help-ask Edge Function. Sends ONLY the question: the function reads
 // this client's records server-side, scoped to the owner id it resolves from the
 // JWT, because a request body is client-controlled and grounding an answer on
 // body-supplied records is the IDOR feature 002's review found.
@@ -402,7 +402,7 @@ export async function addEnhancementRequest({ subject, message, policyId, assetI
 // one path (FR-17) and a null answer can never render as text.
 export async function askHelp(question, { signal } = {}) {
   try {
-    const { data, error } = await supabase.functions.invoke("desk-ask", {
+    const { data, error } = await supabase.functions.invoke("help-ask", {
       body: { question },
       ...(signal ? { signal } : {}),
     });

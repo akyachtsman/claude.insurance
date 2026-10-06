@@ -1,6 +1,6 @@
 // keep/logic/help.js — pure helpers for the Keep's help desk (#/keep/help).
 // No DOM, no network, no imports: question validation, suggestion chips derived
-// from the help corpus, and the shaping of whatever the `desk-ask` Edge Function
+// from the help corpus, and the shaping of whatever the `help-ask` Edge Function
 // returns. Unit-tested (help.test.mjs).
 //
 // Spec: specs/003-help-desk/spec.md · Plan: specs/003-help-desk/plan.md (T3).

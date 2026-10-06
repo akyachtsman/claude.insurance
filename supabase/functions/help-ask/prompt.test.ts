@@ -1,5 +1,5 @@
 // prompt.test.ts — Deno tests for the Help desk prompt builder.
-// Run: deno test supabase/functions/desk-ask/prompt.test.ts
+// Run: deno test supabase/functions/help-ask/prompt.test.ts
 //
 // ⚠️ Deno is NOT installed in the agent sandbox, so these were additionally
 // exercised through a Node shim that strips the type annotations and runs the
