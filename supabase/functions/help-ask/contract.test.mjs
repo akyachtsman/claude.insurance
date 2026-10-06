@@ -154,3 +154,19 @@ test("nothing AFTER the model call releases the reservation", () => {
   assert.ok(!/releaseAnd\(|help_queries"\)\s*\.delete\(/.test(fnSrc.slice(bill)),
     "the reservation is released after the model call — that call was billed");
 });
+
+test("the daily cap derives its retryAfter instead of reusing the hourly 3600", () => {
+  // An hour is an UPPER bound for the hourly window, so 3600 there is
+  // conservative and never a false promise. On the rolling 24-hour window it is
+  // the opposite: 400 calls in the last hour means the cap holds for nearly
+  // another 23, and "try again in an hour" is a promise the endpoint cannot keep.
+  const at = fnSrc.indexOf("DAILY_TOTAL_CAP) {");
+  assert.ok(at > 0, "could not locate the daily-cap branch — did the parse break?");
+  const branch = fnSrc.slice(at, fnSrc.indexOf("\n  }", at));
+  assert.ok(!/retryAfter:\s*3600/.test(branch),
+    "the daily cap reports the hourly 3600, which under-states a 24-hour window");
+  assert.ok(/86_400_000|86400000/.test(branch),
+    "the daily cap does not derive its wait from the 24-hour window");
+  assert.ok(/retryAfter \?/.test(branch),
+    "the daily cap must omit retryAfter when it cannot be derived — a wrong number is worse than none");
+});

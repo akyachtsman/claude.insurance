@@ -220,7 +220,15 @@ profile**, never by listing a directory.
   a **compact digest** of that client's own records to the Claude API to ground
   the answer. The digest is **exactly these columns** (`help-ask/index.ts`):
   entities `name, kind`; assets `name, type, value`; policies `line, carrier,
-  number, renewal_date, premium_amount, premium_period`. Policy numbers are in
+  number, renewal_date, premium_amount, premium_period, coverages`. **`coverages`
+  was added 2026-10-06 and is the widest of these** — it is the broker-written
+  jsonb the policy view renders limits from, so coverage LABELS and LIMITS now
+  cross the boundary (capped at 20 lines per policy, since it is unbounded and
+  re-sent on every question). It is in because the prompt lists "Your flood
+  policy's dwelling limit is $400,000" as an ALLOWED fact and nothing loaded the
+  column it lives in, so the feature could not answer its own headline example.
+  Reading a limit back is a fact; whether the limit is *enough* is the
+  determination the boundary refuses. Policy numbers are in
   because "read back what's on my file" is a question the desk is *for* — and
   until 2026-10-06 that column was **selected and then discarded**, so this
   paragraph over-stated what crossed the boundary while the feature

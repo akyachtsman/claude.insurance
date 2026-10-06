@@ -68,6 +68,9 @@ const HOURLY_CAP = 20;
 // Console spend limit makes as the backstop — this one just makes it earlier,
 // cheaper, and visible as "unavailable" rather than as a bill.
 const DAILY_TOTAL_CAP = 400;
+// Per-policy coverage lines sent to the model. Bounded because `coverages` is
+// broker-written jsonb with no length limit and it is re-sent on every question.
+const COVERAGES_PER_POLICY = 20;
 const QUESTION_MAX = 500;
 
 const CORS = {
@@ -169,7 +172,7 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
   if (!assetIds.length) return facts;
 
   const policies = read(await admin.from("policies")
-    .select("line, carrier, number, renewal_date, premium_amount, premium_period, asset_id")
+    .select("line, carrier, number, renewal_date, premium_amount, premium_period, coverages, asset_id")
     .in("asset_id", assetIds), "policies");
   const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
   for (const p of policies) {
@@ -193,6 +196,22 @@ async function ownRecords(admin: ReturnType<typeof createClient>, owner: string)
       // and a month, and a client reading a premium back needs to know which.
       const per = p.premium_period ? ` / ${p.premium_period}` : "";
       facts.push({ kind: "policy", name: p.line, label: "premium", value: `$${p.premium_amount}${per}` });
+    }
+    // COVERAGE LIMITS. `policies.coverages` is the system of record the policy
+    // view renders from, and without it the feature could not answer its own
+    // advertised example — the prompt lists "Your flood policy's dwelling limit
+    // is $400,000" as an ALLOWED fact (spec FR-8's table), while nothing loaded
+    // the column it lives in. The model would have had to say the records don't
+    // say, or invent it. Reading a limit back is a FACT; whether that limit is
+    // enough is the determination the boundary refuses, and that distinction is
+    // in the prompt, not here.
+    //
+    // Capped per policy: this is broker-written jsonb of unbounded length, and
+    // every entry costs prompt tokens on every question the client asks.
+    for (const c of (Array.isArray(p.coverages) ? p.coverages : []).slice(0, COVERAGES_PER_POLICY)) {
+      if (c && c.label && c.limit != null) {
+        facts.push({ kind: "policy", name: p.line, label: `${c.label} limit`, value: String(c.limit) });
+      }
     }
   }
   return facts;
@@ -287,8 +306,27 @@ Deno.serve(async (req: Request) => {
   //
   // Fails CLOSED, like the reservation: a cap that cannot be counted must never
   // read as "under the cap".
-  if (totalErr || (total ?? 0) > DAILY_TOTAL_CAP) {
-    return await releaseAnd(totalErr ? "unavailable" : "rate_limited", totalErr ? {} : { retryAfter: 3600 });
+  if (totalErr) return await releaseAnd("unavailable");
+  if ((total ?? 0) > DAILY_TOTAL_CAP) {
+    // NOT 3600. For the HOURLY cap an hour is an upper bound — the window can
+    // only be shorter — so it is conservative and never a false promise. For
+    // this ROLLING 24-HOUR window it is the opposite: 400 calls in the last hour
+    // means the cap holds for nearly another 23, and "try again in an hour"
+    // would be a promise the endpoint cannot keep.
+    //
+    // The cap clears when enough rows age out of the window. We hold `total`
+    // rows including the reservation about to be released, so `total - CAP` of
+    // the oldest must expire before the next ask fits; that row's `asked_at`
+    // plus 24h is the answer. If it cannot be read, send NO retryAfter — the
+    // client then says "in a few minutes" instead of a number that is wrong.
+    const offset = Math.max(0, (total ?? 0) - DAILY_TOTAL_CAP - 1);
+    const { data: oldest } = await admin.from("help_queries")
+      .select("asked_at").gte("asked_at", dayAgo)
+      .order("asked_at", { ascending: true }).range(offset, offset);
+    const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
+    const secs = Number.isFinite(at) ? Math.ceil((at + 86_400_000 - Date.now()) / 1000) : NaN;
+    const retryAfter = Number.isFinite(secs) && secs > 0 ? secs : null;
+    return await releaseAnd("rate_limited", retryAfter ? { retryAfter } : {});
   }
 
   const topics = await loadGuide();
