@@ -8,6 +8,7 @@ import {
   TOPIC_FIELDS,
   ANSWER_REASONS,
   FAILURE_NOTICE,
+  cleanQuestion,
   validateQuestion,
   suggestionChips,
   isWellFormedTopic,
@@ -75,16 +76,45 @@ test("validateQuestion: one character over QUESTION_MAX is rejected", () => {
   assert.match(r.error, new RegExp(String(QUESTION_MAX)));
 });
 
-// The help_queries migration constrains length(btrim(question)) <= 500, so the
-// length here is measured on the TRIMMED text. If it were measured raw, the two
-// would disagree and the disagreement would surface as a failed INSERT *after*
-// the client was told the question was fine.
+// The length is measured on the TRIMMED text, which is what cleanQuestion()
+// produces and the caller sends. Padding a question to the limit therefore does
+// not refuse it.
 test("validateQuestion: trailing whitespace does not push an at-limit question over", () => {
   assert.deepEqual(validateQuestion("  " + "x".repeat(QUESTION_MAX) + "   "), { ok: true });
 });
 
 test("validateQuestion: QUESTION_MAX matches the stored column cap", () => {
-  assert.equal(QUESTION_MAX, 500); // supabase/proposed help_queries: question text <= 500
+  assert.equal(QUESTION_MAX, 500); // supabase/proposed help_queries: char_length(question) <= 500
+});
+
+test("cleanQuestion: is the one normalisation, and is what validation measured", () => {
+  assert.equal(cleanQuestion("  How do I add a trust?  "), "How do I add a trust?");
+  assert.equal(cleanQuestion("   "), "");
+  for (const bad of [undefined, null, 42, {}, []]) assert.equal(cleanQuestion(bad), "");
+});
+
+// The migration's constraint is asymmetric on purpose:
+//   check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)
+// — non-blank on the TRIMMED text, the cap on the RAW text, so padding cannot
+// store more than 500 characters. Client-side validation exists to stop a
+// question being accepted here and then refused by the INSERT, so anything
+// validateQuestion accepts must satisfy that check WHEN SENT AS cleanQuestion()
+// output. This test is that implication, one-directional on purpose.
+test("validateQuestion + cleanQuestion satisfy the help_queries check constraint", () => {
+  const dbAccepts = (sent) => typeof sent === "string" && sent.trim().length >= 1 && sent.length <= QUESTION_MAX;
+  const samples = [
+    "", "   ", "\n", "ok?", "  ok?  ", "x".repeat(QUESTION_MAX),
+    "  " + "x".repeat(QUESTION_MAX) + "   ", "x".repeat(QUESTION_MAX + 1),
+    " " + "x".repeat(QUESTION_MAX + 1) + " ", 42, null, undefined, {},
+  ];
+  let accepted = 0;
+  for (const s of samples) {
+    if (!validateQuestion(s).ok) continue;
+    accepted += 1;
+    const sent = cleanQuestion(s);
+    assert.ok(dbAccepts(sent), `validation accepted ${sent.length} chars the constraint would reject`);
+  }
+  assert.ok(accepted >= 4, "the sample set has to actually exercise the accepting branch");
 });
 
 test("validateQuestion: errors are plain language a client can act on", () => {

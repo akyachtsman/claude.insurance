@@ -71,6 +71,19 @@ function str(v) {
   return typeof v === "string" ? v.trim() : "";
 }
 
+// The question as it should be SENT and STORED: trimmed, and "" for anything
+// that is not a usable string. Callers validate and send the same value —
+//   const q = cleanQuestion(input.value);
+//   const v = validateQuestion(q); if (!v.ok) { show(v.error); return; }
+//   await askHelp(q);
+// — so the length validateQuestion measured is the length the check constraint
+// sees. Send the raw input instead and 500 characters of question plus trailing
+// spaces passes here and is rejected by the database, which is the one failure
+// mode client-side validation exists to prevent.
+export function cleanQuestion(text) {
+  return str(text);
+}
+
 // Validate a question before it is sent. Returns { ok } or { ok:false, error }.
 // Errors are shown to the client, so they are sentences, not codes.
 export function validateQuestion(text) {
@@ -80,10 +93,11 @@ export function validateQuestion(text) {
   // (requests.js's `(subject || "").trim()` throws on a number; this does not.)
   const q = str(text);
   if (!q) return { ok: false, error: "Type a question to ask the help desk." };
-  // Measured on the TRIMMED text because the migration constrains
-  // `length(btrim(question)) <= 500`. Measuring the raw text instead would let
-  // the two disagree, and the disagreement surfaces as a failed INSERT *after*
-  // the client has been told the question is fine.
+  // Measured on the TRIMMED text — the text cleanQuestion() produces and the
+  // caller sends. The migration's cap is on the raw column value, so the two
+  // agree exactly when the caller sends what was validated; a caller that sends
+  // the raw input instead can still be refused by the INSERT *after* being told
+  // the question was fine, which is why cleanQuestion() is the documented entry.
   if (q.length > QUESTION_MAX) {
     // "to N or fewer", not requests.js's "under N": the limit is inclusive, and
     // a client who hits exactly 500 should not be told 500 is too many.
