@@ -123,48 +123,57 @@ not registered — doing so asserts their current lists are invariants, a broade
 claim than has been established. **The file holds no comments; JSON has none,
 and a `_comment` key is read as a workflow filename and fails the guard.**
 
-**Local Playwright ceiling — recorded 2026-08-26; webkit/firefox half
-re-verified 2026-10-05.** The browser-egress half was NOT re-verified (see the
-note at the end of this section); it is carried forward unchanged. In an agent sandbox
-**S1/S4/S7/S8 pass on chromium; S5/S6 do not; the webkit profiles do not run at
-all.** Two observed causes. `global.md` → **Network Access Playbook** governs
-browser-side network failures; this section only records what was measured here.
+**Local Playwright ceiling — MEASURED 2026-10-06, replacing a wrong record.**
+The previous version of this section said *"the webkit profiles do not run at
+all"* and *"no webkit or firefox in the sandbox image"*, re-verified 2026-10-05
+by listing `/opt/pw-browsers`. **Both claims were wrong, and the method was the
+one `test.md` forbids.** That section says: *"Absent is not unavailable — a
+browser missing from the image may be installable. Run the ladder rather than
+judging by eye."* This file even stated the principle while recording an
+eye-check as verification; the tool that settles it
+(`.github/scripts/browser-ladder.js`) was not installed here until this refresh,
+which is the whole reason the wrong answer survived two sessions.
 
-- **No webkit or firefox in the sandbox image** (checked in three sandboxes
-  2026-08-26; **re-checked 2026-10-05 in a fresh container — still chromium
-  only**: `/opt/pw-browsers` holds chromium, two pinned chromium builds, their
-  headless shells and ffmpeg, nothing else), so `tablet` and `iphone` fail at
-  launch. *Absent
-  is not unavailable* — a missing browser may be installable, so treat this as
-  "not present today", not "impossible". CI has both.
-- **Chromium could not complete an HTTPS request to the hosts S5/S6 need**
-  (Supabase REST, and previously esm.sh), so those scenarios cannot load
-  `rule_settings` and compute a `.need`. `curl` reached the same Supabase URL
-  with a 200 while chromium threw `Failed to fetch`.
+What is actually true, measured by running it:
+
+| check | result |
+|---|---|
+| `browser-ladder.js webkit` | **LAUNCHES** at rung `install --with-deps` |
+| `browser-ladder.js firefox` | **LAUNCHES** at rung `install` |
+| `--project=tablet` (webkit), S1 + S7 | **2 passed**, 15.5s |
+| `--project=iphone` (webkit), S1 + S7 + S8 | **3 passed**, 14.5s |
+
+So the webkit profiles RUN LOCALLY. They need one `playwright install
+--with-deps webkit` first; absent from the image is not absent from the
+sandbox. A stale ceiling reads as current and silently suppresses a check that
+would catch a real defect — this one suppressed two whole viewport profiles.
+
+**What still does not run here: S5/S6/S9**, which need a live Supabase read the
+sandbox browser cannot complete. That half of the record is unchanged and was
+NOT re-measured on 2026-10-06.
+
+⚠️ **The ladder grades browser STARTUP only, and says so itself:** *"network
+egress, DNS, TLS, filesystem limits and every other sandbox constraint are all
+still open questions."* A launching browser is not a passing suite.
 
 ⚠️ **Do NOT treat "curl 200 + browser failure" as proof of environment.** That
-inference was retracted upstream (`claude.directives` #331, `d886513`) and it is
-unsound in both directions: curl succeeding shows the *host* is reachable from
-the sandbox, but the browser failing is equally consistent with a real app
-defect — a JS exception before the fetch, a bad URL, a selector regression. It
-decides nothing. The wrong version of this rule tells you to dismiss genuine
-failures, which is the expensive mistake.
-
-Likewise **do not classify by failure duration.** A fast uniform failure is also
-a config or import throw; a 200 page with no DOM is also an app exception. Grade
-on **what actually happened** — read the log and name the assertion — never on a
-cheap correlate.
+inference was retracted upstream (`claude.directives` #331, `d886513`) and is
+unsound in both directions: curl succeeding shows the *host* is reachable, but
+the browser failing is equally consistent with a real app defect — a JS
+exception before the fetch, a bad URL, a selector regression. It decides
+nothing. Likewise **do not classify by failure duration.** Grade on **what
+actually happened** — read the log and name the assertion — never on a cheap
+correlate.
 
 Vendoring the Supabase client (2026-08-26) fixed the *module-load* half and
-recovered S7/S8 — the app now boots offline. It did not change the *runtime
+recovered S7/S8 — the app boots offline. It did not change the *runtime
 request* half, which is why S5/S6 still fail here.
 
 **What would make this record wrong** (re-check before relying on it): the
-sandbox image gains webkit/firefox, or gains a browser egress path; the proxy
-configuration changes; S5/S6 stop depending on a live Supabase read; or any
-listed scenario starts passing locally. A ceiling that is stale reads as current
-and silently suppresses a check that would now catch a real defect — nothing
-goes red when that happens, so the date above matters.
+sandbox gains a browser egress path; the proxy configuration changes; S5/S6 stop
+depending on a live Supabase read; or `browser-ladder.js` stops reporting
+LAUNCHES for webkit or firefox. Re-check by **running the ladder and the
+profile**, never by listing a directory.
 
 ## Project-Specific Security Constraints
 - **Public anonymous lead capture (accepted trade-off):** the questionnaire is anonymous (no login), so the client uses the Supabase **anon/publishable key** and can INSERT into `leads`. Mitigated by RLS: anon has **INSERT-only** on `leads` with column/shape checks and **no SELECT** (no lead harvesting), and **SELECT-only** on `rule_settings`. A honeypot field guards against trivial bots; revisit a CAPTCHA if abused.
