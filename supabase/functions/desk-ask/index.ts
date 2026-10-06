@@ -138,15 +138,41 @@ Deno.serve(async (req: Request) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-  // Throttle BEFORE the model call — a refused caller must cost nothing.
+  // THROTTLE: reserve the slot BEFORE the model call, not after.
+  //
+  // An earlier version of this counted, called, and inserted only on success,
+  // with a comment calling that a courtesy: "a failed call does not consume the
+  // caller's allowance". That is backwards, and a security review caught it. A
+  // failed Claude call is STILL BILLED, so a caller who can reliably provoke a
+  // failure — a max_tokens cut, a refusal — pays for every call and consumes no
+  // quota. Counting-then-calling also races: two concurrent requests both read
+  // a count under the cap before either writes.
+  //
+  // So: insert first, then count. Every billable attempt is already recorded
+  // before it can be billed, and the race now over-counts (safe) instead of
+  // under-counting (not).
   const since = new Date(Date.now() - 3600_000).toISOString();
+  const { data: slot, error: slotErr } = await admin.from("help_queries")
+    .insert({ owner, question }).select("id").single();
+  // Fails CLOSED. A missing table means the migration is not applied, and an
+  // unthrottled paid endpoint is exactly what this exists to prevent — so
+  // "cannot reserve" must never read as "go ahead".
+  // `owner` is passed explicitly and is never taken from the request body: the
+  // column's `default auth.uid()` is NULL under the service key, so an implicit
+  // insert would fail the NOT NULL rather than silently mis-attribute.
+  if (slotErr || !slot) return unavailable("unavailable");
+
   const { count, error: countErr } = await admin.from("help_queries")
     .select("id", { count: "exact", head: true }).eq("owner", owner).gte("asked_at", since);
-  // Fails CLOSED. A missing table means the migration has not been applied, and
-  // an unthrottled paid endpoint is the thing this check exists to prevent —
-  // so "cannot count" must never read as "under the cap".
   if (countErr) return unavailable("unavailable");
-  if ((count ?? 0) >= HOURLY_CAP) return unavailable("rate_limited", { retryAfterMinutes: 60 });
+  if ((count ?? 0) > HOURLY_CAP) {
+    // Over the cap and nothing has been billed yet, so release the reservation.
+    // Keeping it would make a user who hammers the endpoint extend their own
+    // lockout with every refused attempt. Past this point the row STAYS,
+    // whatever the provider does, because the call has been paid for.
+    await admin.from("help_queries").delete().eq("id", slot.id);
+    return unavailable("rate_limited", { retryAfterMinutes: 60 });
+  }
 
   const topics = await loadGuide();
   if (!topics) return unavailable("unavailable");
@@ -167,6 +193,8 @@ Deno.serve(async (req: Request) => {
     // blocks present read as a complete answer that merely stops — and thinking
     // cannot be disabled on this model and counts against max_tokens, so a cut
     // is a realistic outcome rather than a theoretical one.
+    // The reservation is NOT released on any path below: the call was made and
+    // therefore billed, whatever came back.
     if (res.stop_reason !== "end_turn") return unavailable(`stopped_${res.stop_reason}`);
     // Extract by BLOCK TYPE, never content[0]: with thinking on, the first block
     // is a thinking block and content[0].text is undefined.
@@ -175,10 +203,6 @@ Deno.serve(async (req: Request) => {
     return unavailable("provider_error");
   }
   if (!answer) return unavailable("empty_answer");
-
-  // Recorded only once an answer exists, so a failed call does not consume the
-  // caller's hourly allowance.
-  await admin.from("help_queries").insert({ owner, question });
 
   return json({
     answer,
