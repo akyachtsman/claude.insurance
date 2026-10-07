@@ -511,3 +511,32 @@ test("content/help-guide.json: every route is a navigable static Keep address", 
     assert.ok(cases.has(sub), `${t.id}: route ${t.route} has no case in dispatchKeep`);
   }
 });
+
+test("a shared-cap refusal does not blame the client, whatever the wait", () => {
+  // The wording used to switch on the WAIT (>5400s), which is a proxy for the cap
+  // and a wrong one: a rolling 24h window usually clears in under 90 minutes, so
+  // the COMMON shared-cap refusal read "You've asked a few questions in a short
+  // time" to someone who may have asked none all day. The function now says which
+  // cap fired.
+  const shared = answerShape({ answer: null, reason: "rate_limited", retryAfter: 4000, scope: "shared" });
+  assert.ok(!/you've asked/i.test(shared.notice),
+    `a shared-cap refusal blamed the client: ${shared.notice}`);
+  assert.match(shared.notice, /limit for today/i);
+  assert.match(shared.notice, /67 minutes/);
+
+  // A shared cap with no retryAfter must still not say "in a few minutes".
+  const bare = answerShape({ answer: null, reason: "rate_limited", scope: "shared" });
+  assert.ok(!/you've asked/i.test(bare.notice), `bare shared-cap refusal blamed the client: ${bare.notice}`);
+  assert.match(bare.notice, /limit for today/i);
+
+  // The per-client cap keeps its own wording, including over the old threshold.
+  const mine = answerShape({ answer: null, reason: "rate_limited", retryAfter: 3600, scope: "client" });
+  assert.match(mine.notice, /you've asked a few questions/i);
+  const longMine = answerShape({ answer: null, reason: "rate_limited", retryAfter: 9000, scope: "client" });
+  assert.match(longMine.notice, /you've asked a few questions/i,
+    "an explicit client scope must not be overridden by the duration heuristic");
+
+  // No scope at all — an older deployed function — falls back to the heuristic.
+  assert.match(answerShape({ answer: null, reason: "rate_limited", retryAfter: 80000 }).notice, /limit for today/i);
+  assert.match(answerShape({ answer: null, reason: "rate_limited", retryAfter: 120 }).notice, /you've asked/i);
+});

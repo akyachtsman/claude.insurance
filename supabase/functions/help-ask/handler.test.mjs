@@ -598,3 +598,18 @@ test("a client with hundreds of assets still gets their records — no 16KB URL 
   // The ONLY policy hangs off the 201st asset, i.e. the second chunk.
   assert.ok(sends[1].includes("AU-9"), "a policy in the second asset_id chunk is missing");
 });
+
+test("the two caps are distinguishable on the wire, not guessed from the wait", async () => {
+  // The view cannot word a throttle notice correctly without knowing WHICH cap
+  // refused, and inferring it from retryAfter blamed innocent clients (see
+  // js/keep/logic/help.test.mjs). These are the only two emitters.
+  const mine = await (await ask(deps({ tables: seed({ help_queries: Array.from({ length: 21 }, (_, i) => ({ id: `q${i}`, owner: OWNER, asked_at: new Date().toISOString() })) }) }).d)).json();
+  assert.equal(mine.reason, "rate_limited");
+  assert.equal(mine.scope, "client", "the per-client cap did not identify itself");
+
+  const now = new Date().toISOString();
+  const others = Array.from({ length: 400 }, (_, i) => ({ id: `o${i}`, owner: OTHER, asked_at: now }));
+  const shared = await (await ask(deps({ tables: seed({ help_queries: others }) }).d)).json();
+  assert.equal(shared.reason, "rate_limited");
+  assert.equal(shared.scope, "shared", "the aggregate cap did not identify itself");
+});

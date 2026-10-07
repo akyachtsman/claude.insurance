@@ -21,7 +21,7 @@
       "title": "Entities as cards",
       "route": "#/keep/grid",
       "nav": "Entities \u2192 card view",
-      "body": "The same entities shown as cards you can drag to reorder. The order is yours and sticks.",
+      "body": "The same entities shown as cards you can drag to reorder. The order is remembered in the browser you set it in, so it will not follow you to another device.",
       "ask": "Can I reorder my entities?"
     },
     {

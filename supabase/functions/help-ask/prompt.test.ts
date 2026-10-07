@@ -9,6 +9,15 @@
 // nobody can execute is not a test.
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "jsr:@std/assert";
 import { buildPrompt, splitTrailer, recordTag, recordIndex, DELIMITERS, delimitersFor, TRAILER, FACT_LIMITS } from "./prompt.ts";
+// ⚠️ A TYPE-ONLY import, and the reason it is here is that `deno test
+// prompt.test.ts` — the command this file's own header prints — FAILED
+// type-checking without it. An object literal built inside Array.from infers
+// `kind` as `string`, not RecordFact's literal union, so the two FACT_LIMITS
+// bulk tests were TS2322. The suite passed 37/37 only under --no-check, which is
+// not the documented command. The Node twin cannot carry this line (a .mjs file
+// is not type-stripped), so the two files diverge here by necessity, as they
+// already do on every other annotation.
+import type { RecordFact } from "./prompt.ts";
 
 // See prompt.node.test.mjs: prose in the system prompt is hard-wrapped, so an
 // exact-substring assertion breaks when a sentence reflows. Prose probes
@@ -317,7 +326,7 @@ Deno.test("FACT_LIMITS: an oversized field is clipped, not passed through", () =
 });
 
 Deno.test("FACT_LIMITS: the total is bounded, and what was dropped is STATED", () => {
-  const many = Array.from({ length: 1200 }, (_, i) =>
+  const many: RecordFact[] = Array.from({ length: 1200 }, (_, i) =>
     ({ kind: "asset", name: `Asset ${i} ${"y".repeat(100)}`, label: "value on file", value: "$1000" }));
   const body = buildPrompt({ nonce: NONCE, question: "hi", topics: [], facts: many }).messages[0].content;
   assert(body.length < FACT_LIMITS.totalChars + 2000, `prompt is ${body.length} chars`);
@@ -329,7 +338,7 @@ Deno.test("FACT_LIMITS: the total is bounded, and what was dropped is STATED", (
 Deno.test("FACT_LIMITS: dropped lines do not renumber the ones that remain", () => {
   // Renumbering would silently re-point every credited tag past the cut, so a
   // client would be shown a record the answer never used.
-  const many = Array.from({ length: 1200 }, (_, i) =>
+  const many: RecordFact[] = Array.from({ length: 1200 }, (_, i) =>
     ({ kind: "asset", name: `Asset ${i}`, label: "type", value: "vehicle" }));
   const body = buildPrompt({ nonce: NONCE, question: "hi", topics: [], facts: many }).messages[0].content;
   assertMatch(body, /\[r1\] asset "Asset 0"/);

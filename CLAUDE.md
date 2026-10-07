@@ -472,6 +472,90 @@ already proves the dashboard renders after a real login. If you set it, use
 `.k-welcome__h`. A configured condition that never resolves FAILS rather than
 falling back, by design — which is why the wrong selector is loud, not silent.
 
+### ⚠️ OPEN — the Help desk's credit lines bypass the canonical-label modules
+
+**Found by review round 4, verified 2026-10-07. Recorded, not fixed** — it is a
+real breach of this file's own *"One canonical label, one shared module
+(always)"* rule, and there is no minimal fix.
+
+Under "Based on", `help-view.js` renders what the function sent, and the function
+sends `` `${clipField(f.name)} — ${clipField(f.label)}: ${clipField(f.value)}` ``
+straight off the row. So the client sees:
+
+| the desk shows | every other Keep screen shows | via |
+|---|---|---|
+| `Me — type: personal` | `UBO` / `You` | `entity-display.js` |
+| `type: auto` | `Vehicle` | `ASSET_META` |
+| `$900000` | `$920K` | `money` (`shell.js`) |
+| `2027-03-12` | `Mar 12` | `dateShort` (`shell.js`) |
+| `$2400 / yr` | `$2,400 / yr` | `formatPremium` (`policies.js`) |
+
+**Why the one-line fix is wrong.** The obvious move — send raw values and format
+in the view — changes the prompt, because **the same `facts` array feeds both**:
+`buildPrompt({ question, topics, facts, today })` and the credit lines read the
+identical objects. Turning `value: "$900000"` into `900000` changes what the
+model is grounded on and what CLAUDE.md's disclosure paragraph documents as
+crossing the boundary. `handler.ts` says in terms that the premium period is
+carried *because* "$2,400" alone is ambiguous to a reader — that formatting is
+deliberate, for the model.
+A correct fix needs a **separate client-facing projection** alongside the
+model-facing one: the wire sends `{kind, name, label, value}` plus raw typed
+fields, and the view dispatches on `(kind, label)` through the shared modules.
+That touches the prompt (this feature's safety-critical surface), the wire
+contract, the disclosure record and tests on both sides. It is a presentation
+defect, not a correctness or security one, and it is not worth doing hurriedly
+inside the safety boundary. `dateShort` takes **days, not an ISO string**, so
+reuse is not a drop-in either.
+Also missing while this stands: the entity **subtype** ("LLC") is never sent, so
+"what kind of entity is Coastal Cafe?" can only answer "business".
+
+### ⚠️ OPEN — nothing executes `help-view.js`, the layer the plan calls the only independent enforcement
+
+**Found by review round 4. Recorded, not fixed.** `specs/003-help-desk/plan.md`
+Key decision 3 names the view the one layer that cannot be talked out of the
+unconditional AI-generated label and the FR-8 broker hand-off — and no test runs
+its answer branch:
+- **S10 self-skips** off `LIVE_TARGET` on the local server, and against the live
+  site it can only reach the **notice** branch until `help-ask` is deployed.
+- Its `.k-help__broker` assertion sits behind `if (count('.k-help__a'))`, so it is
+  skipped on exactly the runs that cannot produce an answer.
+- `help-view.js` has **no unit tests** (it is DOM code; the repo has no jsdom).
+
+The reviewer demonstrated the gap is closable in ~100 lines: stub the function
+response with Playwright `page.route` plus a seeded `localStorage` session, which
+reaches the answer branch with no backend and no paid call. That is the
+highest-value remaining test work on this feature. It is **not** the committed
+offline `supabase.js` overlay CLAUDE.md forbids — `page.route` intercepts the
+network, it does not replace a module.
+Also absent: a back-flow test (`test.md` requires one for any new back
+affordance — `help-view.js`'s "Back to help" and the credited links) and a
+two-identity scenario, which is what would have caught the `lastAsk` sign-out
+leak instead of a security review catching it after the push.
+
+### ⚠️ Recorded — S10 spends real money on every Pages deploy
+
+`qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
+question as the shared demo `user`. That is up to 2 paid model calls per run,
+charged to the owner's Anthropic account and counted against **both** caps. 2 of
+400/day is noise; the **20/hour per-account** cap is the sharp edge — ten deploys
+in an hour would consume every slot the demo client has and the desk would refuse
+a real person using that login.
+Not fixed because every option is a trade: a dedicated CI account needs a
+`profiles` row and another credential in secrets; skipping the ask removes the
+only live proof the answer path works. Flagged so the first "why is the demo desk
+rate-limited?" has an answer. (The *flake* half of this finding WAS fixed — S10's
+settle was 45s against the function's own 60s ceiling.)
+
+### ⚠️ Recorded — `help-ask` reads only the LEGACY Supabase key names
+
+`index.ts` reads `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. Supabase
+documents the legacy keys as working "until the end of 2026". When they stop,
+`hasKeys` goes false and FR-17 renders that as the same "not available" notice as
+every other failure — so the feature would die quietly on a date, not on a
+deploy. Worth adding the new names as a fallback before then; not done here
+because the correct new names should be read off Supabase's docs at the time, not
+recalled.
+
 ### ⚠️ OPEN — the Keep's app bar overflows horizontally from 761px to 1044px
 
 **Measured 2026-10-06** (headless chromium, local static server, the offline

@@ -10,7 +10,8 @@
 //                usedRecords: ["<display line>", …],
 //                reason: "answered" | "refused" | "no_records" }
 //   failure →  { answer: null, reason: "<key of FAILURE_NOTICE>",
-//                retryAfter: <seconds, rate_limited only> }
+//                retryAfter: <seconds, rate_limited only>,
+//                scope: "client" | "shared" (rate_limited only — WHICH cap) }
 // Credited TOPICS travel as corpus ids, never as titles: the title shown to the
 // client is read back from the corpus by creditedTopics(), per CLAUDE.md's "one
 // canonical label, one shared module" rule. A model's own wording for a screen
@@ -170,14 +171,25 @@ function waitPhrase(seconds) {
 
 // The throttle notice, with the retry time when the function gave one and a
 // complete sentence when it did not — never a hole where the number should be.
-function rateLimitNotice(seconds) {
+function rateLimitNotice(seconds, scope) {
   // Two different caps reach this, and the wording has to survive both. The
   // per-client cap clears within the hour; the SHARED daily one can be most of a
   // day away, and it is not the reader's doing — they may have asked nothing.
   // The first version said "You've asked a few questions in a short time" with a
   // minute count, which rendered a 22-hour wait as "about 1333 minutes" and
   // blamed the wrong person for it.
-  const hours = Number.isFinite(seconds) && seconds > 5400;
+  //
+  // ⚠️ That fix switched on the WAIT, which is a proxy for the cap and a wrong
+  // one. A shared-cap refusal whose window clears in under 90 minutes — the
+  // COMMON case for a rolling 24h window, not an edge — still read "You've asked
+  // a few questions in a short time", to someone who may have asked none. The
+  // function now says which cap fired and that is what decides the wording.
+  // The duration heuristic survives ONLY as a fallback for a deployed function
+  // older than this field; it is a guess, and labelled as one.
+  if (scope === "client") {
+    return `You've asked a few questions in a short time. Please try again ${waitPhrase(seconds) || "in a few minutes"}.`;
+  }
+  const hours = scope === "shared" || (!scope && Number.isFinite(seconds) && seconds > 5400);
   if (hours) {
     return `The help desk has reached its limit for today. Please try again ${waitPhrase(seconds) || "tomorrow"}.`;
   }
@@ -255,7 +267,7 @@ export function answerShape(payload) {
       topics: [],
       records: [],
       reason: key,
-      notice: key === "rate_limited" ? rateLimitNotice(retryAfter) : FAILURE_NOTICE[key],
+      notice: key === "rate_limited" ? rateLimitNotice(retryAfter, str(p && p.scope)) : FAILURE_NOTICE[key],
       retryAfter,
     };
   }

@@ -2405,7 +2405,9 @@ test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, 
 test('S10: the Help desk labels its answers, refuses a blank question, and never leaves the answer region empty', async ({ page, renderWitness }) => {
   renderWitness();
   test.skip(!LIVE_TARGET, 'The Help desk sits behind real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
-  test.setTimeout(90_000);
+  // 150s, not 90s: the login allows 30s and the ask below allows 75s, which 90
+  // cannot hold. See the settle comment for why 75.
+  test.setTimeout(150_000);
 
   const pageErrors = [];
   const consoleErrors = [];
@@ -2471,8 +2473,16 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
+  // ⚠️ 75s, NOT 45s. The function builds its Anthropic client with a 60s request
+  // timeout, so a slow-but-working provider can legitimately take just over a
+  // minute to come back as `unavailable`. A 45s settle therefore failed S10 with
+  // "the answer region never settled" while the product was behaving exactly as
+  // designed — a red build caused by the test, not by the app. 75s clears the
+  // function's own ceiling with margin.
+  // (It was worse before this PR set maxRetries to 0: a retried timeout made the
+  // worst case ~121s, so 45s was less than HALF of it.)
   await expect(settled, 'An ask resolved to neither an answer nor a notice — the answer region never settled')
-    .toHaveCount(1, { timeout: 45_000 });
+    .toHaveCount(1, { timeout: 75_000 });
   await expect(page.locator('.k-help__out'), 'The Looking… placeholder was left standing after the ask')
     .not.toHaveText(/^Looking…$/);
 

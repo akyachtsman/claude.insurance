@@ -77,14 +77,19 @@
 create table if not exists public.help_queries (
   id uuid primary key default gen_random_uuid(),
   owner uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  asked_at timestamptz not null default now(),
-  question text not null,
-  -- btrim, not char_length alone: '   ' is present and non-null but is not a
-  -- question, and NOT NULL does not catch it. The non-blank test is on the
-  -- TRIMMED text; the 500 cap is on the RAW text, so padding cannot be used to
-  -- store more than 500 characters.
-  constraint help_queries_question_shape
-    check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)
+  asked_at timestamptz not null default now()
+  -- ⚠️ NO `question` COLUMN, and that is the point. An earlier draft stored the
+  -- client's free text here with a 1..500 length check. The throttle needs only
+  -- `owner` and `asked_at`. Nothing read the text and nothing was ever going to:
+  -- there is no SELECT grant for `authenticated`, no policy, no UI and no plan
+  -- item for one. So it was client free text (a name, an address, a claim
+  -- detail) retained indefinitely with no reader and no TTL. Follow-up A below
+  -- said as much: "Dropping `question` entirely is the cheaper answer if nobody is
+  -- actually going to read it." Nobody is.
+  --
+  -- If "what are clients asking?" later becomes a product feature, it needs its
+  -- own disclosure and its own retention policy. It must not arrive as a side
+  -- effect of a rate limiter.
 );
 
 alter table public.help_queries enable row level security;
@@ -176,18 +181,17 @@ create index if not exists help_queries_owner_asked_at_idx
 --   0. SEED a row to probe against. The client can no longer write this table,
 --      so do this ONCE as service-role (or by asking a question through the
 --      deployed function) before running steps 1-5 as a client:
---        insert into public.help_queries (owner, question)
---          values ('<the client uuid>', 'probe row');
+--        insert into public.help_queries (owner)
+--          values ('<the client uuid>');
 --      then confirm the function's own shape held:
 --        select owner is not null, asked_at is not null
 --          from public.help_queries order by asked_at desc limit 1;   -- t, t
 --
 --   1. Client inserts — expect FAILURE, SQLSTATE 42501 insufficient_privilege
 --      (there is no INSERT grant for `authenticated` at all):
---        insert into public.help_queries (question)
---          values ('How do I add a business entity?');
+--        insert into public.help_queries (owner) values (auth.uid());
 --      Via PostgREST the equivalent call is
---        supabase.from("help_queries").insert({ question: "..." })
+--        supabase.from("help_queries").insert({ owner: "<the client uuid>" })
 --      ⚠️ THIS STEP IS INVERTED FROM THE FIRST DRAFT, where it expected SUCCESS.
 --      A client insert that succeeds means the INSERT grant came back, and the
 --      function's AGGREGATE daily cap counts every row in the table — so one
@@ -195,22 +199,24 @@ create index if not exists help_queries_owner_asked_at_idx
 --      every client for 24 hours, at no provider cost. Assert the failure.
 --
 --   2. Client forges an owner — expect FAILURE, 42501, for the same reason:
---        insert into public.help_queries (owner, question)
---          values ('00000000-0000-0000-0000-000000000000', 'forged');
+--        insert into public.help_queries (owner)
+--          values ('00000000-0000-0000-0000-000000000000');
 --      Rejected before any policy is consulted, because the privilege is absent
 --      rather than narrowed.
 --
 --   3. Client READS — expect FAILURE, 42501 (no SELECT grant, and no policy
 --      either). This is the step round 3 added, and it is the one that matters
 --      most on a shared demo account:
---        select question from public.help_queries;
---      Via PostgREST: supabase.from("help_queries").select("question")
+--        select owner, asked_at from public.help_queries;
+--      Via PostgREST: supabase.from("help_queries").select("owner,asked_at")
 --      ⚠️ ALSO INVERTED from an earlier draft, which granted `select` and a
 --      `using (owner = auth.uid())` policy. With ONE published demo credential
 --      that every visitor signs in with, that policy fences nothing: they are all
---      the same `owner`, so each could read every question the others had typed —
---      and `question` is free text a client may put a name, an address or a claim
---      detail into. A success here means the grant came back.
+--      the same `owner`, so each could read every row the others had written. That
+--      mattered most when the table still held the question TEXT (free text a
+--      client may put a name, an address or a claim detail into); the column is
+--      gone now, but the ask TIMES of everyone sharing a credential are still not
+--      theirs to read. A success here means the grant came back.
 --
 --   4. Client deletes — expect FAILURE, 42501 (no DELETE grant):
 --        delete from public.help_queries;
@@ -235,16 +241,16 @@ create index if not exists help_queries_owner_asked_at_idx
 -- TWO FOLLOW-UPS this migration deliberately does NOT carry, recorded here so
 -- they are decided rather than forgotten.
 --
---   A. NO RETENTION. Narrower than it was, now that `authenticated` cannot read
---      this table at all — the text is reachable only with the service-role
---      key — but not closed. `question` stores the client's free text indefinitely,
---      and a client may well type a name, an address or a claim detail into a
---      help box. The throttle needs only `owner` + `asked_at`; the text is kept
---      because a help desk that cannot be read back cannot be improved. Nothing
---      here expires it. A TTL needs pg_cron, which is a separate production
---      change; until one exists, treat this table as holding client PII and say
---      so in any processing record. Dropping `question` entirely is the cheaper
---      answer if nobody is actually going to read it.
+--   A. ~~NO RETENTION~~ — RESOLVED, in this file, before it shipped, by taking
+--      this note's own closing suggestion. It used to say `question` stored the
+--      client's free text indefinitely with no TTL, that a TTL needs pg_cron and
+--      is a separate production change, and that "dropping `question` entirely is
+--      the cheaper answer if nobody is actually going to read it."
+--      Nobody is: there is no SELECT grant, no policy, no UI, and no plan item
+--      for one. So the column is gone and the retention question with it — there
+--      is no client text in this table to retain. What remains is `owner` and
+--      `asked_at`, which is exactly what the throttle counts.
+--      Independently flagged by review round 4, which reached the same answer.
 --
 --   B. ~~THE CLIENT INSERT GRANT~~ — RESOLVED, in this file, before it shipped.
 --      This note used to say the grant was bounded self-harm and could not

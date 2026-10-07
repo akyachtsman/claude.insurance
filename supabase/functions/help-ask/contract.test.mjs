@@ -10,9 +10,19 @@
 // paid four review rounds for.
 //
 // So this reads the function's SOURCE for the reason strings it can emit and
-// asserts the consumer understands each one. Source-reading is deliberate: the
-// function cannot be imported here (Deno-only `jsr:`/`npm:` specifiers), and a
-// hand-kept list of reasons would be a third place to drift.
+// asserts the consumer understands each one. A hand-kept list of reasons would be
+// a third place to drift.
+//
+// ⚠️ The reason given here used to be "the function cannot be imported (Deno-only
+// `jsr:`/`npm:` specifiers)". That stopped being true when the logic moved to
+// handler.ts so it could be executed: handler.test.mjs imports it and runs it.
+// `index.ts` still cannot be imported — it is the file holding the jsr/npm
+// specifiers — but handler.ts can. What justifies a SOURCE scrape now is narrower
+// and worth stating precisely: this asserts a property of the TEXT, namely the
+// complete SET of reason strings the file can emit. Executing the handler proves
+// the reasons it does emit on the paths a test drives; only reading it catches a
+// reason added on a path no test reaches. The two are complements, and the
+// executed test is the stronger of them.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

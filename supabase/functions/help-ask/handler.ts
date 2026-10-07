@@ -179,6 +179,30 @@ const unavailable = (reason: string, extra: Record<string, unknown> = {}) =>
 // Reads through the CALLER'S client, not the service-role one — see Deps.admin
 // for the measurement that forced this. The `.eq`/`.in` filters are kept as
 // defence in depth; RLS is what actually fences the rows.
+// ⚠️ EXPLICIT ROW TYPES, and they are not decoration. `read<T>`/`inChunks<T>`
+// cannot infer T from the PostgREST builder, so every call defaulted to
+// `unknown` and `deno check help-ask/index.ts` reported 31 errors — 26 TS18046
+// ("'e' is of type 'unknown'"), 3 TS2345, 2 TS7006 — in THIS file alone, while
+// the deployed notify-enhancement checks clean. CI never runs Deno, so nothing
+// here caught it and the PR claimed the Deno twin was "in step". If Supabase's
+// deploy bundler type-checks, that is owner-gate step 6 failing.
+//
+// The names are the TABLE's, not the nested shape the views consume — the same
+// trap that shipped `assets.kind`/`policies.policy_number` and made every
+// client's records read as empty. Verified against supabase/migrations/.
+interface EntityRow { id: string; name: string; kind: string }
+interface AssetRow { id: string; name: string; type: string; value: number | null; entity_id: string }
+interface PolicyRow {
+  line: string;
+  carrier: string | null;
+  number: string | null;
+  renewal_date: string | null;
+  premium_amount: number | null;
+  premium_period: string | null;
+  coverages: unknown;
+  asset_id: string;
+}
+
 async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   const facts: RecordFact[] = [];
   const read = <T>(res: { data: T[] | null; error: { message: string } | null }, what: string): T[] => {
@@ -218,27 +242,27 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
     return out;
   };
 
-  const entities = read(
+  const entities = read<EntityRow>(
     await db.from("entities").select("id, name, kind").eq("owner", owner), "entities");
   for (const e of entities) {
     facts.push({ kind: "entity", name: e.name, label: "type", value: String(e.kind) });
   }
-  const ids = entities.map((e: { id: string }) => e.id);
+  const ids = entities.map((e) => e.id);
   if (!ids.length) return facts;
 
-  const assets = await inChunks(ids, (chunk) =>
+  const assets = await inChunks<AssetRow>(ids, (chunk) =>
     db.from("assets").select("id, name, type, value, entity_id").in("entity_id", chunk), "assets");
   for (const a of assets) {
     facts.push({ kind: "asset", name: a.name, label: "type", value: String(a.type) });
     if (a.value != null) facts.push({ kind: "asset", name: a.name, label: "value on file", value: `$${a.value}` });
   }
-  const assetIds = assets.map((a: { id: string }) => a.id);
+  const assetIds = assets.map((a) => a.id);
   if (!assetIds.length) return facts;
 
-  const policies = await inChunks(assetIds, (chunk) => db.from("policies")
+  const policies = await inChunks<PolicyRow>(assetIds, (chunk) => db.from("policies")
     .select("line, carrier, number, renewal_date, premium_amount, premium_period, coverages, asset_id")
     .in("asset_id", chunk), "policies");
-  const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
+  const assetName = new Map(assets.map((a) => [a.id, a.name] as const));
   for (const p of policies) {
     const on = assetName.get(p.asset_id) ?? "an asset";
     // "on asset", NOT "covers". That label is the verb the whole fact/advice
@@ -367,7 +391,11 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // under-counting (not).
   const since = new Date(Date.now() - 3600_000).toISOString();
   const { data: slot, error: slotErr } = await admin.from("help_queries")
-    .insert({ owner, question }).select("id").single();
+    // `{ owner }` only — the question TEXT is deliberately not stored. See the
+    // help_queries migration: the throttle counts rows, and nothing reads the
+    // text, so keeping it was indefinite retention of client free text with no
+    // reader. The question still reaches the prompt; it just does not reach a table.
+    .insert({ owner }).select("id").single();
   // Fails CLOSED. A missing table means the migration is not applied, and an
   // unthrottled paid endpoint is exactly what this exists to prevent — so
   // "cannot reserve" must never read as "go ahead".
@@ -401,7 +429,11 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // Over the cap, likewise: keeping the row would make a user who hammers the
   // endpoint extend their own lockout with every refused attempt.
   // SECONDS — the consumer builds its wait line from retryAfter.
-  if ((count ?? 0) > HOURLY_CAP) return await releaseAnd("rate_limited", { retryAfter: 3600 });
+  // `scope` so the consumer can word this correctly. Without it the view guessed
+  // from the WAIT LENGTH, which told a client who had asked nothing all day
+  // "You've asked a few questions in a short time" whenever the SHARED cap
+  // happened to clear in under 90 minutes — the common case for a rolling window.
+  if ((count ?? 0) > HOURLY_CAP) return await releaseAnd("rate_limited", { retryAfter: 3600, scope: "client" });
 
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { count: total, error: totalErr } = await admin.from("help_queries")
@@ -436,7 +468,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
     const secs = Number.isFinite(at) ? Math.ceil((at + 86_400_000 - Date.now()) / 1000) : NaN;
     const retryAfter = Number.isFinite(secs) && secs > 0 ? secs : null;
-    return await releaseAnd("rate_limited", retryAfter ? { retryAfter } : {});
+    return await releaseAnd("rate_limited", { scope: "shared", ...(retryAfter ? { retryAfter } : {}) });
   }
 
   const topics = await loadGuide();
@@ -485,7 +517,8 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     if (res.stop_reason !== "end_turn") return unavailable("incomplete");
     // Extract by BLOCK TYPE, never content[0]: with thinking on, the first block
     // is a thinking block and content[0].text is undefined.
-    answer = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim() || null;
+    const blocks = (res.content ?? []) as Array<{ type: string; text?: string }>;
+    answer = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n").trim() || null;
   } catch (err) {
     // ⚠️ THE ONE RELEASE PAST THE BILLING LINE, and it is deliberate.
     //

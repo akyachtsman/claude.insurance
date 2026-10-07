@@ -351,7 +351,13 @@ export const FACT_LIMITS = Object.freeze({ field: 120, totalChars: 16_000, count
 //      everyone was watching.
 export function clipField(raw: string): string {
   const bounded = String(raw ?? "").slice(0, FACT_LIMITS.field * 4);
-  // eslint-disable-next-line no-control-regex
+  // The control-character class is DELIBERATE — see the block comment above: a
+  // newline in a client-written name forged a second record line. `deno lint`
+  // flags it, so it is suppressed with Deno's directive.
+  // ⚠️ This was `// eslint-disable-next-line no-control-regex`, which is ESLint
+  // syntax. There is no ESLint in this repo and Deno does not read it, so the
+  // suppression did nothing and `deno lint` reported the rule anyway.
+  // deno-lint-ignore no-control-regex
   const flat = deFence(bounded).replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s{2,}/g, " ").trim();
   return flat.length <= FACT_LIMITS.field ? flat : `${flat.slice(0, FACT_LIMITS.field - 1)}…`;
 }
