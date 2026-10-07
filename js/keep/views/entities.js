@@ -91,7 +91,13 @@ function entitiesPrivacyRow() {
   return el("div", { class: "k-privacyrow" }, [
     el("div", { class: "k-privacy" }, [
       icon("lock", { size: 16 }),
-      el("span", { text: "Encrypted & private — only you and your broker." }),
+      // ⚠️ "only you and your broker" was true until feature 003 made Anthropic a
+      // sub-processor. This row renders on the list, the cards AND the map, and it
+      // links to the Security page that this feature rewrote to disclose the
+      // digest — so the old wording contradicted its own link. keep.js's security
+      // card says in terms that such a disclosure "is not optional"; a card that
+      // overstates protection is worse than one that says nothing.
+      el("span", { text: "Encrypted · only you and your broker — plus the Help desk's AI when you ask it a question." }),
       el("a", { attrs: { href: "#/keep/security" }, text: "How we protect you" }),
     ]),
     el("button", { class: "k-btn k-btn--sm", attrs: { type: "button", "data-go": "/keep/add-entity" } }, [icon("plus", { size: 16 }), el("span", { text: "New entity" })]),

@@ -31,8 +31,14 @@
 -- `authenticated` and argued carefully for the column scoping.
 --
 -- The grant was never needed: NOTHING in js/ writes this table. The only writer
--- is the help-ask Edge Function under the service-role key, which bypasses both
--- RLS and these grants. The grant existed because the table was designed as
+-- is the help-ask Edge Function under the service-role key, which bypasses
+-- RLS -- but NOT these grants. ⚠️ This line claimed it bypassed "both RLS and
+-- these grants", which is false and sits six lines from the grant that sentence
+-- would justify deleting: BYPASSRLS skips POLICIES, not PRIVILEGES, and
+-- `service_role` in this project holds no default table privileges at all, so
+-- without the explicit grant below every insert here returns 42501. Verified in
+-- a throwaway Postgres with these roles.
+-- The grant existed because the table was designed as
 -- "client-writable, carefully constrained" rather than "server-only".
 --
 -- What made it a defect rather than dead privilege is the function's AGGREGATE

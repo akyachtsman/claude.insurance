@@ -153,7 +153,10 @@ const unavailable = (reason: string, extra: Record<string, unknown> = {}) =>
 // alone, because "where do I add an entity" would then be answered with no
 // knowledge of the screens at all.
 
-/** The client's own rows, read with the service key and filtered by the owner id
+/** The client's own rows, read with THE CALLER'S OWN CLIENT — not the service key,
+ *  which has no SELECT on any of these tables in this project (measured; see
+ *  Deps.admin). This line said "the service key" for the whole life of that bug
+ *  and outlived the fix. Filtered by the owner id
  *  resolved from their JWT — never by anything in the request body. Flattened to
  *  label/value pairs so the model receives VALUES, not a coverage summary it is
  *  invited to interpret (plan, Key decision 3, layer 2). */
@@ -183,6 +186,38 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
     return res.data ?? [];
   };
 
+  // ⚠️ CHUNKED, because PostgREST puts an `.in()` list in the query STRING — a
+  // uuid costs ~39 chars there, so one list crossed 16KB at roughly 410 ids and
+  // Cloudflare answered 520. That was a PERMANENT `records_error` for that
+  // client: self-inflicted by owning enough assets, unreachable by any retry, and
+  // reachable deliberately by anyone holding an account, the shared demo among
+  // them.
+  //
+  // The filter is NOT dropped, though RLS makes it redundant today (`assets` has
+  // no `owner` column; its policy is `exists (select 1 from entities e where
+  // e.id = assets.entity_id and e.owner = auth.uid())`, exactly the set `ids`
+  // describes). Two reasons to keep it: the header above commits to these filters
+  // as defence in depth, so an `assets` table that later gains its own `owner`
+  // column or loses a policy still has a fence here; and handler.test.mjs proves
+  // cross-client isolation against a fake with no RLS, so removing the filter
+  // would mean weakening the test that guards the property. Chunking fixes the
+  // defect without touching either.
+  //
+  // 200 ids ≈ 7.8KB, half the limit, so the per-request overhead of a second
+  // round-trip only starts past 200 — well beyond any real client.
+  const CHUNK = 200;
+  const inChunks = async <T>(
+    values: string[],
+    query: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+    what: string,
+  ): Promise<T[]> => {
+    const out: T[] = [];
+    for (let i = 0; i < values.length; i += CHUNK) {
+      out.push(...read(await query(values.slice(i, i + CHUNK)), what));
+    }
+    return out;
+  };
+
   const entities = read(
     await db.from("entities").select("id, name, kind").eq("owner", owner), "entities");
   for (const e of entities) {
@@ -191,8 +226,8 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   const ids = entities.map((e: { id: string }) => e.id);
   if (!ids.length) return facts;
 
-  const assets = read(
-    await db.from("assets").select("id, name, type, value, entity_id").in("entity_id", ids), "assets");
+  const assets = await inChunks(ids, (chunk) =>
+    db.from("assets").select("id, name, type, value, entity_id").in("entity_id", chunk), "assets");
   for (const a of assets) {
     facts.push({ kind: "asset", name: a.name, label: "type", value: String(a.type) });
     if (a.value != null) facts.push({ kind: "asset", name: a.name, label: "value on file", value: `$${a.value}` });
@@ -200,9 +235,9 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   const assetIds = assets.map((a: { id: string }) => a.id);
   if (!assetIds.length) return facts;
 
-  const policies = read(await db.from("policies")
+  const policies = await inChunks(assetIds, (chunk) => db.from("policies")
     .select("line, carrier, number, renewal_date, premium_amount, premium_period, coverages, asset_id")
-    .in("asset_id", assetIds), "policies");
+    .in("asset_id", chunk), "policies");
   const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
   for (const p of policies) {
     const on = assetName.get(p.asset_id) ?? "an asset";

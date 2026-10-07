@@ -418,3 +418,31 @@ test("the delimiter nonce is fresh per call — the property the redesign rests 
   }
   assert.ok(seen.size > 190, `only ${seen.size} distinct nonces in 200 calls — the delimiter is predictable`);
 });
+
+test("trailer parsing stays linear on whitespace — the third ReDoS of this shape", () => {
+  // `isBlankish` was /^\s*(---+|___+|\*\*\*+)?\s*$/ — two `\s*` around an
+  // optional group, anchored both ends. A last line of whitespace then text
+  // backtracked quadratically: measured 15k chars 74ms, 30k 296ms, 60k 1179ms.
+  // That is reached AFTER the model call is billed and the Edge CPU limit is
+  // ~2s, so a degenerate reply spent the money and then killed the isolate.
+  //
+  // The bound is deliberately loose. The replacement does 200k in ~0.2ms, so
+  // 250ms is ~1000x headroom; the old expression needed ~14s for the same
+  // input, so nothing quadratic can slip back under this.
+  const body = `Answer.\n${" ".repeat(200_000)}tail`;
+  const t0 = process.hrtime.bigint();
+  const out = splitTrailer(body);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 250, `splitTrailer took ${ms.toFixed(0)}ms on 200k spaces — superlinear again`);
+  assert.match(out.answer, /Answer\./);
+
+  // The language it accepts must not have widened: a horizontal rule of >=3
+  // identical chars is dropped, two is not a rule, and a mixed run is text.
+  const dropped = (l) => !splitTrailer(`Answer.\n${l}`).answer.includes(l.trim());
+  for (const rule of ["---", "___", "***", "-----", "  ---  "]) {
+    assert.ok(dropped(rule), `a trailing rule ${JSON.stringify(rule)} should be dropped`);
+  }
+  for (const text of ["--", "-_-", "---___", "a---"]) {
+    assert.ok(!dropped(text), `${JSON.stringify(text)} is answer text, not a rule`);
+  }
+});

@@ -42,7 +42,11 @@ made safe: the request body is client-controlled, so a crafted body is a request
 to ground an answer on records the caller may not own.
 
 Instead the function resolves the caller from their JWT and reads **that owner's
-rows with the service-role key**, filtered by the resolved id. The client sends
+rows with the caller's own client** (anon key + their JWT), filtered by the
+resolved id. ⚠️ This said "with the service-role key" until review round 4;
+`service_role` has no SELECT on these tables in this project, so that design
+would have returned 42501 to every caller. RLS is the fence, and it is stronger:
+it cannot be removed by editing a filter out of the handler. The client sends
 only its question. This is the same reasoning as feature 002's IDOR finding,
 applied before the bug rather than after.
 

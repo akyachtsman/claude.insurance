@@ -19,7 +19,12 @@
 // full list. This one is the wiring: secrets, clients, and the network call that
 // fetches the corpus.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+// PINNED. `@2` was floating while the four lines below argued that a
+// self-updating server dependency is the same class of surprise as the esm.sh
+// incident — and the Anthropic SDK beside it WAS pinned, so the file contradicted
+// itself. Version VERIFIED against the npm registry on 2026-10-07 (latest
+// 2.117.2), which is also what Deno resolved `@2` to.
+import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
 // Pinned, not floating: the esm.sh incident recorded in CLAUDE.md is about the
 // browser, but a server-side dependency that self-updates is the same class of
 // surprise. Version VERIFIED against the npm registry on 2026-10-06 (latest
@@ -51,7 +56,14 @@ async function loadGuide(): Promise<HelpTopic[] | null> {
   // answered from records alone — the one outcome the comment above forbids.
   if (guideCache?.length) return guideCache;
   try {
-    const res = await fetch(`${APP_URL}/content/help-guide.json`, { headers: { "Cache-Control": "no-cache" } });
+    // The 10s deadline is not decoration: this fetch runs AFTER the throttle row
+    // is inserted, and a hung Pages response held that reservation until the 150s
+    // platform timeout killed the isolate — with no release, because nothing ran.
+    // Nothing was billed, so the slot was pure loss to the client.
+    const res = await fetch(`${APP_URL}/content/help-guide.json`, {
+      headers: { "Cache-Control": "no-cache" },
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     const topics = Array.isArray(data?.topics) ? data.topics : [];
@@ -80,7 +92,14 @@ Deno.serve((req: Request) =>
     // every row to `owner = auth.uid()`.
     userDb: (authz: string) => callerClient(authz),
     userClient: (authz: string) => callerClient(authz).auth.getUser(),
-    anthropic: new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 1 }),
+    // ⚠️ maxRetries: 0, NOT 1. The handler reserves exactly ONE row per ask and
+    // treats a timeout as "billing unknown", keeping that row. The SDK retries a
+    // timeout, so `maxRetries: 1` sent TWO billable generations against one
+    // reserved slot — the throttle undercounted spend by up to 2x, which is the
+    // bypass the reservation exists to prevent. It also doubled the worst case to
+    // ~121s, close enough to the 150s platform limit to turn a slow provider into
+    // a hard timeout. One reservation, one call.
+    anthropic: new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 0 }),
     loadGuide,
     appUrl: APP_URL,
     hasKeys: Boolean(SUPABASE_URL && SERVICE_KEY && ANON_KEY && ANTHROPIC_API_KEY),

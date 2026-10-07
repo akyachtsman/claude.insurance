@@ -536,3 +536,65 @@ test("today's date is grounded, so 'still active' is answerable", async () => {
   assert.ok(sent.includes(new Date().toISOString().slice(0, 10)),
     "no current date reached the model, so it answers renewal questions from its own guess at today");
 });
+
+test("a client with hundreds of assets still gets their records — no 16KB URL cliff", async () => {
+  // PostgREST puts an `.in()` list in the query STRING, ~39 chars per uuid, so a
+  // single list crossed 16KB at roughly 410 ids and Cloudflare answered 520. That
+  // was a PERMANENT records_error for that client — not a transient one — and
+  // deliberately reachable by anyone holding an account. A fake has no URL, so
+  // this asserts the BOUND rather than the symptom: no `in` list may exceed the
+  // chunk size, whatever the client owns.
+  //
+  // ⚠️ Both phases stay under FACT_LIMITS.count (400) ON PURPOSE. The first draft
+  // seeded 520 assets, which produces ~1040 facts, and the digest cap dropped the
+  // last one — so the test failed reporting "chunking dropped rows" when chunking
+  // was fine and the cap was simply doing its job. Exceeding 200 ids and
+  // exceeding 400 facts cannot be done at once, which is why this is two phases.
+  const sends = [];
+  const spy = () => ({ messages: { create: async (a) => { sends.push(JSON.stringify(a)); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } });
+  // PER TABLE, not across all of them: a flat list mixes the entity_id list into
+  // the asset_id ones, and the first draft's "at least two lists > 1" assertion
+  // then failed on a correct 200 + 1 split, because a remainder chunk of one id
+  // is still a chunk.
+  const inLists = (c, table) => c.log.filter((q) => q.table === table)
+    .flatMap((q) => q.filters.filter(([op]) => op === "in").map(([, , v]) => v.length));
+
+  // Phase 1 — 211 entities chunks the ASSET read's entity_id list (200 + 11).
+  // An asset hanging off the LAST entity only arrives if chunk 2 is queried.
+  const entities = [{ id: "e1", owner: OWNER, name: "Me", kind: "personal" }];
+  for (let i = 0; i < 210; i++) entities.push({ id: `E${i}`, owner: OWNER, name: `Entity ${i}`, kind: "business" });
+  const p1 = deps({
+    tables: seed({ entities, assets: [
+      { id: "AF", entity_id: "E0", name: "First Chunk Asset", type: "home", value: 100 },
+      { id: "AL", entity_id: "E209", name: "Last Chunk Asset", type: "auto", value: 200 },
+    ], policies: [] }),
+    anthropic: spy(),
+  });
+  assert.equal((await ask(p1.d)).status, 200);
+  const l1 = inLists(p1.caller, "assets");
+  assert.ok(l1.length >= 2, `211 entity ids should have chunked the asset read, saw ${JSON.stringify(l1)}`);
+  for (const n of l1) assert.ok(n <= 200, `an in() list carried ${n} ids — the URL cliff is back`);
+  assert.equal(l1.reduce((a, b) => a + b, 0), 211, "the chunks do not cover every entity id");
+  assert.ok(sends[0].includes("First Chunk Asset"), "a first-chunk asset is missing");
+  assert.ok(sends[0].includes("Last Chunk Asset"), "a last-chunk asset is missing — chunking dropped rows");
+
+  // Phase 2 — 201 assets chunks the POLICY read's asset_id list. `value: null`
+  // keeps each asset to ONE fact so 202 facts stays under the 400 cap.
+  const assets = [];
+  for (let i = 0; i < 201; i++) assets.push({ id: `A${i}`, entity_id: "e1", name: `Asset ${i}`, type: "auto", value: null });
+  const p2 = deps({
+    tables: seed({
+      entities: [{ id: "e1", owner: OWNER, name: "Me", kind: "personal" }],
+      assets,
+      policies: [{ asset_id: "A200", line: "Auto", carrier: "Beta", number: "AU-9", renewal_date: "2027-04-01", premium_amount: 900, premium_period: "yr", coverages: [] }],
+    }),
+    anthropic: spy(),
+  });
+  assert.equal((await ask(p2.d)).status, 200);
+  const l2 = inLists(p2.caller, "policies");
+  assert.ok(l2.length >= 2, `201 asset ids should have chunked the policy read, saw ${JSON.stringify(l2)}`);
+  for (const n of l2) assert.ok(n <= 200, `an in() list carried ${n} ids — the URL cliff is back`);
+  assert.equal(l2.reduce((a, b) => a + b, 0), 201, "the chunks do not cover every asset id");
+  // The ONLY policy hangs off the 201st asset, i.e. the second chunk.
+  assert.ok(sends[1].includes("AU-9"), "a policy in the second asset_id chunk is missing");
+});

@@ -180,7 +180,11 @@ grant select, insert, delete on public.help_queries to service_role;
 shipped.** The first draft granted `insert (question)` to `authenticated` and
 argued carefully for the column scoping. The grant was never needed — nothing in
 `js/` writes this table, and the only writer is the `help-ask` Edge Function
-under the service-role key, which bypasses RLS and grants alike.
+under the service-role key, which bypasses RLS -- **but not grants.** ⚠️ This
+said "RLS and grants alike", which is false: BYPASSRLS skips policies, not
+privileges, and this project's `service_role` holds no default table privileges,
+which is exactly why the migration's explicit `grant ... to service_role` is
+load-bearing rather than tidiness. The same file said both things.
 
 What turned dead privilege into a defect was the function's **aggregate** daily
 cap, added the same day. Under the per-owner cap, a direct PostgREST insert was

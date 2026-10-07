@@ -52,7 +52,13 @@ export function renderKeepLogin() {
     error,
     el("p", { class: "k-ameta" }, [el("b", { text: "Demo logins: " }), el("span", { text: "“user” (client) · “broker” (broker) · “underwriter” (underwriter) — same password (prefilled)." })]),
     el("p", { class: "k-ameta", text: `Forgot your password? Contact your broker (${BROKER_NAME}) to reset it.` }),
-    el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
+    // "private to you" dropped: feature 003 sends a digest of the signed-in
+    // client's records to Anthropic when they use the Help desk, so an absolute
+    // privacy claim on the way in is one the product no longer keeps. The Security
+    // page carries the detail; this is pre-auth, so it cannot link there.
+    // "invite-only" is left as-is deliberately — CLAUDE.md records public sign-up
+    // as measured ON and the CONFIG as the thing that is wrong, not this wording.
+    el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only access" })]),
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
 

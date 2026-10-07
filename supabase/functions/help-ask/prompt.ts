@@ -454,7 +454,33 @@ export function splitTrailer(raw: string): SplitAnswer {
   // partner went out with a fenced trailer. Popping any trailing fence would eat
   // the closing fence of a code block that merely ENDS an answer, which is a
   // different thing and measured as such.
-  const isBlankish = (l: string) => /^\s*(---+|___+|\*\*\*+)?\s*$/.test(l);
+  // ⚠️ A CHARACTER SCAN, NOT A REGEX — and the reason is that this is the THIRD
+  // superlinear regex found in this file, all the same shape: two `\s*` with
+  // something optional between them, anchored at both ends. `deFence` had it
+  // (14.8s on a 100k name) and its exact-match predecessor had it. Here the
+  // engine must try every split of the leading `\s*` against the optional rule
+  // and the trailing `\s*` before it can fail, so a line of whitespace followed
+  // by any text backtracks quadratically. Measured on this exact expression:
+  // 15k chars 74ms, 30k 296ms, 60k 1179ms — against a ~2s Edge CPU limit, and
+  // reached AFTER the model call is billed, so it spends the money and then
+  // dies. `global.md` → "Review Rounds Have to Terminate" says redesign rather
+  // than patch a third time, so the construction is gone instead of tuned.
+  // Same language: trimmed, the line is empty or one run of >=3 identical
+  // chars from -_*. Verified equivalent to the old expression over 404,463
+  // differential cases (exhaustive to length 3 over an alphabet of the three
+  // rule chars, six whitespace forms \s matches, and ordinary text; plus
+  // 400k random strings and targeted pure/impure runs) with zero mismatches.
+  // 1,000,000 chars now takes 1.12ms. `.trim()` strips exactly `\s`, which is
+  // what the anchors did.
+  const isBlankish = (l: string) => {
+    const s = l.trim();
+    if (s === "") return true;
+    if (s.length < 3) return false;
+    const c = s[0];
+    if (c !== "-" && c !== "_" && c !== "*") return false;
+    for (let i = 1; i < s.length; i++) if (s[i] !== c) return false;
+    return true;
+  };
   const isFence = (l: string) => /^\s*```/.test(l);
   for (;;) {
     const last = kept[kept.length - 1];

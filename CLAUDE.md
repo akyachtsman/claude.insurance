@@ -92,8 +92,9 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
     billable invocation. `supabase/config.toml` carries no `[functions.help-ask]`
     block, deliberately — and note that only the CLI reads that file at all; the
     Supabase MCP deploy tool takes `verify_jwt` explicitly and defaults to true.
-    Written and merged, **not yet deployed**; see the owner gate below for the
-    full order. Until then `#/keep/help` renders and every ask shows the plain
+    Written, **not merged and not deployed** — ⚠️ this said "Written and merged"
+    while PR #254 was still open, which is the kind of claim that makes a reader
+    stop looking for the branch. See the owner gate below for the full order. Until then `#/keep/help` renders and every ask shows the plain
     "not available" notice — FR-17's single failure
     path, which is why the page is shippable ahead of the deploy.
   - ⚠️ **`desk-ask` is a retired stub, not part of this system — and NOT an
@@ -134,10 +135,29 @@ This is the one to follow; the others defer to it.
 5. Set `ANTHROPIC_API_KEY` as an Edge Function secret.
 6. Deploy `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
    entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
-7. Ask one question as a signed-in client and confirm an answer renders. FR-17
+7. **Merge PR #254, and wait for the Pages deploy to finish.**
+8. Ask one question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
-   deploy worked.
-8. Then merge.
+   deploy worked. If it still shows the notice, read the function logs: the
+   `where` field names the stage (`guide`, `records`, `reserve`, `provider`).
+
+⚠️ **Verification comes AFTER the merge, and that ordering is forced, not a
+preference.** This list had them the other way round — verify at 7, merge at 8 —
+and that gate could never be cleared. `help-ask` fetches its corpus from
+`${APP_URL}/content/help-guide.json`, i.e. the **served** GitHub Pages copy, and
+returns `unavailable` when that fetch is not ok (`index.ts` `loadGuide` →
+`handler.ts`). `content/help-guide.json` lives only on this feature branch, so
+until the merge that URL is a 404 — **measured 2026-10-07: 404, while
+`content/coverage.json` beside it returns 200.** So the old step 7 could only
+ever produce the quiet notice, and the list itself says FR-17 makes that
+indistinguishable from every other failure. An operator following it would either
+stall on an unclearable step or merge without the one proof it calls the only
+proof.
+Merging first is safe for exactly the reason the `help-ask` entry already gives:
+an undeployed or unreachable function renders FR-17's single notice, not a broken
+page. If step 8 fails, the fix is a follow-up PR, not a revert.
+(An `APP_URL` override pointing at a host that serves the branch's corpus would
+also work, and is the escape hatch if a pre-merge proof is ever required.)
 
 ## Backend (Supabase — provisioned)
 - **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
