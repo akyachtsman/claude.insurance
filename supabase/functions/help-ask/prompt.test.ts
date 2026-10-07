@@ -436,21 +436,41 @@ Deno.test("the delimiter nonce is fresh per call — the property the redesign r
 });
 
 Deno.test("trailer parsing stays linear on whitespace — the third ReDoS of this shape", () => {
-  // `isBlankish` was /^\s*(---+|___+|\*\*\*+)?\s*$/ — two `\s*` around an
-  // optional group, anchored both ends. A last line of whitespace then text
-  // backtracked quadratically: measured 15k chars 74ms, 30k 296ms, 60k 1179ms.
-  // That is reached AFTER the model call is billed and the Edge CPU limit is
-  // ~2s, so a degenerate reply spent the money and then killed the isolate.
+  // ⚠️ POSITION MATTERS, and the first version of this test did not know that.
+  // It drove only `" ".repeat(n) + "tail"` — a run at the START of the line —
+  // which clears `isBlankish` but leaves TWO other quadratic regexes passing:
+  // the parseList decoration strip (80k chars 3001ms) and the head's trailing
+  // whitespace strip (80k 2296ms). Both are greedy classes before `$`, so they
+  // only backtrack when the run is in the MIDDLE, followed by a non-class
+  // character. The old input ran in 0.3ms through the same function.
   //
-  // The bound is deliberately loose. The replacement does 200k in ~0.2ms, so
-  // 250ms is ~1000x headroom; the old expression needed ~14s for the same
-  // input, so nothing quadratic can slip back under this.
-  const body = `Answer.\n${" ".repeat(200_000)}tail`;
-  const t0 = performance.now();
-  const out = splitTrailer(body);
-  const ms = performance.now() - t0;
-  assert(ms < 250, `splitTrailer took ${ms.toFixed(0)}ms on 200k spaces — superlinear again`);
+  // So every shape is driven: run at the start, in the middle, and at the end,
+  // on each of the three paths. All of this runs AFTER the model call is billed,
+  // against a ~2s Edge CPU limit.
+  //
+  // The bound is loose on purpose. The scans do 200k in well under a
+  // millisecond; each regex this replaced needed seconds on the same input.
+  const N = 200_000;
+  const cases = [
+    ["isBlankish: run at start", `Answer.\n${" ".repeat(N)}tail`],
+    ["isBlankish: run at end", `Answer.\ntail${" ".repeat(N)}`],
+    ["parseList decor: run in the middle", `Answer.\n[[SOURCES]] a${"*".repeat(N)}a`],
+    ["parseList decor: run at the end", `Answer.\n[[SOURCES]] a${"*".repeat(N)}`],
+    ["head trimEnd: run in the middle", `a${" ".repeat(N)}b [[SOURCES]] x`],
+    ["head trimEnd: run at the end", `ab${" ".repeat(N)} [[SOURCES]] x`],
+  ];
+  for (const [label, body] of cases) {
+    const t0 = performance.now();
+    splitTrailer(body);
+    const ms = performance.now() - t0;
+    assert(ms < 250, `${label}: splitTrailer took ${ms.toFixed(0)}ms on ${N} chars — superlinear again`);
+  }
+
+  // Behaviour, not just speed: the answer survives and a marker still parses.
+  const out = splitTrailer(`Answer.\n${" ".repeat(N)}tail`);
   assertMatch(out.answer, /Answer\./);
+  const ids = splitTrailer("Answer.\n[[SOURCES]] insurance, claims").sourceIds;
+  assert(ids.includes("insurance") && ids.includes("claims"), `decoration strip broke id parsing: ${JSON.stringify(ids)}`);
 
   // The language it accepts must not have widened: a horizontal rule of >=3
   // identical chars is dropped, two is not a rule, and a mixed run is text.

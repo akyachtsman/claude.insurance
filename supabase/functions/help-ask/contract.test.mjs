@@ -217,3 +217,82 @@ test("the daily cap derives its retryAfter instead of reusing the hourly 3600", 
   assert.ok(/retryAfter \?/.test(branch),
     "the daily cap must omit retryAfter when it cannot be derived — a wrong number is worse than none");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// index.ts — THE ONE FILE NOTHING CAN EXECUTE, so the only gate it can have is
+// a source scrape. It imports `jsr:` and `npm:` specifiers, so `node --test`
+// cannot load it, and handler.test.mjs injects fakes for everything it wires.
+// Review round 5 measured the consequence: reverting `maxRetries` to 1, deleting
+// the corpus-fetch timeout, and un-pinning the supabase-js import EACH passed
+// the entire suite. Every invariant below is one a previous round established at
+// cost; a scrape is weak, but a weak gate on an unexecutable file beats none.
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ CODE ONLY. The first version of these tests scanned the raw file and the
+// blanket `maxRetries: [1-9]` assertion matched the COMMENT that explains why
+// `maxRetries: 1` was wrong — a scrape tripping over its own documentation. Any
+// source scrape that asserts the ABSENCE of a pattern has to ignore comments, or
+// writing down the defect reintroduces it. (schema.test.mjs carries the same
+// helper for the same reason; duplicated rather than shared because these two
+// files have no module between them and a third file in this directory would
+// need its own manifest story.)
+function codeOnly(src) {
+  let out = "", i = 0, q = null;
+  while (i < src.length) {
+    const c = src[i], d = src[i + 1];
+    if (q) {
+      out += c;
+      if (c === "\\") { out += d ?? ""; i += 2; continue; }
+      if (c === q) q = null;
+      i++; continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { q = c; out += c; i++; continue; }
+    if (c === "/" && d === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && d === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+const idxSrc = codeOnly(readFileSync(join(here, "index.ts"), "utf8"));
+
+test("index.ts: one reservation buys exactly one provider call", () => {
+  // maxRetries: 1 sent two billable generations against one reserved row, so the
+  // throttle undercounted spend by up to 2x — the bypass the reservation exists
+  // to prevent. It also doubled the worst case to ~121s against a 150s limit.
+  assert.match(idxSrc, /new Anthropic\(\{[^}]*maxRetries:\s*0\b/,
+    "the Anthropic client must be built with maxRetries: 0");
+  assert.ok(!/maxRetries:\s*[1-9]/.test(idxSrc), "a non-zero maxRetries reintroduces the double-spend");
+});
+
+test("index.ts: the corpus fetch is bounded", () => {
+  // This fetch runs AFTER the throttle row is inserted. A hung Pages response
+  // held that reservation until the 150s platform timeout with nothing to
+  // release it — pure loss to the client, since nothing was billed.
+  assert.match(idxSrc, /help-guide\.json[\s\S]{0,400}?AbortSignal\.timeout\(/,
+    "the corpus fetch must carry an AbortSignal.timeout");
+});
+
+test("index.ts: server dependencies are pinned, not floating", () => {
+  // The file argues this itself four lines above the import, and the Anthropic
+  // SDK beside it was already pinned while supabase-js was `@2`.
+  const floating = [...idxSrc.matchAll(/from\s+"(jsr|npm):(@[^"]+)"/g)]
+    .map(([, , spec]) => spec)
+    .filter((spec) => !/@\d+\.\d+\.\d+/.test(spec));
+  assert.deepEqual(floating, [],
+    `unpinned server dependency specifier(s): ${JSON.stringify(floating)}`);
+});
+
+test("index.ts: hasKeys is decided before any client is constructed", () => {
+  // handler.ts documents hasKeys as "checked before anything else". It was not:
+  // `admin: createClient(...)` evaluated as an argument, so an empty URL or
+  // service key threw inside createClient and the caller got a bare 500 with no
+  // CORS headers, no JSON body and no `where` log line — instead of FR-17's one
+  // quiet notice, and with nothing for owner-gate step 8 to read.
+  const hasKeysAt = idxSrc.search(/const HAS_KEYS\s*=/);
+  assert.ok(hasKeysAt > 0, "HAS_KEYS must be computed at module scope");
+  const serveAt = idxSrc.search(/Deno\.serve\(/);
+  assert.ok(hasKeysAt < serveAt, "HAS_KEYS must be computed before Deno.serve");
+  // No createClient may be *called* unguarded in the deps literal.
+  const depsBlock = idxSrc.slice(serveAt);
+  assert.ok(!/admin:\s*createClient\(/.test(depsBlock),
+    "admin must not call createClient inside the deps literal — it runs before the hasKeys check");
+});

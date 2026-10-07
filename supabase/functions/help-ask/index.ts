@@ -82,9 +82,26 @@ const callerClient = (authz: string) =>
     global: { headers: { Authorization: authz } }, auth: { persistSession: false },
   });
 
+// ⚠️ COMPUTED AND CHECKED BEFORE ANY CLIENT IS BUILT. `handler.ts` documents
+// hasKeys as "checked before anything else", and it was not true for two of the
+// four keys: `admin: createClient(SUPABASE_URL, SERVICE_KEY, …)` was evaluated as
+// an ARGUMENT, so an empty URL or service key threw inside createClient before
+// `handle` could reach its `if (!hasKeys)` branch. The caller then got a bare
+// HTTP 500 with no CORS headers, no JSON body and no `where` log line — instead
+// of FR-17's single quiet notice, which is the feature's one documented failure
+// path, and with nothing in the logs for owner-gate step 8 to read. Measured by
+// review round 5 by executing the real index.ts with the keys blanked.
+//
+// `handle` destructures deps and returns at the hasKeys check without
+// dereferencing `admin`, so the placeholder below is never touched on that path.
+const HAS_KEYS = Boolean(SUPABASE_URL && SERVICE_KEY && ANON_KEY && ANTHROPIC_API_KEY);
+const adminClient = HAS_KEYS
+  ? createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+  : (null as unknown as ReturnType<typeof createClient>);
+
 Deno.serve((req: Request) =>
   handle(req, {
-    admin: createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } }),
+    admin: adminClient,
     // Built per request: it carries THIS caller's bearer token. Used both to
     // resolve the identity and — since `service_role` has NO select on the
     // client tables in this project (measured; see handler.ts Deps.admin) — to
@@ -102,5 +119,5 @@ Deno.serve((req: Request) =>
     anthropic: new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 0 }),
     loadGuide,
     appUrl: APP_URL,
-    hasKeys: Boolean(SUPABASE_URL && SERVICE_KEY && ANON_KEY && ANTHROPIC_API_KEY),
+    hasKeys: HAS_KEYS,
   }));

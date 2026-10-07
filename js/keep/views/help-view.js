@@ -137,6 +137,8 @@ export async function renderKeepHelp() {
   async function ask(raw) {
     // cleanQuestion, NOT the raw value: the migration's CHECK caps the RAW text
     // at 500 while testing non-blankness on the TRIMMED text, so validating one
+    // ⚠️ the "stored column" this once named is gone — help_queries no longer
+    // keeps the question text. `handler.ts`'s QUESTION_MAX is the authority now.
     // string and sending another is how a question passes here and is refused by
     // the INSERT. One normalisation, used for both.
     const question = cleanQuestion(raw);

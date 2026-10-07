@@ -58,6 +58,14 @@ revoke insert on public.profiles from authenticated;
 --    re-granting INSERT later (by hand, or by a migration that restates the
 --    table-level grant) cannot silently reopen self-promotion. Belt and braces
 --    on purpose — step 2 is the guard, this is what survives step 2 being undone.
+-- ⚠️ ORDER MATTERS AGAINST `20261006_profiles_no_client_insert.sql`, which
+-- REVOKES client INSERT and DROPS this very policy. If that file is applied first
+-- and this one second, the two lines below RE-CREATE the policy. It is dormant —
+-- Postgres checks privileges before policies, and INSERT is revoked, so nothing
+-- can reach it — but the end state the other file documents ("insert own
+-- dropped") then no longer matches the database, and the next person to read
+-- pg_policies sees a policy that looks live. Apply this file FIRST, or re-run
+-- 20261006's two statements afterwards. Found by review round 5.
 drop policy if exists "profiles insert own" on public.profiles;
 create policy "profiles insert own" on public.profiles for insert to authenticated
   with check (id = auth.uid() and role = 'client');

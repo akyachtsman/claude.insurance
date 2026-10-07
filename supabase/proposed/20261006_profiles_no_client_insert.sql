@@ -51,6 +51,12 @@
 -- `role`. Different hole (privilege escalation, not account creation), different
 -- approval, and either can be applied without the other.
 
+-- ⚠️ APPLY THIS AFTER `20261005_profiles_role_not_self_assignable.sql`, not
+-- before. That file re-creates "profiles insert own", so in the other order the
+-- policy comes back. It is dormant (the revoke below means privileges stop an
+-- insert before any policy is consulted), but the end state recorded in this file
+-- would then be wrong, which is the kind of drift this directory exists to
+-- prevent. Found by review round 5.
 revoke insert on public.profiles from authenticated;
 drop policy if exists "profiles insert own" on public.profiles;
 

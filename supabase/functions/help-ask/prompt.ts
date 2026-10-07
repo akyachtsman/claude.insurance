@@ -409,8 +409,34 @@ export function splitTrailer(raw: string): SplitAnswer {
   // as this did, leaked the entire trailer the moment the model decorated a
   // marker or added a sign-off after it.
   const kept: string[] = [];
+  // ⚠️ ALSO A SCAN, for the same reason, found one round later. This was
+  // `part.trim().replace(/^[[*_`:\s]+|[\]*_`:\s]+$/g, "")`. The trailing
+  // alternative is a greedy character class before `$`, so a long run of class
+  // characters followed by ONE non-class character backtracks quadratically:
+  // measured through splitTrailer at 20k chars 183ms, 40k 736ms, 80k 3001ms.
+  //
+  // ⚠️ AND IT WAS REPORTED AS MEASURED-FLAT ONE ROUND EARLIER. The isolation run
+  // that cleared it used `" ".repeat(n) + "tail"` — the run at the START, where
+  // the LEADING alternative matches greedily and succeeds and the trailing one
+  // fails at once. The input shape decided the answer, and the result was then
+  // stated as a general claim about the expression. A measurement is only as
+  // general as its inputs; the test below now drives start, middle AND end.
+  // Verified equivalent to the old expression over 505,220 differential cases
+  // (exhaustive to length 3 over the five lead chars, five tail chars, six
+  // whitespace forms and ordinary text, plus 500k random strings) with zero
+  // mismatches. 500,000 chars now takes 0.25ms.
+  const ws = (c: string) => c.trim() === "";
+  const LEAD_DECOR = "[*_`:";
+  const TAIL_DECOR = "]*_`:";
+  const stripDecor = (s: string) => {
+    let i = 0, j = s.length;
+    while (i < j && (LEAD_DECOR.includes(s[i]) || ws(s[i]))) i++;
+    while (j > i && (TAIL_DECOR.includes(s[j - 1]) || ws(s[j - 1]))) j--;
+    return s.slice(i, j);
+  };
+
   const parseList = (v: string) => v.split(",")
-    .map((part) => part.trim().replace(/^[[*_`:\s]+|[\]*_`:\s]+$/g, ""))
+    .map((part) => stripDecor(part))
     // "none" is the protocol's explicit empty, and a bare "-" is how a model
     // sometimes writes it. Neither is an id.
     .filter((x) => x && !/^(none|n\/a|-)$/i.test(x));
@@ -441,7 +467,11 @@ export function splitTrailer(raw: string): SplitAnswer {
     // "", which index.ts then reports as `incomplete`: billed, slot spent, and
     // nothing shown. Measured.
     const head = line.slice(0, found[0].at);
-    if (head.trim() && !isDecoration(head)) kept.push(head.replace(/\s+$/, ""));
+    // `.trimEnd()`, NOT `.replace(/\s+$/, "")`. Identical language — `trimEnd`
+    // strips exactly `\s` — but `\s+$` is a greedy class before an anchor, so a
+    // whitespace run in the MIDDLE of the head made it try every start position:
+    // measured through splitTrailer at 40k chars 591ms, 80k 2296ms.
+    if (head.trim() && !isDecoration(head)) kept.push(head.trimEnd());
 
     // Each marker's value ends at the NEXT marker, not at the end of the line.
     // Reading to end-of-line made "[[SOURCES]] none [[REFUSED]] yes" parse the

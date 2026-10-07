@@ -2385,8 +2385,10 @@ test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, 
 //
 // ⚠️ THIS SCENARIO IS WRITTEN TO PASS BOTH BEFORE AND AFTER THE `help-ask`
 // DEPLOY, and that is deliberate, not a weakened assertion. The function is
-// merged but awaiting an owner gate (migration + ANTHROPIC_API_KEY), so until it
-// is live every ask returns FR-17's single "not available" shape. An ask must
+// written but NOT merged and NOT deployed — it is behind an eight-step owner gate
+// in CLAUDE.md (two migrations, sign-up off, a profiles row per client,
+// ANTHROPIC_API_KEY, the deploy, the merge, then one real answer). Until it is
+// live every ask returns FR-17's single "not available" shape. An ask must
 // therefore resolve to EXACTLY ONE OF: an answer (.k-help__a) or the notice
 // (.k-help__notice) — and crucially NEITHER of those is "the region is still
 // empty" or "the region still holds the Looking… placeholder". The thing S10
@@ -2405,8 +2407,8 @@ test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, 
 test('S10: the Help desk labels its answers, refuses a blank question, and never leaves the answer region empty', async ({ page, renderWitness }) => {
   renderWitness();
   test.skip(!LIVE_TARGET, 'The Help desk sits behind real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
-  // 150s, not 90s: the login allows 30s and the ask below allows 75s, which 90
-  // cannot hold. See the settle comment for why 75.
+  // 150s, not 90s: the login allows 30s and the ask below allows 90s, which 90
+  // cannot hold. See the settle comment for why 90.
   test.setTimeout(150_000);
 
   const pageErrors = [];
@@ -2473,16 +2475,18 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
-  // ⚠️ 75s, NOT 45s. The function builds its Anthropic client with a 60s request
-  // timeout, so a slow-but-working provider can legitimately take just over a
-  // minute to come back as `unavailable`. A 45s settle therefore failed S10 with
-  // "the answer region never settled" while the product was behaving exactly as
-  // designed — a red build caused by the test, not by the app. 75s clears the
-  // function's own ceiling with margin.
+  // ⚠️ 90s, NOT 45s. The function's worst case is additive: up to 10s on the
+  // corpus fetch (AbortSignal.timeout) plus 60s on the provider (the Anthropic
+  // client's request timeout) plus the DB round-trips — about 72s before it can
+  // answer `unavailable`. A 45s settle therefore failed S10 with "the answer
+  // region never settled" while the product behaved exactly as designed: a red
+  // build caused by the test, not the app.
+  // 75s was the first correction and its "with margin" claim was wrong — about 3s
+  // over a ~72s worst case is not margin. 90s is.
   // (It was worse before this PR set maxRetries to 0: a retried timeout made the
   // worst case ~121s, so 45s was less than HALF of it.)
   await expect(settled, 'An ask resolved to neither an answer nor a notice — the answer region never settled')
-    .toHaveCount(1, { timeout: 75_000 });
+    .toHaveCount(1, { timeout: 90_000 });
   await expect(page.locator('.k-help__out'), 'The Looking… placeholder was left standing after the ask')
     .not.toHaveText(/^Looking…$/);
 

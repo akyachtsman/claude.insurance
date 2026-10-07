@@ -538,12 +538,15 @@ test("today's date is grounded, so 'still active' is answerable", async () => {
 });
 
 test("a client with hundreds of assets still gets their records — no 16KB URL cliff", async () => {
-  // PostgREST puts an `.in()` list in the query STRING, ~39 chars per uuid, so a
-  // single list crossed 16KB at roughly 410 ids and Cloudflare answered 520. That
-  // was a PERMANENT records_error for that client — not a transient one — and
-  // deliberately reachable by anyone holding an account. A fake has no URL, so
-  // this asserts the BOUND rather than the symptom: no `in` list may exceed the
-  // chunk size, whatever the client owns.
+  // PostgREST puts an `.in()` list in the query STRING, ~37 chars per uuid, so a
+  // long enough list is refused outright and the read fails PERMANENTLY for that
+  // client — not transiently — and it is deliberately reachable by anyone holding
+  // an account. Measured live 2026-10-07: accepted at 640 ids / 23,760 bytes,
+  // refused with HTTP 400 at 700 / 25,980. (An earlier comment here said 16KB at
+  // 410 ids with a 520; that was Supabase's documented Cloudflare limit quoted as
+  // a measurement. See handler.ts for the full table.)
+  // A fake has no URL, so this asserts the BOUND rather than the symptom: no `in`
+  // list may exceed the chunk size, whatever the client owns.
   //
   // ⚠️ Both phases stay under FACT_LIMITS.count (400) ON PURPOSE. The first draft
   // seeded 520 assets, which produces ~1040 facts, and the digest cap dropped the
@@ -612,4 +615,47 @@ test("the two caps are distinguishable on the wire, not guessed from the wait", 
   const shared = await (await ask(deps({ tables: seed({ help_queries: others }) }).d)).json();
   assert.equal(shared.reason, "rate_limited");
   assert.equal(shared.scope, "shared", "the aggregate cap did not identify itself");
+});
+
+test("the throttle row carries ONLY the owner — the question text is never stored", async () => {
+  // The help_queries migration deliberately has no `question` column: the
+  // throttle counts rows, nothing reads the text, so storing it was indefinite
+  // retention of client free text with no reader. Nothing pinned that, and
+  // review round 5 proved it: changing the insert back to `{ owner, question }`
+  // passed all 305 tests, because the fake accepts any column and the schema
+  // scraper only reads `.select()` lists. On the real table that edit fails every
+  // insert; against an older table it silently resumes storing the text.
+  const { d, db } = deps();
+  const res = await ask(d, { question: "My neighbour Jane Smith at 14 Harbour Rd is suing me" });
+  assert.equal(res.status, 200);
+
+  const ins = db.log.find((q) => q.table === "help_queries" && q.inserted);
+  assert.ok(ins, "no help_queries insert was made");
+  assert.deepEqual(Object.keys(ins.inserted).sort(), ["owner"],
+    `the throttle insert carries more than the owner: ${JSON.stringify(ins.inserted)}`);
+
+  // And the text itself must appear nowhere in what was written.
+  const written = JSON.stringify(db.tables.help_queries ?? []);
+  assert.ok(!/Jane Smith|Harbour Rd|suing/.test(written),
+    `the question text reached the throttle table: ${written}`);
+});
+
+test("coverages are capped per policy — the column is unbounded and re-sent every ask", async () => {
+  // CLAUDE.md's disclosure paragraph says "capped at 20 lines per policy".
+  // Dropping the .slice() survived the suite at 7a35387, so the cap was
+  // documented and unenforced. `coverages` is broker-written jsonb with no bound,
+  // and it crosses to the provider on EVERY question.
+  let sent = "";
+  const many = Array.from({ length: 60 }, (_, i) => ({ label: `Cover ${i}`, limit: `$${i}000` }));
+  const { d } = deps({
+    tables: seed({ policies: [
+      { asset_id: "a1", line: "Home", carrier: "Acme", number: "HO-1", renewal_date: "2027-03-12", premium_amount: 2400, premium_period: "yr", coverages: many },
+    ] }),
+    anthropic: { messages: { create: async (a) => { sent = JSON.stringify(a); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+  });
+  assert.equal((await ask(d)).status, 200);
+
+  const seenLabels = many.filter((c) => sent.includes(`${c.label} limit`)).length;
+  assert.ok(seenLabels > 0, "no coverage lines reached the prompt at all — the test is vacuous");
+  assert.ok(seenLabels <= 20, `${seenLabels} coverage lines crossed the boundary; CLAUDE.md documents a cap of 20`);
 });

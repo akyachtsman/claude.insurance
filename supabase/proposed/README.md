@@ -142,7 +142,8 @@ hole — it creates a table a feature needs. It waits here for the same reason
 they do: CLAUDE.md requires explicit owner approval for migrations.
 
 **What it is.** One row per answered help-desk question
-(`id`, `owner`, `asked_at`, `question`), plus the RLS, the service-role grant and the index
+(`id`, `owner`, `asked_at` — **no `question`**; the text column was dropped before
+this was applied because nothing read it), plus the RLS, the service-role grant and the index
 around it. It is the state the `help-ask` throttle counts, satisfying **FR-16**
 ("the endpoint is throttled per client").
 

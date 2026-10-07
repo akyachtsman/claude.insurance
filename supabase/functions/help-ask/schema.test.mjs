@@ -84,9 +84,55 @@ test("the migration parser found the tables this function reads", () => {
   assert.ok(!schema.get("policies").has("premium"), "policies.premium was dropped");
 });
 
+// ⚠️ COMMENTS ARE STRIPPED BEFORE PAIRING, and that is a bug fix, not tidiness.
+// The pairing regex allows 200 characters between `.from()` and `.select(`. A
+// 348-character comment added to the throttle reservation pushed its
+// `.select("id")` out of that window, so this guard silently went from pairing
+// 8 of 8 selects to 7 of 8 — and `>= 4` could not notice. Mutating that select
+// to a nonexistent column then passed the whole suite, which is precisely the
+// defect class this file exists to catch (a missing column makes PostgREST
+// return `{data: null, error}` and every ask fail). Found by review round 5.
+//
+// Stripping comments makes the window measure CODE distance, so no comment can
+// move a select out of range again. String literals are left alone: a `//` or
+// `/*` inside one would only ever shorten the text being searched, and the
+// column lists this reads are themselves string literals.
+function codeOnly(src) {
+  let out = "", i = 0, q = null;
+  while (i < src.length) {
+    const c = src[i], d = src[i + 1];
+    if (q) {
+      out += c;
+      if (c === "\\") { out += d ?? ""; i += 2; continue; }
+      if (c === q) q = null;
+      i++; continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { q = c; out += c; i++; continue; }
+    if (c === "/" && d === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && d === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+// Every `.from(t) … .select("cols")` pair, with an assertion that NOTHING was
+// left unpaired — the count must equal the number of `.select("…")` calls in the
+// file, not merely clear a floor.
+function selectPairs(src) {
+  const code = codeOnly(src);
+  const pairs = [...code.matchAll(/\.from\("(\w+)"\)[\s\S]{0,200}?\.select\(\s*"([^"]*)"/g)];
+  const total = [...code.matchAll(/\.select\(\s*"[^"]*"/g)].length;
+  if (pairs.length !== total) {
+    throw new Error(
+      `${total} .select("…") calls in handler.ts but only ${pairs.length} could be paired with a .from(). ` +
+      "An unpaired select is UNCHECKED — this guard would pass while it named a column that does not exist.");
+  }
+  return pairs;
+}
+
 test("every column help-ask SELECTs exists in that table", () => {
-  const selects = [...fnSrc.matchAll(/\.from\("(\w+)"\)[\s\S]{0,200}?\.select\(\s*"([^"]*)"/g)];
-  assert.ok(selects.length >= 4, `only ${selects.length} .from().select() pairs found — did the parse break?`);
+  const selects = selectPairs(fnSrc);
+  assert.ok(selects.length >= 8, `only ${selects.length} .from().select() pairs found — did the parse break?`);
 
   const missing = [];
   for (const [, table, list] of selects) {
@@ -120,8 +166,8 @@ const DOCUMENTED = {
 };
 
 test("help-ask selects exactly the columns CLAUDE.md says it discloses", () => {
-  const selects = [...fnSrc.matchAll(/\.from\("(\w+)"\)[\s\S]{0,200}?\.select\(\s*"([^"]*)"/g)];
-  assert.ok(selects.length >= 4, `only ${selects.length} .from().select() pairs found — did the parse break?`);
+  const selects = selectPairs(fnSrc);
+  assert.ok(selects.length >= 8, `only ${selects.length} .from().select() pairs found — did the parse break?`);
 
   for (const [, table, list] of selects) {
     if (!DOCUMENTED[table]) continue;                 // help_queries is throttle state, not a disclosure

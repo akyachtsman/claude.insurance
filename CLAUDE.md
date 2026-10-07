@@ -135,6 +135,15 @@ This is the one to follow; the others defer to it.
 5. Set `ANTHROPIC_API_KEY` as an Edge Function secret.
 6. Deploy `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
    entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
+   ⚠️ **It is THREE modules — `index.ts`, `handler.ts`, `prompt.ts` — and they
+   deploy together.** `index.ts` imports the other two, so pasting it alone into
+   the Dashboard editor fails at import, which FR-17 then renders as the same
+   quiet notice as everything else. Deploy the whole `supabase/functions/help-ask/`
+   directory (the `.test.mjs`/`.test.ts` files are harmless but need not ship).
+   ⚠️ Also set an **Anthropic Console workspace spend limit** before or with this
+   step. The code's caps are the first line; the Console limit is the backstop if
+   they have a bug, and it is named as the backstop in this file's security
+   constraints without ever having been a step here.
 7. **Merge PR #254, and wait for the Pages deploy to finish.**
 8. Ask one question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
@@ -344,7 +353,9 @@ profile**, never by listing a directory.
     probe showed the gateway flag and CORS touch the *same* request path — the
     preflight reaches the function, an unauthenticated POST never does. Changing
     both at once is how a deploy fails for a reason nobody can distinguish.
-    Revisit once step 7 of the owner gate has proved one real answer renders.
+    Revisit once owner-gate **step 8** has proved one real answer renders. (This
+    said "step 7" — written before the gate was reordered in the same round, so
+    it pointed at what is now the merge. The proof is step 8.)
   - An Anthropic Console workspace spend limit is the backstop if that has a bug.
 - **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
   there is no lead-reading path in the static app. ⚠️ The second half of this
@@ -535,16 +546,33 @@ leak instead of a security review catching it after the push.
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
-question as the shared demo `user`. That is up to 2 paid model calls per run,
-charged to the owner's Anthropic account and counted against **both** caps. 2 of
-400/day is noise; the **20/hour per-account** cap is the sharp edge — ten deploys
-in an hour would consume every slot the demo client has and the desk would refuse
-a real person using that login.
+question as the shared demo `user`.
+⚠️ **4 paid calls per clean run, up to 8 on a failing one — not "up to 2", which
+is what this said.** S10 carries no project filter, and `playwright.config.js`
+declares **four** projects (desktop, tablet, mobile-chrome, iphone), so
+`npx playwright test --list | grep -c S10` returns **4**. Measured by review
+round 5; I had counted the scenario, not its instantiations.
+That makes the **20/hour per-account** cap the sharp edge: about **5 clean runs**
+exhausts it (2-3 failing ones), not "ten deploys" — and after owner-gate step 7
+those 4 CI asks run *before* the operator's own step-8 proof, so a burst of
+deploys can make step 8 fail for rate-limiting rather than for anything real.
 Not fixed because every option is a trade: a dedicated CI account needs a
 `profiles` row and another credential in secrets; skipping the ask removes the
 only live proof the answer path works. Flagged so the first "why is the demo desk
 rate-limited?" has an answer. (The *flake* half of this finding WAS fixed — S10's
 settle was 45s against the function's own 60s ceiling.)
+
+### ⚠️ Recorded — `max_tokens: 8192` against a 60s non-streaming timeout
+
+The provider call is non-streaming with a 60s request timeout and `max_tokens:
+8192`, chosen to leave thinking room. Filling that budget inside the timeout needs
+roughly **137 output tokens/second** sustained; a long thinking trace that misses
+it ends as a **billed timeout** whose reservation is deliberately kept ("billing
+unknown" resolves as billed), so the client loses a slot and sees the quiet
+notice. Raised by review round 5 as reasoned, not measured — nobody here has
+timed Opus 5.5 against this budget. Streaming would remove the cliff entirely and
+is the fix if owner-gate step 8 or early use shows timeouts. Worth watching in the
+function logs for `where: "provider"` with no status.
 
 ### ⚠️ Recorded — `help-ask` reads only the LEGACY Supabase key names
 

@@ -13,7 +13,7 @@
       "title": "Your entities",
       "route": "#/keep/list",
       "nav": "Entities",
-      "body": "Every entity you hold cover under \u2014 yourself plus any businesses or trusts. Each card shows how many assets and policies sit under it. Open one to see its detail.",
+      "body": "Every entity you hold cover under \u2014 yourself plus any businesses or trusts. The table shows each one's type, subtype, asset count, open gaps and total value, and you can switch to a card view showing assets, gaps and value. Open one to see its detail.",
       "ask": "Where do I see my entities?"
     },
     {
@@ -45,7 +45,7 @@
       "title": "All your assets",
       "route": "#/keep/assets",
       "nav": "Assets",
-      "body": "Every asset across all your entities in one sortable table \u2014 value, depreciated value, which entity holds it, and how many policies cover it.",
+      "body": "Every asset across all your entities in one sortable table \u2014 type, which entity holds it, value, annual depreciation (or \u201cHolds value\u201d for types that do not depreciate), and how many policies cover it.",
       "ask": "Where do I see all my assets?"
     },
     {

@@ -21,7 +21,12 @@
 
 // Matches the help_queries check constraint in the T4 migration
 // (supabase/proposed/20261006_help_queries.sql):
-//   check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)
+//   ⚠️ NOT a stored-column cap any more. This used to quote
+//   `check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)`
+//   from help_queries, but that table no longer stores the question text at all —
+//   the column was dropped, because nothing read it. The 500 is still real and
+//   still worth matching: `handler.ts` (QUESTION_MAX) rejects a longer question
+//   with `invalid`, and that is now the ONLY authority for the number.
 // Note the asymmetry — the non-blank test is on the TRIMMED text, the cap is on
 // the RAW text, so padding cannot buy extra characters. validateQuestion
 // measures the trimmed text, which agrees with that cap only if the caller

@@ -66,8 +66,14 @@ independent, and the honest version is more useful than the flattering one:
    violation. Worth keeping, worth not overclaiming.
 3. **In the UI** — the AI-generated label (FR-10) and the broker channel are
    rendered by the view on every answer, regardless of the payload. **This is
-   the independent layer**, and the only one that still holds when the model
-   ignores everything above it.
+   the only MODEL-INDEPENDENT layer**, and the only one that still holds when the
+   model ignores everything above it.
+   ⚠️ But be precise about what it holds: `renderAnswer` prints the model's text
+   **verbatim** and appends a label and a broker box. It cannot read the answer,
+   so it cannot detect a coverage determination and cannot block one. What it
+   guarantees is that the disclosure and the remedy are ALWAYS PRESENT — never
+   that the boundary was respected. Calling it enforcement was an overclaim, made
+   in this file and repeated in the PR description; found by review round 5.
 
 Layer 3 only became true of the broker channel on 2026-10-06. It had been
 rendered off `brokerHandoff`, which traced back through `reason: "refused"` and
@@ -78,8 +84,12 @@ worse than having no hand-off at all: a model that answered a coverage question
 determination, which reads as broker-endorsed. Measured. The channel is
 unconditional now and the flag is deleted rather than left unread.
 
-A-4 says none of these is sufficient alone. That remains true; what changed is
-the count of layers that can actually enforce anything, which is one.
+A-4 says none of these is sufficient alone. That remains true, and the sharper
+version is this: **no layer blocks a violation.** Layers 1 and 2 lower the odds
+through the same inference they are trying to constrain; layer 3 does not depend
+on the model but does not inspect the answer either. One layer is
+model-independent; zero are enforcement. A reader who needs enforcement needs a
+human, which is what the broker channel is for.
 
 ## Key decision 4 — model and cost
 
@@ -117,7 +127,11 @@ is the backstop that holds if the throttle has a bug.
 
 ```
 id uuid pk, owner uuid not null default auth.uid() -> auth.users on delete cascade,
-asked_at timestamptz not null default now(), question text not null (btrim, <=500)
+asked_at timestamptz not null default now()
+<!-- The `question text not null (btrim, <=500)` column this once listed was
+     REMOVED before the migration was applied: nothing read it, so it was client
+     free text retained indefinitely. The 500-character limit still exists, in
+     handler.ts (QUESTION_MAX), as a request bound rather than a stored one. -->
 ```
 
 RLS enabled with **no policies and no client grants at all** (revised 2026-10-06 — this

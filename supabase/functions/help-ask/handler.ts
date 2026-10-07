@@ -211,11 +211,23 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   };
 
   // ⚠️ CHUNKED, because PostgREST puts an `.in()` list in the query STRING — a
-  // uuid costs ~39 chars there, so one list crossed 16KB at roughly 410 ids and
-  // Cloudflare answered 520. That was a PERMANENT `records_error` for that
-  // client: self-inflicted by owning enough assets, unreachable by any retry, and
-  // reachable deliberately by anyone holding an account, the shared demo among
-  // them.
+  // uuid costs ~37 chars there, so a long list eventually exceeds what the edge
+  // will accept and the read fails PERMANENTLY for that client: self-inflicted by
+  // owning enough assets, unreachable by any retry, and reachable deliberately by
+  // anyone holding an account, the shared demo among them.
+  //
+  // ⚠️ THE THRESHOLD HERE WAS WRONG AND IS NOW MEASURED. It said "crossed 16KB at
+  // roughly 410 ids and Cloudflare answered 520" — that was Supabase's documented
+  // Cloudflare limit quoted as though it had been observed. Measured against this
+  // project's live REST endpoint on 2026-10-07 (anon key, so 401 = the URL was
+  // ACCEPTED and auth rejected it, 400 = the URL itself was refused):
+  //     n=200  7,480 B -> 401      n=600  22,280 B -> 401
+  //     n=410 15,250 B -> 401      n=640  23,760 B -> 401
+  //     n=520 19,320 B -> 401      n=700  25,980 B -> 400  <- first refusal
+  // So the real cliff is between 640 and 700 ids (~24-26KB) with a 400, not 410
+  // ids at 16KB with a 520. Review round 5 measured the same thing authenticated.
+  // The defect is real; only the numbers were borrowed. 200 ids is ~7.5KB, which
+  // leaves roughly 3x margin.
   //
   // The filter is NOT dropped, though RLS makes it redundant today (`assets` has
   // no `owner` column; its policy is `exists (select 1 from entities e where

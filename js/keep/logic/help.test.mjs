@@ -83,8 +83,11 @@ test("validateQuestion: trailing whitespace does not push an at-limit question o
   assert.deepEqual(validateQuestion("  " + "x".repeat(QUESTION_MAX) + "   "), { ok: true });
 });
 
-test("validateQuestion: QUESTION_MAX matches the stored column cap", () => {
-  assert.equal(QUESTION_MAX, 500); // supabase/proposed help_queries: char_length(question) <= 500
+test("validateQuestion: QUESTION_MAX matches the limit the FUNCTION enforces", () => {
+  // Renamed from "the stored column cap": help_queries no longer stores the
+  // question text, so there is no column to mirror. The number must still match
+  // the server, or a question the client accepts comes back as `invalid`.
+  assert.equal(QUESTION_MAX, 500); // supabase/functions/help-ask/handler.ts: QUESTION_MAX
 });
 
 test("cleanQuestion: is the one normalisation, and is what validation measured", () => {
@@ -94,7 +97,7 @@ test("cleanQuestion: is the one normalisation, and is what validation measured",
 });
 
 // The migration's constraint is asymmetric on purpose:
-//   check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)
+//   (handler.ts) if (question.length > QUESTION_MAX) return unavailable("invalid")
 // — non-blank on the TRIMMED text, the cap on the RAW text, so padding cannot
 // store more than 500 characters. Client-side validation exists to stop a
 // question being accepted here and then refused by the INSERT, so anything
