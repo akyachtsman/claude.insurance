@@ -96,15 +96,22 @@ test("cleanQuestion: is the one normalisation, and is what validation measured",
   for (const bad of [undefined, null, 42, {}, []]) assert.equal(cleanQuestion(bad), "");
 });
 
-// The migration's constraint is asymmetric on purpose:
-//   (handler.ts) if (question.length > QUESTION_MAX) return unavailable("invalid")
-// — non-blank on the TRIMMED text, the cap on the RAW text, so padding cannot
-// store more than 500 characters. Client-side validation exists to stop a
-// question being accepted here and then refused by the INSERT, so anything
-// validateQuestion accepts must satisfy that check WHEN SENT AS cleanQuestion()
-// output. This test is that implication, one-directional on purpose.
-test("validateQuestion + cleanQuestion satisfy the help_queries check constraint", () => {
-  const dbAccepts = (sent) => typeof sent === "string" && sent.trim().length >= 1 && sent.length <= QUESTION_MAX;
+// What the SERVER does, which is not what this comment used to describe:
+//   const question = payload.question.trim();            // handler.ts
+//   if (!question) return unavailable("invalid");
+//   if (question.length > QUESTION_MAX) return unavailable("invalid");
+// Both tests are on the TRIMMED text. The old `help_queries` CHECK was asymmetric
+// — non-blank on the trimmed text, the cap on the RAW column — but that column
+// was dropped, and this comment kept describing it. Padding is now simply ignored
+// rather than rejected.
+// Client-side validation exists so the client never reports a length the server
+// disagrees with, so anything validateQuestion accepts must be accepted by the
+// server WHEN SENT AS cleanQuestion() output. This test is that implication,
+// one-directional on purpose.
+test("validateQuestion + cleanQuestion agree with what the function accepts", () => {
+  // Models handler.ts, NOT a CHECK constraint: the cap is on `.trim()`ed length.
+  const serverAccepts = (sent) =>
+    typeof sent === "string" && sent.trim().length >= 1 && sent.trim().length <= QUESTION_MAX;
   const samples = [
     "", "   ", "\n", "ok?", "  ok?  ", "x".repeat(QUESTION_MAX),
     "  " + "x".repeat(QUESTION_MAX) + "   ", "x".repeat(QUESTION_MAX + 1),
@@ -115,7 +122,7 @@ test("validateQuestion + cleanQuestion satisfy the help_queries check constraint
     if (!validateQuestion(s).ok) continue;
     accepted += 1;
     const sent = cleanQuestion(s);
-    assert.ok(dbAccepts(sent), `validation accepted ${sent.length} chars the constraint would reject`);
+    assert.ok(serverAccepts(sent), `validation accepted ${sent.length} chars the function would reject`);
   }
   assert.ok(accepted >= 4, "the sample set has to actually exercise the accepting branch");
 });

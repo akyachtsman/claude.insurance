@@ -239,8 +239,10 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   // would mean weakening the test that guards the property. Chunking fixes the
   // defect without touching either.
   //
-  // 200 ids ≈ 7.8KB, half the limit, so the per-request overhead of a second
-  // round-trip only starts past 200 — well beyond any real client.
+  // 200 ids ≈ 7.5KB against a measured ~24.5-25.5KB cliff, so roughly 3x margin
+  // (this line said "half the limit", which was arithmetic against the retracted
+  // 16KB figure). A second round-trip only starts past 200 ids — well beyond any
+  // real client.
   const CHUNK = 200;
   const inChunks = async <T>(
     values: string[],
@@ -329,7 +331,17 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   const { admin, userDb, userClient, anthropic, loadGuide, hasKeys } = deps;
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  if (!hasKeys) return unavailable("unavailable");  // FR-17: the client needs a notice, not a cause
+  // FR-17: the CLIENT needs a notice, not a cause — but the OPERATOR needs the
+  // cause, and this was the one FR-17 path that logged nothing. Every other one
+  // (invite, reserve, guide, records, provider) emits a `where`, and owner-gate
+  // step 8 says to read that field when the notice appears. A missing secret was
+  // the single most likely reason for it on a first deploy and the single hardest
+  // to diagnose, because the parent at least threw a stack naming the absent key
+  // and the fix for THAT replaced it with silence. Names only, never values.
+  if (!hasKeys) {
+    console.error(JSON.stringify({ where: "config", message: "a required secret is unset" }));
+    return unavailable("unavailable");
+  }
 
   // These return the SHAPED payload at 200, not `{error}` at 400. A non-2xx makes
   // supabase-js surface an error with no body, so the client fell through to its

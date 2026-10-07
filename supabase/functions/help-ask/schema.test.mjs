@@ -97,6 +97,15 @@ test("the migration parser found the tables this function reads", () => {
 // move a select out of range again. String literals are left alone: a `//` or
 // `/*` inside one would only ever shorten the text being searched, and the
 // column lists this reads are themselves string literals.
+//
+// ⚠️ KNOWN LIMIT: a REGEX LITERAL containing `/*` — e.g. `.replace(/\/*$/, "")`,
+// a plausible trailing-slash trim — opens a block comment that runs to end of
+// file, because this does not track regex-literal context (telling `/` as
+// division from `/` as a regex start needs real lexing). It FAILS CLOSED: three
+// of the index.ts scrapes then fail on correct code, with messages naming the
+// wrong cause ("the Anthropic client must be built with maxRetries: 0"). If that
+// happens, the scrape is wrong, not the code. Measured by review round 6; a lone
+// quote or backtick inside a regex literal was tried and does not break it.
 function codeOnly(src) {
   let out = "", i = 0, q = null;
   while (i < src.length) {
@@ -121,7 +130,13 @@ function codeOnly(src) {
 function selectPairs(src) {
   const code = codeOnly(src);
   const pairs = [...code.matchAll(/\.from\("(\w+)"\)[\s\S]{0,200}?\.select\(\s*"([^"]*)"/g)];
-  const total = [...code.matchAll(/\.select\(\s*"[^"]*"/g)].length;
+  // ⚠️ `total` COUNTS EVERY QUOTING STYLE, not just double quotes. It used to
+  // count only `.select("…")`, so a read written `.select('id, ssn')`, with a
+  // template literal, or with a constant was invisible to BOTH halves of this
+  // guard — the pair count matched, nothing looked unpaired, and a new select
+  // reaching an undocumented column passed. Measured. Counting all forms means
+  // such a select is unpairable and the error below fires.
+  const total = [...code.matchAll(/\.select\(\s*(?:["'`]|[A-Za-z_$])/g)].length;
   if (pairs.length !== total) {
     throw new Error(
       `${total} .select("…") calls in handler.ts but only ${pairs.length} could be paired with a .from(). ` +

@@ -135,12 +135,15 @@ export async function renderKeepHelp() {
   }
 
   async function ask(raw) {
-    // cleanQuestion, NOT the raw value: the migration's CHECK caps the RAW text
-    // at 500 while testing non-blankness on the TRIMMED text, so validating one
-    // ⚠️ the "stored column" this once named is gone — help_queries no longer
-    // keeps the question text. `handler.ts`'s QUESTION_MAX is the authority now.
-    // string and sending another is how a question passes here and is refused by
-    // the INSERT. One normalisation, used for both.
+    // cleanQuestion, NOT the raw value: validate and send the SAME string, so the
+    // length the client reports is the length the server enforces
+    // (`handler.ts`'s QUESTION_MAX, measured after its own trim).
+    //
+    // ⚠️ This comment previously described a `help_queries` CHECK constraint
+    // capping the RAW text, and a correction was then inserted INTO THE MIDDLE OF
+    // ITS SENTENCE, leaving "…so validating one / ⚠️ … / string and sending
+    // another…". Both the constraint and the column are gone, and a half-applied
+    // fix reads worse than the stale text it was patching.
     const question = cleanQuestion(raw);
     const v = validateQuestion(question);
     error.textContent = v.ok ? "" : v.error;

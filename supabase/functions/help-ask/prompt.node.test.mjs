@@ -428,9 +428,13 @@ test("trailer parsing stays linear on whitespace — the third ReDoS of this sha
   // only backtrack when the run is in the MIDDLE, followed by a non-class
   // character. The old input ran in 0.3ms through the same function.
   //
-  // So every shape is driven: run at the start, in the middle, and at the end,
-  // on each of the three paths. All of this runs AFTER the model call is billed,
-  // against a ~2s Edge CPU limit.
+  // So the shapes that DISCRIMINATE are driven: two positions per path, six cases
+  // in all — not "start, middle and end on each of the three paths", which is how
+  // this was first described and is nine. The omitted combinations cannot tell the
+  // old regexes from the new scans, so the gap is in the wording, not the cover;
+  // recording it because an overstated test description is how the previous
+  // version of this test came to be trusted. All of this runs AFTER the model call
+  // is billed, against a ~2s Edge CPU limit.
   //
   // The bound is loose on purpose. The scans do 200k in well under a
   // millisecond; each regex this replaced needed seconds on the same input.

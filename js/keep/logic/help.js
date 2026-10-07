@@ -19,19 +19,30 @@
 // the client's own rows — so the function sends the display line and the view
 // renders it as text.
 
-// Matches the help_queries check constraint in the T4 migration
-// (supabase/proposed/20261006_help_queries.sql):
-//   ⚠️ NOT a stored-column cap any more. This used to quote
-//   `check (char_length(btrim(question)) >= 1 and char_length(question) <= 500)`
-//   from help_queries, but that table no longer stores the question text at all —
-//   the column was dropped, because nothing read it. The 500 is still real and
-//   still worth matching: `handler.ts` (QUESTION_MAX) rejects a longer question
-//   with `invalid`, and that is now the ONLY authority for the number.
-// Note the asymmetry — the non-blank test is on the TRIMMED text, the cap is on
-// the RAW text, so padding cannot buy extra characters. validateQuestion
-// measures the trimmed text, which agrees with that cap only if the caller
-// sends the trimmed text: cleanQuestion() is that one line, and the reason it
-// is exported rather than left to each caller.
+// Matches the limit the FUNCTION enforces — `handler.ts`'s QUESTION_MAX, which is
+// now the only authority for the number.
+//
+// ⚠️ TWO CORRECTIONS, and the second was still wrong after the first. This note
+// used to describe a `help_queries` CHECK constraint
+// (`char_length(btrim(question)) >= 1 and char_length(question) <= 500`); that
+// table no longer stores the question text at all, because nothing read it. The
+// first fix pointed here at `handler.ts` instead — but kept the constraint's
+// ASYMMETRY, which the handler does not share:
+//
+//     const question = payload.question.trim();          // handler.ts
+//     if (question.length > QUESTION_MAX) ... "invalid";  // the TRIMMED length
+//
+// The old CHECK capped the RAW column and tested non-blankness on the trimmed
+// text, so padding could not buy characters. The handler trims FIRST, so both
+// tests are on the trimmed text and padding is simply ignored: measured, 400
+// spaces + 500 x's (raw 900) is ACCEPTED, and 501 x's is not.
+//
+// What that retires is a whole hazard this file was built around: there is no
+// longer any way to be told a question is fine here and then have the server
+// refuse it for length, because the server normalises the same way. cleanQuestion()
+// is still the documented entry — it keeps what the client sees validated
+// identical to what is sent — but it is no longer load-bearing against a
+// server-side rejection.
 export const QUESTION_MAX = 500;
 
 // How many suggestion chips the empty state offers (FR-2). The corpus is longer
@@ -86,14 +97,17 @@ function str(v) {
   return typeof v === "string" ? v.trim() : "";
 }
 
-// The question as it should be SENT and STORED: trimmed, and "" for anything
-// that is not a usable string. Callers validate and send the same value —
+// The question as it should be SENT: trimmed, and "" for anything that is not a
+// usable string. NOT "and stored" — nothing stores it; help_queries keeps only
+// `owner` and `asked_at`. Callers validate and send the same value —
 //   const q = cleanQuestion(input.value);
 //   const v = validateQuestion(q); if (!v.ok) { show(v.error); return; }
 //   await askHelp(q);
-// — so the length validateQuestion measured is the length the check constraint
-// sees. Send the raw input instead and 500 characters of question plus trailing
-// spaces passes here and is rejected by the database, which is the one failure
+// — so the length validateQuestion measured is the length the SERVER measures.
+// The old warning here said sending the raw input instead gets "rejected by the
+// database"; there is no such rejection now, because the handler trims before it
+// caps. What is left is a smaller, real reason: one normalisation means the client
+// cannot show a character count that disagrees with the one being enforced
 // mode client-side validation exists to prevent.
 export function cleanQuestion(text) {
   return str(text);
@@ -108,11 +122,11 @@ export function validateQuestion(text) {
   // (requests.js's `(subject || "").trim()` throws on a number; this does not.)
   const q = str(text);
   if (!q) return { ok: false, error: "Type a question to ask the help desk." };
-  // Measured on the TRIMMED text — the text cleanQuestion() produces and the
-  // caller sends. The migration's cap is on the raw column value, so the two
-  // agree exactly when the caller sends what was validated; a caller that sends
-  // the raw input instead can still be refused by the INSERT *after* being told
-  // the question was fine, which is why cleanQuestion() is the documented entry.
+  // Measured on the TRIMMED text — which is also what the handler measures, since
+  // it trims before it caps. (This said "the migration's cap is on the raw column
+  // value", describing a constraint that no longer exists on a column that no
+  // longer exists; the two now agree by construction rather than by the caller
+  // being careful.)
   if (q.length > QUESTION_MAX) {
     // "to N or fewer", not requests.js's "under N": the limit is inclusive, and
     // a client who hits exactly 500 should not be told 500 is too many.

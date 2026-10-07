@@ -537,7 +537,7 @@ test("today's date is grounded, so 'still active' is answerable", async () => {
     "no current date reached the model, so it answers renewal questions from its own guess at today");
 });
 
-test("a client with hundreds of assets still gets their records — no 16KB URL cliff", async () => {
+test("a client with hundreds of assets still gets their records — no in() URL cliff", async () => {
   // PostgREST puts an `.in()` list in the query STRING, ~37 chars per uuid, so a
   // long enough list is refused outright and the read fails PERMANENTLY for that
   // client — not transiently — and it is deliberately reachable by anyone holding

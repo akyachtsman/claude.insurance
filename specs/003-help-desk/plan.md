@@ -50,7 +50,7 @@ it cannot be removed by editing a filter out of the handler. The client sends
 only its question. This is the same reasoning as feature 002's IDOR finding,
 applied before the bug rather than after.
 
-## Key decision 3 — the refusal boundary: one independent layer, two mitigations
+## Key decision 3 — the refusal boundary: one model-independent layer, zero enforcement points
 
 **Restated 2026-10-06, because the original claim was overstated** and a QA pass
 was right to say so. It read "the refusal boundary lives in three places, not

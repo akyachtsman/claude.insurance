@@ -520,7 +520,7 @@ reuse is not a drop-in either.
 Also missing while this stands: the entity **subtype** ("LLC") is never sent, so
 "what kind of entity is Coastal Cafe?" can only answer "business".
 
-### ⚠️ OPEN — nothing executes `help-view.js`, the layer the plan calls the only independent enforcement
+### ⚠️ OPEN — nothing executes `help-view.js`, the only MODEL-INDEPENDENT layer
 
 **Found by review round 4. Recorded, not fixed.** `specs/003-help-desk/plan.md`
 Key decision 3 names the view the one layer that cannot be talked out of the

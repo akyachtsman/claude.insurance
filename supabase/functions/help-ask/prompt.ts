@@ -2,8 +2,10 @@
 // Deno.env, no SDK import, so prompt.test.ts can exercise it without a key.
 //
 // This module carries feature 003's safety story. The spec's fact/advice
-// boundary is defended in three places (plan, Key decision 3 — only the third
-// is an independent ENFORCEMENT point; this file is one of the two mitigations) and
+// boundary is defended in three places (plan, Key decision 3 — only the third is
+// MODEL-INDEPENDENT, and none of the three is an enforcement point: the view
+// cannot read the answer, so it cannot block a determination, only guarantee the
+// disclosure and the remedy are present. This file is one of the two mitigations) and
 // this is the first: the rules below. The other two are the SHAPE of the
 // grounding — records arrive as values, never as a coverage summary inviting
 // interpretation — and the view's unconditional AI-generated label. None of the
@@ -424,7 +426,11 @@ export function splitTrailer(raw: string): SplitAnswer {
   // Verified equivalent to the old expression over 505,220 differential cases
   // (exhaustive to length 3 over the five lead chars, five tail chars, six
   // whitespace forms and ordinary text, plus 500k random strings) with zero
-  // mismatches. 500,000 chars now takes 0.25ms.
+  // mismatches.
+  // ⚠️ "500,000 chars in 0.25ms" was the figure first recorded here and it is only
+  // the EXIT-IMMEDIATELY shape. A full scan of 500k costs 4.6-6.5ms — still linear,
+  // still fine against a ~2s budget, but quoting the cheap shape is the exact
+  // mistake the paragraph above confesses to, repeated two lines later.
   const ws = (c: string) => c.trim() === "";
   const LEAD_DECOR = "[*_`:";
   const TAIL_DECOR = "]*_`:";

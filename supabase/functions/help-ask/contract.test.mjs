@@ -235,6 +235,15 @@ test("the daily cap derives its retryAfter instead of reusing the hourly 3600", 
 // helper for the same reason; duplicated rather than shared because these two
 // files have no module between them and a third file in this directory would
 // need its own manifest story.)
+//
+// ⚠️ KNOWN LIMIT: a REGEX LITERAL containing `/*` — e.g. `.replace(/\/*$/, "")`,
+// a plausible trailing-slash trim — opens a block comment that runs to end of
+// file, because this does not track regex-literal context (telling `/` as
+// division from `/` as a regex start needs real lexing). It FAILS CLOSED: three
+// of the index.ts scrapes then fail on correct code, with messages naming the
+// wrong cause ("the Anthropic client must be built with maxRetries: 0"). If that
+// happens, the scrape is wrong, not the code. Measured by review round 6; a lone
+// quote or backtick inside a regex literal was tried and does not break it.
 function codeOnly(src) {
   let out = "", i = 0, q = null;
   while (i < src.length) {
@@ -274,9 +283,27 @@ test("index.ts: the corpus fetch is bounded", () => {
 test("index.ts: server dependencies are pinned, not floating", () => {
   // The file argues this itself four lines above the import, and the Anthropic
   // SDK beside it was already pinned while supabase-js was `@2`.
-  const floating = [...idxSrc.matchAll(/from\s+"(jsr|npm):(@[^"]+)"/g)]
-    .map(([, , spec]) => spec)
-    .filter((spec) => !/@\d+\.\d+\.\d+/.test(spec));
+  //
+  // ⚠️ THE FIRST VERSION OF THIS TEST WAS VACUOUS IN THREE WAYS. It matched
+  // `from\s+"(jsr|npm):(@[^"]+)"` — double quotes only, a `from` clause only, and
+  // a SCOPED package only — so it examined ZERO specifiers against single quotes
+  // (`'jsr:@supabase/supabase-js@2'`), an unscoped package (`npm:dayjs`) or a
+  // side-effect import (`import "jsr:@std/dotenv/load"`). Converting the two real
+  // imports to single quotes with `@2` — the exact mutation this test was written
+  // to catch — left it green, with nothing examined and nothing asserted.
+  // Measured. So: every quoting style, with or without `from`, scoped or not, AND
+  // a non-vacuity floor, because a scrape that matches nothing passes.
+  const specs = [...idxSrc.matchAll(/(?:from\s*)?["'`](jsr|npm):([^"'`]+)["'`]/g)]
+    .map(([, reg, spec]) => `${reg}:${spec}`);
+  assert.ok(specs.length >= 3,
+    `only ${specs.length} jsr:/npm: specifiers found — this scrape has gone vacuous: ${JSON.stringify(specs)}`);
+
+  // A bare type/side-effect import of edge-runtime.d.ts is exempt: it carries no
+  // code, and the deployed notify-enhancement has the identical line, so pinning
+  // it here would diverge from the function that already works. deno lint still
+  // reports it, which is the honest place for it.
+  const floating = specs.filter((s) =>
+    !/@\d+\.\d+\.\d+/.test(s) && !s.includes("functions-js/edge-runtime"));
   assert.deepEqual(floating, [],
     `unpinned server dependency specifier(s): ${JSON.stringify(floating)}`);
 });
@@ -291,8 +318,44 @@ test("index.ts: hasKeys is decided before any client is constructed", () => {
   assert.ok(hasKeysAt > 0, "HAS_KEYS must be computed at module scope");
   const serveAt = idxSrc.search(/Deno\.serve\(/);
   assert.ok(hasKeysAt < serveAt, "HAS_KEYS must be computed before Deno.serve");
-  // No createClient may be *called* unguarded in the deps literal.
-  const depsBlock = idxSrc.slice(serveAt);
-  assert.ok(!/admin:\s*createClient\(/.test(depsBlock),
-    "admin must not call createClient inside the deps literal — it runs before the hasKeys check");
+  // ⚠️ NO createClient MAY BE CALLED OUTSIDE THE HAS_KEYS GUARD AT ALL. The first
+  // version of this assertion only rejected the literal text `admin: createClient(`,
+  // so three rewrites restored the original 500 with the suite green: an
+  // unguarded module-scope `const adminClient = createClient(...)`, an IIFE in the
+  // deps literal, and `const HAS_KEYS = true`. Measured by executing each one.
+  // So: every createClient call site must sit on a line that mentions HAS_KEYS,
+  // and HAS_KEYS must be derived from the secrets rather than written.
+  assert.match(idxSrc, /const HAS_KEYS\s*=\s*Boolean\(/,
+    "HAS_KEYS must be derived from the secrets with Boolean(...), not assigned a literal");
+  // ⚠️ THE EXACT SHAPE, not a proximity test — and this is the SECOND time this
+  // assertion was too weak. A per-line check reported both real call sites as
+  // unguarded (each spans lines). A 240-char preceding-context window then let two
+  // of the three known defeats straight through, because `const HAS_KEYS =
+  // Boolean(...)` sits directly above the admin client, so the window found the
+  // string "HAS_KEYS" and called an UNGUARDED call guarded. Proximity to a
+  // declaration is not a guard. Both measured.
+  //
+  // So this pins the shape that is known safe and fails on any deviation. That is
+  // deliberately brittle: a refactor here must re-establish the property on
+  // purpose rather than inherit a pass. The file cannot be executed under
+  // `node --test`, so shape is all a gate can check.
+  const sites = [...idxSrc.matchAll(/\bcreateClient\(/g)].map((m) => m.index);
+  assert.equal(sites.length, 2,
+    `expected exactly 2 createClient call sites (the guarded admin client and the per-request ` +
+    `callerClient), found ${sites.length} — a new one needs its own guard and its own line here`);
+
+  // 1. The admin client is the true branch of a HAS_KEYS ternary, and nothing else.
+  assert.match(idxSrc, /const adminClient\s*=\s*HAS_KEYS\s*\?\s*createClient\(/,
+    "adminClient must be the true branch of a HAS_KEYS ternary — an unguarded " +
+    "`const adminClient = createClient(...)` throws on a blank key before handle() runs");
+
+  // 2. Nothing constructs a client inside the deps literal. An IIFE there restores
+  //    the original bare-500 defect byte for byte while every text match still holds.
+  const depsBlock = idxSrc.slice(idxSrc.search(/Deno\.serve\(/));
+  assert.ok(!/createClient\(/.test(depsBlock),
+    "no createClient may appear after Deno.serve( — arguments are evaluated before handle() " +
+    "can reach its hasKeys check, which is the whole defect");
+
+  // 3. The deps literal uses the guarded binding by name.
+  assert.match(depsBlock, /admin:\s*adminClient\b/, "deps.admin must reference the guarded binding");
 });
