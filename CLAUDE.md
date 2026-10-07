@@ -315,6 +315,27 @@ profile**, never by listing a directory.
   express "this column may not change"). Needs owner approval. Verify by
   re-running the probe in that file's footer **as a client session**;
   service-role bypasses RLS and reports a false pass.
+- **⚠️ `service_role` HAS NO TABLE PRIVILEGES IN THIS PROJECT (live, measured
+  2026-10-06).** Not a trade-off — a fact that invalidates the obvious way to
+  write a server-side reader, and it nearly shipped feature 003 dead.
+  `has_table_privilege('service_role', 'public.<t>', 'SELECT')` is **false** for
+  `profiles`, `entities`, `assets`, `policies` and `enhancement_requests`; it
+  holds only `REFERENCES/TRIGGER/TRUNCATE`, is a member of no other role, and
+  **`BYPASSRLS` skips POLICIES, not PRIVILEGES.** Supabase's "service_role reads
+  everything" default does not hold here.
+  **Consequence for any Edge Function:** a service-role read of a client table
+  returns `42501`. `help-ask` was written that way and would have refused every
+  caller on its first query the moment it deployed — rendered by FR-17 as the
+  same quiet notice as "not deployed yet", so nothing would have shown why. It
+  now reads client records through the **caller's own client** (anon key + their
+  JWT), where `authenticated` does hold SELECT and RLS scopes rows to
+  `owner = auth.uid()` — which is also stronger, since RLS cannot be removed by
+  editing a `.eq()` out of the handler. `service_role` is used for `help_queries`
+  alone, and that works only because `supabase/proposed/20261006_help_queries.sql`
+  grants it explicitly.
+  **Also true and NOT fixed here:** the deployed `notify-enhancement` reads
+  `enhancement_requests` under the same key, so it has the same denial. Verify
+  before relying on its emails; outside feature 003's scope.
 - **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
   (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
   `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.

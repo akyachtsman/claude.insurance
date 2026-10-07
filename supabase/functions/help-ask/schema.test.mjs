@@ -103,3 +103,32 @@ test("every column help-ask SELECTs exists in that table", () => {
     `A PostgREST select of a missing column returns { data: null, error } — and this function ` +
     `discards those errors, so the client is told they have no records rather than that the read failed.`);
 });
+
+// The documented disclosure list, asserted against the SELECT lists too.
+//
+// handler.test.mjs pins what reaches the provider, which is the boundary that
+// matters. This pins the other half: a column selected and then discarded
+// discloses nothing, but it makes CLAUDE.md's "exactly these columns" untrue and
+// pays to fetch something nobody reads — which is exactly how `policy_number`
+// sat selected-and-dropped for four review rounds while the docs claimed it was
+// sent. Keep the two lists in step or change the constraint deliberately.
+const DOCUMENTED = {
+  profiles: ["id"],
+  entities: ["id", "name", "kind"],
+  assets: ["id", "name", "type", "value", "entity_id"],
+  policies: ["line", "carrier", "number", "renewal_date", "premium_amount", "premium_period", "coverages", "asset_id"],
+};
+
+test("help-ask selects exactly the columns CLAUDE.md says it discloses", () => {
+  const selects = [...fnSrc.matchAll(/\.from\("(\w+)"\)[\s\S]{0,200}?\.select\(\s*"([^"]*)"/g)];
+  assert.ok(selects.length >= 4, `only ${selects.length} .from().select() pairs found — did the parse break?`);
+
+  for (const [, table, list] of selects) {
+    if (!DOCUMENTED[table]) continue;                 // help_queries is throttle state, not a disclosure
+    const got = list.split(",").map((c) => c.trim()).filter(Boolean).sort();
+    assert.deepEqual(got, [...DOCUMENTED[table]].sort(),
+      `public.${table}'s select does not match CLAUDE.md's disclosed column list. ` +
+      `Widening it widens what crosses to the provider; narrowing it makes the documented list over-state. ` +
+      `Change the constraint deliberately, in the same edit.`);
+  }
+});

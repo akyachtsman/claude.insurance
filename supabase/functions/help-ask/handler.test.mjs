@@ -16,6 +16,14 @@ import { handle } from "./handler.ts";
 
 // ── A PostgREST-shaped fake. It records every query it is asked to run, so a
 //    test can assert what was NOT scoped as easily as what came back.
+// `denied` models a PRIVILEGE boundary, which is the thing the first version of
+// this fake left out — and leaving it out is why a review, not a test, found
+// that `service_role` has NO select on profiles/entities/assets/policies in this
+// project (measured: has_table_privilege -> false on all four; BYPASSRLS skips
+// policies, not privileges). The handler read every client record through the
+// service-role client and would have returned 42501 to every caller on the first
+// query after deploy, forever. A fake with no privileges cannot fail that way,
+// so the claim under test was exactly the thing being faked.
 function fakeDb(tables = {}, opts = {}) {
   const log = [];
   const api = {
@@ -24,6 +32,9 @@ function fakeDb(tables = {}, opts = {}) {
       const q = { table, filters: [], _count: null, _head: false };
       log.push(q);
       const run = () => {
+        if (opts.denied?.includes(table)) {
+          return { data: null, error: { code: "42501", message: `permission denied for table ${table}` }, count: null };
+        }
         if (opts.fail?.[table]) return { data: null, error: { message: `boom:${table}` }, count: null };
         let rows = (tables[table] ?? []).filter((r) =>
           q.filters.every(([op, col, val]) =>
@@ -44,7 +55,7 @@ function fakeDb(tables = {}, opts = {}) {
         range(a, b) { q._range = [a, b]; return chain; },
         insert(row) {
           q.inserted = row;
-          if (opts.fail?.[table]) return chain;
+          if (opts.denied?.includes(table) || opts.fail?.[table]) return chain;
           const id = `row-${(tables[table] ??= []).length + 1}`;
           tables[table].push({ id, ...row, asked_at: opts.now ?? new Date().toISOString() });
           q._single = { id };
@@ -53,6 +64,7 @@ function fakeDb(tables = {}, opts = {}) {
         delete() { q.deleted = true; q._delete = true; return chain; },
         maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error }); },
         single() {
+          if (opts.denied?.includes(table)) return Promise.resolve({ data: null, error: { code: "42501", message: `permission denied for table ${table}` } });
           if (opts.fail?.[table]) return Promise.resolve({ data: null, error: { message: "boom" } });
           return Promise.resolve({ data: q._single ?? run().data?.[0] ?? null, error: null });
         },
@@ -95,16 +107,23 @@ function seed(extra = {}) {
   };
 }
 
+// The live ACL, encoded. `service_role` holds no SELECT/INSERT on any of these.
+const SERVICE_ROLE_DENIED = ["profiles", "entities", "assets", "policies", "enhancement_requests"];
+
 function deps(over = {}) {
   const tables = over.tables ?? seed();
-  const db = over.db ?? fakeDb(tables, over.dbOpts ?? {});
+  // ONE backing store, TWO clients with different privileges — exactly the live
+  // split. `admin` may touch help_queries only; everything else is 42501.
+  const admin = over.db ?? fakeDb(tables, { ...(over.dbOpts ?? {}), denied: SERVICE_ROLE_DENIED });
+  const caller = fakeDb(tables, { ...(over.dbOpts ?? {}), denied: ["help_queries"] });
   return {
     // `rows(t)` rather than a captured array: the fake replaces the array on a
     // delete, so a captured reference would report the pre-delete length and
     // every "was it given back?" assertion would pass without measuring.
-    rows: (t) => db.tables[t] ?? [], tables, db,
+    rows: (t) => admin.tables[t] ?? [], tables, db: admin, caller,
     d: {
-      admin: db,
+      admin,
+      userDb: () => caller,
       userClient: over.userClient ?? (async () => ({ data: { user: { id: OWNER } } })),
       anthropic: over.anthropic ?? { messages: { create: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "Your policies are on the Policies screen.\n[[SOURCES]] insurance\n[[RECORDS]] r1" }] }) } },
       loadGuide: over.loadGuide ?? (async () => [TOPIC]),
@@ -134,9 +153,9 @@ test("another client's entities, assets and policies never reach the prompt", as
 
 test("the entity read is scoped to the caller, by owner", async () => {
   // The mutation that survived the old suite: dropping this filter.
-  const { d, db } = deps();
+  const { d, caller } = deps();
   await ask(d);
-  const ent = db.log.find((q) => q.table === "entities");
+  const ent = caller.log.find((q) => q.table === "entities");
   assert.ok(ent, "no entity query was made");
   assert.deepEqual(ent.filters.filter(([op]) => op === "eq"), [["eq", "owner", OWNER]],
     "the entity read is not scoped to the caller — a service-role client bypasses RLS, so this filter IS the fence");
@@ -306,4 +325,78 @@ test("coverage limits reach the prompt — the boundary table's own example", as
   await ask(d);
   assert.ok(sent.includes("Dwelling limit"), "coverage limits are not grounded, so the allowed example cannot be answered");
   assert.ok(sent.includes("$400,000"));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE DISCLOSURE BOUNDARY, pinned.
+//
+// CLAUDE.md states exactly which columns cross to Anthropic and that no contact
+// details go with them. Nothing enforced it: a review widened the digest to also
+// send `named_insured`, `agent_contact` and `claims` and all 70 help-ask tests
+// stayed green. A security constraint no test can fail is a sentence, not a
+// boundary.
+//
+// Every column of every table is seeded with a distinct sentinel, so this fails
+// on a widened `select` AND on a dropped one.
+// ─────────────────────────────────────────────────────────────────────────────
+const SENTINEL_TABLES = {
+  profiles: [{ id: OWNER, full_name: "SENT-profile-name", role: "SENT-role" }],
+  help_queries: [],
+  entities: [{ id: "e1", owner: OWNER, name: "SENT-entity-name", kind: "SENT-kind",
+               label: "SENT-ent-label", subtype: "SENT-subtype", meta: "SENT-ent-meta", industry: "SENT-industry" }],
+  assets: [{ id: "a1", entity_id: "e1", name: "SENT-asset-name", type: "SENT-type", value: 4242,
+             meta: "SENT-asset-meta", facts: ["SENT-facts"], attrs: { k: "SENT-attrs" }, held: ["SENT-held"] }],
+  policies: [{ asset_id: "a1", line: "SENT-line", carrier: "SENT-carrier", number: "SENT-number",
+               renewal_date: "2027-03-12", premium_amount: 2400, premium_period: "yr",
+               coverages: [{ label: "SENT-cov-label", limit: "SENT-cov-limit" }],
+               naic: "SENT-naic", form: "SENT-form", status: "SENT-status",
+               named_insured: "SENT-named-insured", agent: "SENT-agent", agent_contact: "SENT-agent-contact",
+               claims: "SENT-claims", payment_plan: "SENT-payment-plan", billing_status: "SENT-billing",
+               effective_date: "2026-03-12", auto_renew: true,
+               endorsements: ["SENT-endorsements"], deductibles: ["SENT-deductibles"],
+               discounts: ["SENT-discounts"], interests: ["SENT-interests"],
+               documents: ["SENT-documents"], details: ["SENT-details"] }],
+};
+
+// Exactly what CLAUDE.md's "Anthropic is a sub-processor" paragraph lists.
+const MAY_CROSS = ["SENT-entity-name", "SENT-kind", "SENT-asset-name", "SENT-type",
+                   "SENT-line", "SENT-carrier", "SENT-number", "SENT-cov-label", "SENT-cov-limit"];
+
+test("exactly the documented columns cross to the provider — no more, no less", async () => {
+  let sent = "";
+  const { d } = deps({
+    tables: structuredClone(SENTINEL_TABLES),
+    anthropic: { messages: { create: async (a) => { sent = JSON.stringify(a); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+  });
+  await ask(d);
+  assert.ok(sent, "the provider was never called");
+
+  const leaked = [...sent.matchAll(/SENT-[a-z-]+/g)].map((m) => m[0]);
+  const unexpected = [...new Set(leaked)].filter((x) => !MAY_CROSS.includes(x));
+  assert.deepEqual(unexpected, [],
+    `these columns crossed to the provider but are NOT in CLAUDE.md's disclosed list: ${unexpected.join(", ")} — ` +
+    `widening the digest is a change to that security constraint, not an implementation detail`);
+
+  const missing = MAY_CROSS.filter((x) => !leaked.includes(x));
+  assert.deepEqual(missing, [],
+    `documented columns did NOT reach the provider: ${missing.join(", ")} — the constraint over-states what is sent`);
+
+  // The numeric fields have no sentinel, so assert them by value.
+  for (const [label, v] of [["asset value", "4242"], ["premium", "2400"], ["renewal date", "2027-03-12"]]) {
+    assert.ok(sent.includes(v), `${label} did not reach the prompt`);
+  }
+});
+
+test("row ids never cross the boundary", async () => {
+  // CLAUDE.md: "the row ids never cross the boundary — the join keys stay inside
+  // the function". Nothing checked it.
+  let sent = "";
+  const { d } = deps({
+    tables: structuredClone(SENTINEL_TABLES),
+    anthropic: { messages: { create: async (a) => { sent = JSON.stringify(a); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+  });
+  await ask(d);
+  for (const id of ["e1", "a1"]) {
+    assert.ok(!new RegExp(`"${id}"`).test(sent), `the row id ${id} reached the provider`);
+  }
 });

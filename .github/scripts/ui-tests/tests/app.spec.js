@@ -2460,12 +2460,14 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   // 6. A real question resolves to an answer OR the notice — never to nothing,
   //    and never to the Looking… placeholder left standing.
   //
-  //    Discard console noise from the ask HERE, scoped to this step, rather than
-  //    text-filtering at the end: a failed function request is logged by the
-  //    browser and is a handled state, but a filter broad enough to cover it also
-  //    hides a 404 on the corpus or a stylesheet. Everything logged before this
-  //    line was asserted strictly above.
-  consoleErrors.length = 0;
+  //    ⚠️ ASSERT FIRST, THEN CLEAR — the order S9 uses, and the opposite of what
+  //    this did. Clearing before the ask threw away steps 1-5's errors (so the
+  //    comment's claim that they "were asserted strictly above" was false — they
+  //    were asserted nowhere) AND kept the ask's own noise, which on an
+  //    undeployed function is a 404 or a blocked preflight: Chromium logs both as
+  //    console errors, so this test would have gone red on exactly the state the
+  //    PR ships in.
+  expect(consoleErrors, `Console errors before the ask: ${consoleErrors.join('; ')}`).toHaveLength(0);
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
@@ -2476,6 +2478,11 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
 
   // The ask box must come back for a second question either way.
   await expect(input, 'The ask box stayed disabled after the request settled').toBeEnabled();
+
+  //    NOW discard the ask's own request noise, scoped to the step that made it:
+  //    a failed function call is a HANDLED state (step 6 asserted the notice
+  //    rendered), and before the owner gate completes it is the expected one.
+  consoleErrors.length = 0;
 
   // 7. The AI-generated label and the broker channel are on screen in BOTH
   //    branches — neither is gated on anything the model says. The hand-off used

@@ -109,7 +109,7 @@
       "title": "Account settings",
       "route": "#/keep/account",
       "nav": "Account menu \u2192 Account settings",
-      "body": "Your name and email, and your renewal-reminder preferences \u2014 which address reminders go to and how far ahead you want them.",
+      "body": "Your name and email, and your renewal-reminder preferences \u2014 the address reminders are sent to (shown there, changed by your broker) and how far ahead you want them.",
       "ask": "How do I change my reminder settings?"
     },
     {

@@ -105,12 +105,23 @@ alter table public.help_queries enable row level security;
 -- UI is ever wanted, the count goes through the Edge Function, which already
 -- computes it.
 --
--- The only principal with any privilege here is the service role.
--- The writer is the service role. Supabase grants it table privileges in the
--- public schema by default (every other table here relies on that, and
--- notify-enhancement writes under the same key), but it is stated explicitly
--- rather than inherited: this is the only path that writes the table, and an
--- inherited privilege is one a platform default change can remove silently.
+-- The only principal with any privilege here is the service role, and the grant
+-- below is LOAD-BEARING, not belt-and-braces.
+--
+-- ⚠️ An earlier version of this comment said Supabase grants service_role the
+-- public schema "by default (every other table here relies on that, and
+-- notify-enhancement writes under the same key)". That is FALSE for this
+-- project, measured 2026-10-06:
+--     has_table_privilege('service_role','public.profiles','SELECT')  -> false
+-- and the same for entities, assets, policies and enhancement_requests, which
+-- hold only REFERENCES/TRIGGER/TRUNCATE for it. service_role is a member of no
+-- other role, and BYPASSRLS skips POLICIES, not PRIVILEGES. Without the grant
+-- below, help-ask's first `help_queries` write would return 42501 and the
+-- feature would refuse every caller, permanently.
+--
+-- (The same measurement says the deployed `notify-enhancement` cannot read
+-- `enhancement_requests` either. Pre-existing, outside this feature, recorded in
+-- CLAUDE.md rather than fixed here.)
 grant select, insert, delete on public.help_queries to service_role;
 -- DELETE is for the function's own release paths — over the cap, or a count that
 -- could not run — where nothing has been billed and the reservation must go back.
@@ -124,7 +135,8 @@ grant select, insert, delete on public.help_queries to service_role;
 -- earlier version of this file said it was. `insert ... returning` needs one only
 -- when the inserter is subject to RLS; the function inserts under the
 -- service-role key, which bypasses RLS for the whole statement, RETURNING
--- included.
+-- included. What it does NOT bypass is the privilege — which is why the explicit
+-- grant above is the thing that makes this table work at all.
 
 -- The throttle counts one owner's rows inside a time window, so (owner,
 -- asked_at) is the access path and this index is not optional at the scale a

@@ -158,14 +158,29 @@ export function suggestionChips(guide, limit = CHIP_LIMIT) {
 // "in about a minute" / "in about 3 minutes", or "" when no usable number was
 // given. Seconds in, matching HTTP Retry-After.
 function waitPhrase(seconds) {
+  // Minutes only, once, produced "in about 1333 minutes" for a 22-hour wait —
+  // technically true and useless to read. The daily cap can be nearly a day out.
   const s = Number(seconds);
   if (!Number.isFinite(s) || s <= 0) return "";
-  return s < 90 ? "in about a minute" : `in about ${Math.round(s / 60)} minutes`;
+  if (s < 90) return "in about a minute";
+  if (s < 5400) return `in about ${Math.round(s / 60)} minutes`;
+  const h = Math.round(s / 3600);
+  return h >= 20 ? "tomorrow" : `in about ${h} hour${h === 1 ? "" : "s"}`;
 }
 
 // The throttle notice, with the retry time when the function gave one and a
 // complete sentence when it did not — never a hole where the number should be.
 function rateLimitNotice(seconds) {
+  // Two different caps reach this, and the wording has to survive both. The
+  // per-client cap clears within the hour; the SHARED daily one can be most of a
+  // day away, and it is not the reader's doing — they may have asked nothing.
+  // The first version said "You've asked a few questions in a short time" with a
+  // minute count, which rendered a 22-hour wait as "about 1333 minutes" and
+  // blamed the wrong person for it.
+  const hours = Number.isFinite(seconds) && seconds > 5400;
+  if (hours) {
+    return `The help desk has reached its limit for today. Please try again ${waitPhrase(seconds) || "tomorrow"}.`;
+  }
   return `You've asked a few questions in a short time. Please try again ${waitPhrase(seconds) || "in a few minutes"}.`;
 }
 

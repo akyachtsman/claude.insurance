@@ -81,6 +81,22 @@ drop policy if exists "profiles insert own" on public.profiles;
 --      The Account screen's only write. Asserted because revoking one verb on a
 --      table is exactly the change that silently takes another with it.
 --
---   4. Service-role can still provision — expect SUCCESS (run as service-role):
+--   4. ⚠️ DO NOT expect a service-role INSERT to work — it never did.
+--      An earlier version of this step said "Service-role can still provision —
+--      expect SUCCESS", which would have failed on a correctly applied migration
+--      and sent the next person hunting a fault that was not there. Measured
+--      2026-10-06:
+--        has_table_privilege('service_role','public.profiles','INSERT') -> false
+--      service_role holds only REFERENCES/TRIGGER/TRUNCATE on this table. The
+--      broker provisions a profile as `postgres` — the dashboard SQL editor or a
+--      migration — never through the service key. Verify THAT path:
 --        insert into public.profiles (id) values ('<a real auth.users id>');
---      The broker's invite path. If this fails, invitations are broken.
+--      run in the SQL editor; expect SUCCESS.
+--
+--      ⚠️ AND NOTE WHAT THIS MEANS FOR help-ask. Nothing creates a profiles row
+--      automatically: no trigger, no client insert once this is applied, and no
+--      service-role insert ever. An invited client without one gets a working
+--      Keep (js/supabase.js tolerates its absence — the name falls back to the
+--      email and the role to "client") and a Help desk that refuses every
+--      question. Provisioning the row is a manual broker step and belongs in the
+--      invite runbook, or the desk looks broken for exactly the people it is for.

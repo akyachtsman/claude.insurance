@@ -609,7 +609,7 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
    is the one background this link never has. */
 .k-ilink { font: 700 14px var(--font-sans); color: var(--color-accent-hover); }
 .k-ilink:hover { text-decoration: underline; }
-.k-imuted { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 2px; }
+.k-imuted { font: 600 12px var(--font-sans); color: var(--color-text-secondary); margin-top: 2px; overflow-wrap: anywhere; }
 .k-doc-ic { color: var(--color-text-secondary); margin-right: 7px; }
 /* Documents table — very compact rows, black text. */
 .k-doctable .k-itable th { padding: 6px 16px; }
@@ -741,15 +741,22 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 .k-help__out { margin-top: var(--space-5); }
 /* The question, echoed above its answer — a second ask must not leave the reader
    guessing which one they are looking at. */
-.k-help__q { font: 700 15px var(--font-display); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+/* overflow-wrap: a 480-char unbroken token (the question cap) pushed
+   scrollWidth to 4824 at 390px. URLs and emails wrap on their own; a single
+   long word does not, and the question echo is client-written text. */
+.k-help__q { font: 700 15px var(--font-display); color: var(--color-text-secondary); margin-bottom: var(--space-2); overflow-wrap: anywhere; }
 /* pre-line, not nowrap: the answer may carry line breaks between points, and
    collapsing them runs separate points into one paragraph (help-view.js says so
    at the call site too). */
 .k-help__a { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5) var(--space-5); box-shadow: var(--shadow-lg); }
-.k-help__a p { font: 500 16px var(--font-sans); line-height: 1.6; color: var(--color-text-primary); white-space: pre-line; }
+.k-help__a p { font: 500 16px var(--font-sans); line-height: 1.6; color: var(--color-text-primary); white-space: pre-line; overflow-wrap: anywhere; }
 /* What it drew on (FR-11). A column so a long topic title cannot collide with
    the record line beside it. */
-.k-help__src { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: var(--space-4); }
+/* 8px gap and a 44px line box on the links: design.md's touch targets, and
+   the hand-off link below is the fact/advice boundary's safety remedy —
+   measured at 19px tall and 4px apart before this. */
+.k-help__src { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-4); }
+.k-help__src .k-ilink, .k-help__broker .k-ilink { display: inline-flex; align-items: center; min-height: 44px; }
 .k-help__src .k-lbl { margin-bottom: 2px; }
 /* FR-10's label. Muted but never hidden — it ships on every answer and as the
    page's opening line. */

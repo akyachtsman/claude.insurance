@@ -91,15 +91,21 @@ async function loadGuide(): Promise<HelpTopic[] | null> {
   }
 }
 
+const callerClient = (authz: string) =>
+  createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: authz } }, auth: { persistSession: false },
+  });
+
 Deno.serve((req: Request) =>
   handle(req, {
     admin: createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } }),
-    // Built per request: it carries THIS caller's bearer token, and nothing else
-    // in the handler may be allowed to resolve an identity.
-    userClient: (authz: string) =>
-      createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: authz } }, auth: { persistSession: false },
-      }).auth.getUser(),
+    // Built per request: it carries THIS caller's bearer token. Used both to
+    // resolve the identity and — since `service_role` has NO select on the
+    // client tables in this project (measured; see handler.ts Deps.admin) — to
+    // read their records, where `authenticated` does hold select and RLS scopes
+    // every row to `owner = auth.uid()`.
+    userDb: (authz: string) => callerClient(authz),
+    userClient: (authz: string) => callerClient(authz).auth.getUser(),
     anthropic: new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 1 }),
     loadGuide,
     appUrl: APP_URL,

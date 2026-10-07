@@ -88,7 +88,12 @@ export async function renderKeepHelp() {
       ]));
     }
 
-    // FR-8's hand-off, on EVERY answer — not off `shaped.brokerHandoff`.
+    // FR-8's hand-off, on EVERY answer. Nothing reads `reason === "refused"` here
+    // and nothing should: the model sets it, so gating the remedy on it let a
+    // model answer a coverage question AND attach "this needs your broker"
+    // underneath, which reads as broker-endorsed. The trailer still carries it
+    // and the payload still reports it — for logging and for anyone auditing how
+    // often the boundary fires — but it decides nothing the client sees.
     //
     // That flag is model-controlled end to end: the model emits the REFUSED
     // marker, the function turns it into `reason: "refused"`, help.js turns that
@@ -128,7 +133,14 @@ export async function renderKeepHelp() {
     const controller = new AbortController();
     inFlight = controller;
     setBusy(true);
-    answerRegion.replaceChildren(el("p", { class: "k-imuted", text: "Looking…" }));
+    // The AI label rides along: replacing the whole region removed it for the
+    // length of the request (up to the provider timeout), while this file's own
+    // header and S10 both describe it as unconditional. "Unconditional" has to
+    // include the state the client spends the most time looking at.
+    answerRegion.replaceChildren(
+      el("p", { class: "k-imuted", text: "Looking…" }),
+      el("p", { class: "k-help__ai", text: AI_NOTE }),
+    );
 
     const payload = await askHelp(question, { signal: controller.signal });
     if (controller.signal.aborted) return;        // superseded by a newer ask

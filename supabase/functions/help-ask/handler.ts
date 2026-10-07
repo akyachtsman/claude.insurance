@@ -28,8 +28,31 @@ import { buildPrompt, splitTrailer, recordIndex, clipField, type HelpTopic, type
 export type Db = any;
 
 export interface Deps {
-  /** Service-role client. Bypasses RLS: every read it makes must scope itself. */
+  /** Service-role client. ⚠️ USE IT FOR `help_queries` AND NOTHING ELSE.
+   *
+   *  Measured on this project 2026-10-06:
+   *    has_table_privilege('service_role','public.profiles','SELECT') -> FALSE
+   *  and the same for entities, assets, policies and enhancement_requests.
+   *  `service_role` holds only REFERENCES/TRIGGER/TRUNCATE there, is a member of
+   *  no other role, and BYPASSRLS skips POLICIES, not PRIVILEGES. So a
+   *  service-role read of a client record returns 42501 — every time, for every
+   *  caller. `help_queries` works only because this feature's own migration
+   *  grants it explicitly.
+   *
+   *  An earlier version of this file read every client record through `admin`,
+   *  and would have failed on its first query the moment it was deployed, for
+   *  everyone, permanently — rendered by FR-17 as the same quiet notice as "not
+   *  deployed yet". The comment in that migration asserting Supabase grants
+   *  service_role the public schema "by default" was simply false here. */
   admin: Db;
+  /** A PostgREST client bound to THIS caller's bearer token, used for every
+   *  client-record read. `authenticated` does hold SELECT on those tables, and
+   *  RLS scopes each row to `owner = auth.uid()` — so the database enforces the
+   *  boundary rather than a hand-written filter, which is strictly stronger than
+   *  what it replaces: the IDOR mutation that survived the old suite was a
+   *  DELETED `.eq("owner", owner)`, and RLS cannot be deleted from here at all.
+   *  The explicit filters stay as defence in depth. */
+  userDb: (authz: string) => Db;
   /** Resolves the caller from their Authorization header, and nothing else. */
   userClient: (authz: string) => Promise<{ data: { user?: { id?: string } | null } | null }>;
   /** Anthropic client, or any object with the same `messages.create`. */
@@ -151,7 +174,10 @@ const unavailable = (reason: string, extra: Record<string, unknown> = {}) =>
 // different answers, and saying the second when the first is true is the invented
 // answer FR-12 forbids. The old code stated that rule in a comment one screen
 // down while doing the opposite here.
-async function ownRecords(admin: Db, owner: string): Promise<RecordFact[]> {
+// Reads through the CALLER'S client, not the service-role one — see Deps.admin
+// for the measurement that forced this. The `.eq`/`.in` filters are kept as
+// defence in depth; RLS is what actually fences the rows.
+async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   const facts: RecordFact[] = [];
   const read = <T>(res: { data: T[] | null; error: { message: string } | null }, what: string): T[] => {
     if (res.error) throw new Error(`${what}: ${res.error.message}`);
@@ -159,7 +185,7 @@ async function ownRecords(admin: Db, owner: string): Promise<RecordFact[]> {
   };
 
   const entities = read(
-    await admin.from("entities").select("id, name, kind").eq("owner", owner), "entities");
+    await db.from("entities").select("id, name, kind").eq("owner", owner), "entities");
   for (const e of entities) {
     facts.push({ kind: "entity", name: e.name, label: "type", value: String(e.kind) });
   }
@@ -167,7 +193,7 @@ async function ownRecords(admin: Db, owner: string): Promise<RecordFact[]> {
   if (!ids.length) return facts;
 
   const assets = read(
-    await admin.from("assets").select("id, name, type, value, entity_id").in("entity_id", ids), "assets");
+    await db.from("assets").select("id, name, type, value, entity_id").in("entity_id", ids), "assets");
   for (const a of assets) {
     facts.push({ kind: "asset", name: a.name, label: "type", value: String(a.type) });
     if (a.value != null) facts.push({ kind: "asset", name: a.name, label: "value on file", value: `$${a.value}` });
@@ -175,7 +201,7 @@ async function ownRecords(admin: Db, owner: string): Promise<RecordFact[]> {
   const assetIds = assets.map((a: { id: string }) => a.id);
   if (!assetIds.length) return facts;
 
-  const policies = read(await admin.from("policies")
+  const policies = read(await db.from("policies")
     .select("line, carrier, number, renewal_date, premium_amount, premium_period, coverages, asset_id")
     .in("asset_id", assetIds), "policies");
   const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
@@ -222,7 +248,7 @@ async function ownRecords(admin: Db, owner: string): Promise<RecordFact[]> {
 }
 
 export async function handle(req: Request, deps: Deps): Promise<Response> {
-  const { admin, userClient, anthropic, loadGuide, appUrl, hasKeys } = deps;
+  const { admin, userDb, userClient, anthropic, loadGuide, hasKeys } = deps;
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (!hasKeys) return unavailable("unavailable");  // FR-17: the client needs a notice, not a cause
@@ -233,7 +259,9 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // exactly this, "That question couldn't be read" — was unreachable code.
   let payload: { question?: string };
   try { payload = await req.json(); } catch { return unavailable("invalid"); }
-  const question = String(payload?.question ?? "").trim();
+  // typeof, not String(): `{"question":{"a":1}}` coerced to "[object Object]",
+  // which passed validation, was stored, and was sent to the model as a question.
+  const question = typeof payload?.question === "string" ? payload.question.trim() : "";
   if (!question) return unavailable("invalid");
   if (question.length > QUESTION_MAX) return unavailable("invalid");
 
@@ -270,9 +298,17 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   //
   // Returns the generic notice rather than a new reason: a stranger is owed
   // nothing more specific, and FR-17 means the client never sees a cause anyway.
-  const { data: invited, error: inviteErr } = await admin
+  //
+  // Read through the CALLER'S client: `service_role` has no SELECT on `profiles`
+  // in this project (measured — see Deps.admin), so doing this with `admin`
+  // returned 42501 for every caller and refused the whole feature permanently.
+  const caller = userDb(authz);
+  const { data: invited, error: inviteErr } = await caller
     .from("profiles").select("id").eq("id", owner).maybeSingle();
-  if (inviteErr || !invited) return unavailable("unavailable");
+  if (inviteErr || !invited) {
+    console.error(JSON.stringify({ where: "invite", code: inviteErr?.code ?? null, message: inviteErr?.message ?? "no profile row" }));
+    return unavailable("unavailable");
+  }
 
   // THROTTLE: reserve the slot BEFORE the model call, not after.
   //
@@ -296,7 +332,10 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // `owner` is passed explicitly and is never taken from the request body: the
   // column's `default auth.uid()` is NULL under the service key, so an implicit
   // insert would fail the NOT NULL rather than silently mis-attribute.
-  if (slotErr || !slot) return unavailable("unavailable");
+  if (slotErr || !slot) {
+    console.error(JSON.stringify({ where: "reserve", code: (slotErr as { code?: string })?.code ?? null, message: slotErr?.message ?? "no row returned" }));
+    return unavailable("unavailable");
+  }
 
   // EVERY exit from here until the provider call goes through `releaseAnd`, and
   // nothing after it does. Nothing has been billed yet on this side of the line,
@@ -359,7 +398,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   }
 
   const topics = await loadGuide();
-  if (!topics?.length) return await releaseAnd("unavailable");   // `[]` is truthy; see loadGuide
+  if (!topics?.length) { console.error(JSON.stringify({ where: "guide", message: "corpus empty or unreachable" })); return await releaseAnd("unavailable"); }
 
   // A read ERROR and an empty result must stay distinguishable: telling a client
   // they hold no policies because a SELECT failed is the invented answer FR-12
@@ -367,8 +406,9 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // throws on a query error rather than returning [] for precisely this reason.
   let facts: RecordFact[];
   try {
-    facts = await ownRecords(admin, owner);
-  } catch {
+    facts = await ownRecords(caller, owner);
+  } catch (e) {
+    console.error(JSON.stringify({ where: "records", message: (e as Error)?.message ?? "unknown" }));
     return await releaseAnd("records_error");
   }
   const { system, messages } = buildPrompt({ question, topics, facts });
@@ -380,7 +420,13 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   try {
     const res = await anthropic.messages.create({
       model: "claude-opus-5-5",
-      max_tokens: 2048,
+      // 8192, not 2048. Thinking cannot be disabled on this model and counts
+      // against this budget, and the comment below already calls a max_tokens cut
+      // "realistic" — each cut is billed, spends one of the caller's 20 hourly
+      // slots, and shows them "didn't come through in full". A help-desk answer
+      // is a few short paragraphs, so the ceiling costs nothing when it is not
+      // needed and buys the thinking room when it is.
+      max_tokens: 8192,
       system,
       messages,
     });
@@ -409,7 +455,10 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // A connection error or timeout has NO status and keeps the row: the request
     // may well have been served and the response lost, and "billing unknown" must
     // resolve the same way as "billed".
-    const status = (err as { status?: number } | null)?.status;
+    const e = err as { status?: number; name?: string; message?: string } | null;
+    // No question text and no record values — a cause, not content.
+    console.error(JSON.stringify({ where: "provider", status: e?.status ?? null, name: e?.name ?? null, message: e?.message ?? null }));
+    const status = e?.status;
     if (typeof status === "number") return await releaseAnd("unavailable");
     return unavailable("unavailable");
   }
