@@ -10,7 +10,7 @@
 // violation. This file is what still holds when that inference goes wrong.
 import { el, mount } from "../../dom.js";
 import { icon } from "../../icons.js";
-import { askHelp, loadHelpGuide } from "../../supabase.js";
+import { askHelp, loadHelpGuide, getUser } from "../../supabase.js";
 import {
   cleanQuestion, validateQuestion, suggestionChips, answerShape, creditedTopics,
 } from "../logic/help.js";
@@ -29,6 +29,14 @@ const AI_NOTE =
 // and the page they returned to was empty, because all state lived in this
 // function's closure. Checking the answer cost the answer, and re-asking cost
 // another paid call and one of twenty hourly slots.
+//
+// ⚠️ STAMPED WITH THE OWNER, and restored only to that owner. Module state
+// outlives a sign-out: without this, signing out and signing in as someone else
+// in the same tab showed the previous client's question, their answer, and their
+// record lines under "Based on". This repo publishes three demo credentials and
+// the login screen prefills one, so "a different person signs in on this
+// machine" is the ordinary case, not a contrived one. Flagged by a security
+// review of the commit that added the cache.
 let lastAsk = null;
 
 export async function renderKeepHelp() {
@@ -155,7 +163,7 @@ export async function renderKeepHelp() {
     setBusy(false);
 
     const shaped = answerShape(payload);
-    lastAsk = { shaped, question };
+    lastAsk = { shaped, question, owner: getUser()?.id ?? null };
     if (shaped.ok) renderAnswer(shaped, question); else renderNotice(shaped);
 
     // Disabling the focused control drops focus to <body>, and nothing put it
@@ -187,8 +195,11 @@ export async function renderKeepHelp() {
   // and ends up a 1100px-wide single-line input. Measured at 1280px before the
   // change.
   // Restore the last answer before mounting, so returning from a credited link
-  // shows what you left rather than an empty page.
-  if (lastAsk) {
+  // shows what you left rather than an empty page — but only to the person who
+  // asked it. A null owner on either side never matches, which is the safe
+  // direction: it costs a restore, not a disclosure.
+  const me = getUser()?.id ?? null;
+  if (lastAsk && me && lastAsk.owner === me) {
     input.value = lastAsk.question;
     if (lastAsk.shaped.ok) renderAnswer(lastAsk.shaped, lastAsk.question); else renderNotice(lastAsk.shaped);
   }
