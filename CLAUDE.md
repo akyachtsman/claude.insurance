@@ -313,10 +313,18 @@ profile**, never by listing a directory.
   - **CORS stays `Access-Control-Allow-Origin: *`, deliberately.** Credentials
     travel in an `Authorization` header, not cookies, and `Allow-Credentials` is
     unset, so there is no ambient-credential CSRF and a hostile page cannot read
-    the token cross-origin. Echoing one origin would be mild hardening; it was
-    not taken in the same change as the `--no-verify-jwt` decision, because
-    stacking two origin-sensitive failure modes into one undeployed function is
-    how a deploy fails for a reason nobody can distinguish.
+    the token cross-origin. Echoing one origin would be mild hardening, and it
+    is still not taken — but ⚠️ **the reason recorded here has expired.** It read
+    "not taken in the same change as the `--no-verify-jwt` decision", which dates
+    the caution to a decision this feature **reversed**: the deploy is now
+    `verify_jwt` ON (see the `help-ask` entry), so a reader meeting this line
+    first would take the old flag for current advice. The caution itself still
+    holds, against the deploy that has not happened yet: the function is
+    undeployed, FR-17 renders every failure as one notice, and the 2026-10-07
+    probe showed the gateway flag and CORS touch the *same* request path — the
+    preflight reaches the function, an unauthenticated POST never does. Changing
+    both at once is how a deploy fails for a reason nobody can distinguish.
+    Revisit once step 7 of the owner gate has proved one real answer renders.
   - An Anthropic Console workspace spend limit is the backstop if that has a bug.
 - **No broker-facing LEAD UI:** brokers consume *leads* via Supabase + email —
   there is no lead-reading path in the static app. ⚠️ The second half of this
