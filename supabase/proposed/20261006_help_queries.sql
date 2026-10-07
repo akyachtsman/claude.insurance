@@ -160,7 +160,8 @@ create index if not exists help_queries_owner_asked_at_idx
 -- notice (FR-17). The inverse disables the help desk; it does not unmeter it.
 
 -- POST-APPLY PROBE (run steps 1-5 as a CLIENT session, not service-role —
---   service-role bypasses RLS *and* ignores privileges, so every check below
+--   service-role bypasses RLS — though NOT privileges, and on the client
+--   tables in this project it holds none — so every check below
 --   would report a false pass. Steps 4 and 5 are DESTRUCTIVE under service-role:
 --   there they SUCCEED and wipe or rewrite the log. Step 0 and the two
 --   after-the-fact reads are the only parts that use the service key, and they

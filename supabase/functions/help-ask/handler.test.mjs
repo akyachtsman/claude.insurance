@@ -26,12 +26,14 @@ import { handle } from "./handler.ts";
 // so the claim under test was exactly the thing being faked.
 function fakeDb(tables = {}, opts = {}) {
   const log = [];
+  const counts = {};
   const api = {
     log, tables,
     from(table) {
       const q = { table, filters: [], _count: null, _head: false };
       log.push(q);
       const run = () => {
+        if (q._selectFails) return { data: null, error: { message: `count failed: ${table}` }, count: null };
         if (opts.denied?.includes(table)) {
           return { data: null, error: { code: "42501", message: `permission denied for table ${table}` }, count: null };
         }
@@ -47,7 +49,15 @@ function fakeDb(tables = {}, opts = {}) {
         return { data: rows, error: null, count: rows.length };
       };
       const chain = {
-        select(_cols, o = {}) { q._head = Boolean(o.head); q._count = o.count ?? null; return chain; },
+        select(_cols, o = {}) {
+          q._head = Boolean(o.head); q._count = o.count ?? null;
+          // `failSelect: { help_queries: n }` errors the Nth select on that
+          // table, which is how a count failure is reachable while the insert
+          // that precedes it still works.
+          const n = (counts[table] = (counts[table] ?? 0) + 1);
+          if (opts.failSelect?.[table] === n) q._selectFails = true;
+          return chain;
+        },
         eq(c, v) { q.filters.push(["eq", c, v]); return chain; },
         in(c, v) { q.filters.push(["in", c, v]); return chain; },
         gte(c, v) { q.filters.push(["gte", c, v]); return chain; },
@@ -399,4 +409,130 @@ test("row ids never cross the boundary", async () => {
   for (const id of ["e1", "a1"]) {
     assert.ok(!new RegExp(`"${id}"`).test(sent), `the row id ${id} reached the provider`);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The paths a second mutation sweep found unguarded. Each of these edits left
+// all 131 help-desk tests green before this block existed: the suite proved the
+// eight mutations it was written from, which is not the same as proving the
+// behaviour.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("a throttle that cannot reserve FAILS CLOSED — the model is never called", async () => {
+  // The likeliest first-deploy state is the migration not applied. "Cannot
+  // reserve" must never read as "go ahead" on a paid endpoint.
+  let called = false;
+  const { d } = deps({
+    dbOpts: { fail: { help_queries: true } },
+    anthropic: { messages: { create: async () => { called = true; return { stop_reason: "end_turn", content: [] }; } } },
+  });
+  assert.equal((await (await ask(d)).json()).answer, null);
+  assert.equal(called, false, "the provider was called with no throttle slot reserved");
+});
+
+test("counting failures fail closed and refund the reservation", async () => {
+  // Neither count had a test, so dropping either fail-closed branch changed
+  // nothing. The insert is select #1 (`.select("id").single()` after it), so the
+  // hourly count is #2 and the daily one #3.
+  for (const [mode, nth] of [["hourly", 2], ["daily", 3]]) {
+    let called = false;
+    const tables = seed();
+    const admin = fakeDb(tables, { denied: SERVICE_ROLE_DENIED, failSelect: { help_queries: nth } });
+    const { d, rows } = deps({
+      db: admin, tables,
+      anthropic: { messages: { create: async () => { called = true; return { stop_reason: "end_turn", content: [] }; } } },
+    });
+    assert.equal((await (await ask(d)).json()).answer, null, `${mode}: a failed count produced an answer`);
+    assert.equal(called, false, `${mode}: the provider was called after a count that could not run`);
+    assert.equal(rows("help_queries").length, 0, `${mode}: a failed count cost the caller a slot`);
+  }
+});
+
+test("rows outside the window do not count toward either cap", async () => {
+  // Nothing seeded a stale row, so widening the hourly window to 10h or the
+  // daily one to 10 days changed no test.
+  const old = (mins) => new Date(Date.now() - mins * 60_000).toISOString();
+  const stale = [
+    ...Array.from({ length: 40 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: old(61) })),   // just outside the hour
+    ...Array.from({ length: 900 }, (_, i) => ({ id: `d${i}`, owner: OTHER, asked_at: old(25 * 60) })), // just outside the day
+  ];
+  const { d } = deps({ tables: seed({ help_queries: stale }) });
+  assert.equal((await (await ask(d)).json()).reason, "answered",
+    "rows outside the window were counted, so the caps are wider than they claim");
+});
+
+test("the daily cap boundary is exact: 399 others plus the caller is allowed, 400 is not", async () => {
+  const now = new Date().toISOString();
+  const others = (n) => Array.from({ length: n }, (_, i) => ({ id: `o${i}`, owner: OTHER, asked_at: now }));
+  assert.equal((await (await ask(deps({ tables: seed({ help_queries: others(399) }) }).d)).json()).reason, "answered",
+    "the 400th ask of the day was refused");
+  assert.equal((await (await ask(deps({ tables: seed({ help_queries: others(400) }) }).d)).json()).reason, "rate_limited",
+    "the 401st ask of the day was allowed");
+});
+
+test("the CORS preflight carries the headers supabase-js actually sends", async () => {
+  // The PR's most-argued risk had no assertion at all: the OPTIONS test checked
+  // only the status. The vendored client sends Authorization, apikey,
+  // Content-Type and X-Client-Info; a preflight that omits any of them from
+  // Allow-Headers is blocked by the browser.
+  const { d } = deps();
+  const res = await handle(new Request("https://fn.test/x", { method: "OPTIONS" }), d);
+  assert.equal(res.status, 200);
+  assert.ok(res.headers.get("Access-Control-Allow-Origin"), "no Access-Control-Allow-Origin on the preflight");
+  const allow = (res.headers.get("Access-Control-Allow-Headers") ?? "").toLowerCase();
+  for (const h of ["authorization", "apikey", "content-type", "x-client-info"]) {
+    assert.ok(allow.includes(h), `Allow-Headers omits ${h}, which supabase-js sends — the browser blocks the POST`);
+  }
+  assert.ok((res.headers.get("Access-Control-Allow-Methods") ?? "").toUpperCase().includes("POST"));
+});
+
+test("a token that resolves to no user is refused before any database work", async () => {
+  const { d, db } = deps({ userClient: async () => ({ data: { user: null } }) });
+  assert.equal((await ask(d)).status, 401);
+  assert.deepEqual(db.log, [], "a database query ran for a token that resolved to nobody");
+});
+
+test("a non-string question is invalid, and reserves nothing", async () => {
+  // `{"question":{"a":1}}` was coerced to "[object Object]", stored, and sent.
+  for (const q of [{ a: 1 }, 42, ["x"], true]) {
+    const t = deps({ anthropic: { messages: { create: async () => assert.fail("the provider was called for a non-string question") } } });
+    assert.equal((await (await ask(t.d, { question: q })).json()).reason, "invalid", `accepted ${JSON.stringify(q)}`);
+    assert.equal(t.rows("help_queries").length, 0);
+  }
+});
+
+test("the provider request carries the intended model, budget and boundary rule", async () => {
+  // A model-id typo fails every ask with a provider 404 — refunded, and shown as
+  // the same "not available" notice as everything else. Nothing caught it.
+  let args = null;
+  const { d } = deps({ anthropic: { messages: { create: async (a) => { args = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } } });
+  await ask(d);
+  assert.equal(args.model, "claude-opus-5-5");
+  assert.ok(args.max_tokens >= 4096, `max_tokens ${args.max_tokens} shares its budget with thinking that cannot be disabled`);
+  assert.match(args.system, /may NOT make a COVERAGE DETERMINATION/,
+    "the system prompt no longer carries the rule the whole feature turns on");
+});
+
+test("the grounding never labels a relation with a coverage verb", async () => {
+  // "covers" primes the determination the boundary refuses, and the client sees
+  // the label too, under "Based on". The first version of this test built a
+  // regex against the JSON-escaped payload and matched nothing, so it passed on
+  // the defect it was written for — assert on the PROMPT TEXT instead.
+  let sent = "";
+  const { d } = deps({ anthropic: { messages: { create: async (a) => { sent = a.messages[0].content; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } } });
+  await ask(d);
+  assert.ok(sent.includes("- [r"), "no record lines in the prompt — this test would pass vacuously");
+  for (const bad of ['"covers"', '"covered"', '"coverage"']) {
+    assert.ok(!sent.includes(`${bad}:`),
+      `a record label reads ${bad}, which states the determination the boundary refuses:\n` +
+      sent.split("\n").filter((l) => l.includes(bad)).join("\n"));
+  }
+});
+
+test("today's date is grounded, so 'still active' is answerable", async () => {
+  let sent = "";
+  const { d } = deps({ anthropic: { messages: { create: async (a) => { sent = JSON.stringify(a); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } } });
+  await ask(d);
+  assert.ok(sent.includes(new Date().toISOString().slice(0, 10)),
+    "no current date reached the model, so it answers renewal questions from its own guess at today");
 });

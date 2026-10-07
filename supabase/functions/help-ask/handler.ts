@@ -73,24 +73,23 @@ export interface Deps {
 // repeatedly by a record that still reads as current. `desk-ask` stays
 // unambiguously retired and its deletion stays a separate, closable item;
 // "help-ask" also matches what the feature is now called everywhere else.
-// ⚠️ DEPLOY WITH `--no-verify-jwt`. That reads backwards for an endpoint that
-// spends money per call, so here is the reasoning in full.
-// The gateway flag adds NOTHING this function does not already do: the handler
-// resolves the caller from their JWT and returns 401 before the first database
-// write and long before the model call, so with the flag off an unauthenticated
-// request still costs exactly one 401 and zero dollars.
-// What the flag can do is break the feature in a way nobody can see.
-// `supabase.functions.invoke` sends `Authorization` and `Content-Type:
-// application/json`, neither CORS-safelisted, so the browser MUST send a
-// preflight OPTIONS — and a preflight never carries `Authorization`. If the
-// gateway enforces the flag on that preflight, the POST never leaves the
-// browser. NOT VERIFIED HERE (the function is undeployed and the sandbox browser
-// has no egress), which is exactly why it is not worth risking: FR-17 renders
-// every failure as the same quiet notice, and S10 passes on the notice branch by
-// design, so "deployed and permanently unreachable" is indistinguishable from
-// "not deployed yet" from the client, the suite and the UI alike.
-// A flag that adds no protection and can silently disable the feature is not a
-// trade-off. `notify-enhancement` is deployed the same way, for its own reasons.
+// DEPLOY WITH THE DEFAULT — `verify_jwt` ON. An earlier version of this header
+// argued at length for `--no-verify-jwt`, on two claims that were both false and
+// both testable from here the whole time. The retired `desk-ask` stub is deployed
+// with verify_jwt = true, which makes it a live control. Probed 2026-10-07:
+//
+//   OPTIONS with browser preflight headers and no Authorization returns the
+//   STUB'S OWN body, with x-deno-execution-id set — the preflight REACHES the
+//   function, so the flag does not block CORS;
+//   POST with no Authorization, and POST with a malformed bearer, are both
+//   refused by the gateway with no execution id — the function never runs.
+//
+// So the flag adds exactly what the old header said it did not: unauthenticated
+// traffic stops before it is a billable invocation, rather than being parsed here
+// and (with any bearer present) costing an Auth round trip. The handler's own 401
+// stays — it is what resolves the caller — but it is no longer the only thing
+// between an open endpoint and provider spend.
+//
 // THE RULE THIS FILE EXISTS TO HOLD: records are read SERVER-SIDE, scoped to the
 // caller's own owner id resolved from their JWT. The browser already holds those
 // rows under RLS, so accepting them in the request body would be simpler — and
@@ -207,7 +206,15 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   const assetName = new Map(assets.map((a: { id: string; name: string }) => [a.id, a.name]));
   for (const p of policies) {
     const on = assetName.get(p.asset_id) ?? "an asset";
-    facts.push({ kind: "policy", name: p.line, label: "covers", value: String(on) });
+    // "on asset", NOT "covers". That label is the verb the whole fact/advice
+    // boundary turns on: rendered as `policy "Flood" "covers": "Harbor House"`,
+    // the grounding reads as a record that ANSWERS a coverage question, so
+    // "covers Harbor House, not the Tesla" looks like a fact to state rather than
+    // a determination to refuse — and the spec's own refused example is "does my
+    // flood policy cover the Tesla?". prompt.ts even uses "covers: the garage" as
+    // its example of a FORGED coverage determination. The client sees this string
+    // too, under "Based on". The relation is attachment; say attachment.
+    facts.push({ kind: "policy", name: p.line, label: "on asset", value: String(on) });
     if (p.carrier) facts.push({ kind: "policy", name: p.line, label: "carrier", value: p.carrier });
     // Selected since the first draft and never surfaced, so "what is my policy
     // number?" answered "your records don't say" while CLAUDE.md's Anthropic
@@ -411,7 +418,11 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     console.error(JSON.stringify({ where: "records", message: (e as Error)?.message ?? "unknown" }));
     return await releaseAnd("records_error");
   }
-  const { system, messages } = buildPrompt({ question, topics, facts });
+  // TODAY, as grounding rather than a record: without it the model answered "is
+  // my policy still active?" and "what renews soon?" from its own guess at the
+  // date, against renewal dates it had been given in full. Passed separately so
+  // it does not take a record tag or make a record-less client look stocked.
+  const { system, messages } = buildPrompt({ question, topics, facts, today: new Date().toISOString().slice(0, 10) });
 
   // ─── THE BILLING LINE. Past here the reservation STAYS, whatever comes back,
   // because the call has been paid for. No `releaseAnd` below this point. ───

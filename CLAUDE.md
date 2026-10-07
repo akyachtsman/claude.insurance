@@ -80,16 +80,21 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
   `notify-renewal` functions are still to come.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
-    endpoint. **Deploy with `--no-verify-jwt`**, like `notify-enhancement`: the
-    function resolves the caller from their JWT and 401s before the first DB
-    write and long before the model call, so the gateway flag adds no protection
-    — and if it enforces on the CORS preflight (which `supabase.functions.invoke`
-    forces, by sending `Authorization` and a JSON content type), the POST never
-    leaves the browser. Not verifiable from here, and FR-17 makes that failure
-    look exactly like "not deployed yet", which is why it is not worth the risk.
-    Written and merged, **not yet deployed**; it needs the `help_queries`
-    migration applied and `ANTHROPIC_API_KEY` set first (owner gate). Until then `#/keep/help` renders
-    and every ask shows the plain "not available" notice — FR-17's single failure
+    endpoint. **Deploy with the DEFAULT — `verify_jwt` ON.**
+    ⚠️ This line said `--no-verify-jwt` for five commits, on two claims that were
+    both false and both testable here all along. `desk-ask` is deployed with
+    `verify_jwt: true`, which makes it a live control; probed 2026-10-07:
+    an OPTIONS preflight with no Authorization returns **the stub's own body**
+    with `x-deno-execution-id` set (so the flag does **not** block CORS), while a
+    POST with no Authorization and a POST with a malformed bearer are both
+    refused by the gateway with **no execution id** (so the function never runs).
+    The flag therefore costs nothing and stops junk traffic before it is a
+    billable invocation. `supabase/config.toml` carries no `[functions.help-ask]`
+    block, deliberately — and note that only the CLI reads that file at all; the
+    Supabase MCP deploy tool takes `verify_jwt` explicitly and defaults to true.
+    Written and merged, **not yet deployed**; see the owner gate below for the
+    full order. Until then `#/keep/help` renders and every ask shows the plain
+    "not available" notice — FR-17's single failure
     path, which is why the page is shippable ahead of the deploy.
   - ⚠️ **`desk-ask` is a retired stub, not part of this system — and NOT an
     older name for `help-ask` above.** The two are easy to confuse because 003
@@ -108,6 +113,31 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 - `supabase/proposed/` — migrations **written but not applied**, awaiting owner
   approval. `supabase/migrations/` means "live and matching `list_migrations`";
   this directory exists so that stays true. See its README.
+
+### ⚠️ Feature 003 owner gate — the authoritative order
+
+Three places gave different versions of this (5 steps, 2 prerequisites, 6 steps).
+This is the one to follow; the others defer to it.
+
+1. Apply `supabase/proposed/20261006_help_queries.sql` — the throttle table. Its
+   explicit `grant ... to service_role` is load-bearing, not tidiness.
+2. Apply `supabase/proposed/20261006_profiles_no_client_insert.sql`. Without it
+   the invite check is bypassable with one PostgREST insert, so the per-client
+   spend cap is per *creatable* account.
+3. **Turn public sign-up off** in Supabase Auth. Measured ON (`disable_signup:
+   false`), which makes the Security page's "Invite-only access" card untrue.
+4. **Provision a `profiles` row for every invited client**, as `postgres` (the
+   dashboard SQL editor). Nothing else creates one: no trigger, no client insert
+   after step 2, and `service_role` has no INSERT on that table. Without it the
+   Keep works and the Help desk refuses every question, showing the same notice
+   as an outage. This belongs in the invite runbook.
+5. Set `ANTHROPIC_API_KEY` as an Edge Function secret.
+6. Deploy `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
+   entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
+7. Ask one question as a signed-in client and confirm an answer renders. FR-17
+   makes every failure look identical, so this is the only step that proves the
+   deploy worked.
+8. Then merge.
 
 ## Backend (Supabase — provisioned)
 - **Project:** `insurance` · ref `bdsegmjcgfmgzuxwiplj` · URL `https://bdsegmjcgfmgzuxwiplj.supabase.co` (us-west-1)
@@ -218,7 +248,7 @@ profile**, never by listing a directory.
 - **Anthropic is a sub-processor as of feature 003 (the Help desk).** `help-ask`
   sends the question the client typed, the `content/help-guide.json` corpus, and
   a **compact digest** of that client's own records to the Claude API to ground
-  the answer. The digest is **exactly these columns** (`help-ask/index.ts`):
+  the answer. The digest is **exactly these columns** (`help-ask/handler.ts` — the logic moved there so it could be executed):
   entities `name, kind`; assets `name, type, value`; policies `line, carrier,
   number, renewal_date, premium_amount, premium_period, coverages`. **`coverages`
   was added 2026-10-06 and is the widest of these** — it is the broker-written
@@ -268,15 +298,18 @@ profile**, never by listing a directory.
     of accounts unbounded and that cap with it. Check before deploying.** The
     trade-off is stated in the code: one abuser can take the desk down for
     everyone, which is the same trade the Console spend limit makes, earlier.
-  - **Client text is quoted AND scrubbed on both channels.** The question is
-    wrapped in `<question>` delimiters; so, in effect, are the records — entity
-    and asset *names* are client-written free text (clients hold full CRUD on
-    their own), and they render ahead of the question with no length cap and are
-    re-injected into every future answer, which made them the **better** channel
-    of the two until `deFence()` was applied to them. `deFence` is deliberately
-    whitespace- and attribute-tolerant: the exact-match version it replaced was
-    defeated by `</question >`, `</ question>`, `</question\n>` and
-    `</QUESTION\t>`, all four measured.
+  - **Neither channel is sanitise-then-concatenate any more**, and the history is
+    why. The question used fixed `<question>` delimiters defended by a regex;
+    that regex was exact-match (four escapes), then loose (a ReDoS: 14.8s on a
+    100k name), and still missed `<\/question>`, a zero-width space inside the
+    word, fullwidth and HTML-entity forms. Records had the same shape and were
+    forgeable with a plain newline. Both were redesigned rather than patched
+    again, per `global.md` → *Review Rounds Have to Terminate*:
+    **the question block carries a per-request nonce** (`<question-a1b2c3…>`), so
+    there is no fixed string a client can type to close it; and **every record
+    value is JSON-encoded**, so the boundary is syntactic and no content can
+    create structure. `deFence` and a control-character flatten remain as belt,
+    not as the boundary.
   - **CORS stays `Access-Control-Allow-Origin: *`, deliberately.** Credentials
     travel in an `Authorization` header, not cookies, and `Allow-Credentials` is
     unset, so there is no ambient-credential CSRF and a hostile page cannot read

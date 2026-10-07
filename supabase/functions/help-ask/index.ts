@@ -8,34 +8,8 @@
 // unambiguously retired and its deletion stays a separate, closable item;
 // "help-ask" also matches what the feature is now called everywhere else.
 //
-// ⚠️ DEPLOY WITH `--no-verify-jwt`. That reads backwards for an endpoint that
-// spends money per call, so here is the reasoning in full.
-//
-// The gateway flag adds NOTHING this function does not already do: the handler
-// resolves the caller from their JWT and returns 401 before the first database
-// write and long before the model call, so with the flag off an unauthenticated
-// request still costs exactly one 401 and zero dollars.
-//
-// What the flag can do is break the feature in a way nobody can see.
-// `supabase.functions.invoke` sends `Authorization` and `Content-Type:
-// application/json`, neither CORS-safelisted, so the browser MUST send a
-// preflight OPTIONS — and a preflight never carries `Authorization`. If the
-// gateway enforces the flag on that preflight, the POST never leaves the
-// browser. NOT VERIFIED HERE (the function is undeployed and the sandbox browser
-// has no egress), which is exactly why it is not worth risking: FR-17 renders
-// every failure as the same quiet notice, and S10 passes on the notice branch by
-// design, so "deployed and permanently unreachable" is indistinguishable from
-// "not deployed yet" from the client, the suite and the UI alike.
-//
-// A flag that adds no protection and can silently disable the feature is not a
-// trade-off. `notify-enhancement` is deployed the same way, for its own reasons.
-//
-// THE RULE THIS FILE EXISTS TO HOLD: records are read SERVER-SIDE, scoped to the
-// caller's own owner id resolved from their JWT. The browser already holds those
-// rows under RLS, so accepting them in the request body would be simpler — and
-// is the one shape that cannot be made safe, because the body is client
-// controlled. Feature 002's review found exactly that as an IDOR; this applies
-// the lesson before the bug rather than after.
+// Deploy with the default, verify_jwt ON — see handler.ts's header for the
+// probe that reversed the earlier `--no-verify-jwt` decision.
 //
 // ⚠️ THE LOGIC IS NOT HERE. It is in ./handler.ts, with its collaborators
 // injected, because this file's `jsr:` and `npm:` specifiers are exactly what

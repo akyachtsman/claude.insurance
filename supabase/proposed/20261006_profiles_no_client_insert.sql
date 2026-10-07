@@ -62,8 +62,8 @@ drop policy if exists "profiles insert own" on public.profiles;
 -- the previous state exactly. The only thing lost is the ability of a client to
 -- create their own profile, which nothing in the app does.
 
--- ─── POST-APPLY PROBE (run as a CLIENT session — service-role bypasses both RLS
---   and privileges and would report a false pass on every step) ───────────────
+-- ─── POST-APPLY PROBE (run as a CLIENT session — service-role bypasses RLS (it does NOT bypass privileges, and holds none
+--   on the client tables here) and would report a false pass on every step) ───────────────
 --
 --   1. Client inserts its own profile — expect FAILURE, SQLSTATE 42501:
 --        insert into public.profiles (id) values (auth.uid());

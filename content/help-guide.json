@@ -117,7 +117,7 @@
       "title": "Security and privacy",
       "route": "#/keep/security",
       "nav": "Account menu \u2192 Security & privacy",
-      "body": "How your account is protected and who can see your records: access is by broker invitation, and your entities, assets and policies are visible to you and your licensed broker. One exception, and the Help desk is it: when you ask a question here, your question and a summary of your own records are sent to our AI provider (Anthropic) to answer it. No other client's records are ever included.",
+      "body": "How your account is protected and who can see your records: your entities, assets and policies are visible to you and your licensed broker, and no other client can see them. Two things leave the Keep. When you ask the Help desk a question, your question and a summary of your own records go to our AI provider (Anthropic) to answer it. When you send an enhancement request, its details are emailed to your broker.",
       "ask": "Who can see my information?"
     }
   ]

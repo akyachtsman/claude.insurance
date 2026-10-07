@@ -25,6 +25,10 @@ export interface RecordFact {
 
 export interface PromptInput {
   question: string;
+  /** Today, ISO yyyy-mm-dd. Grounding, NOT one of the client's records: as a
+   *  record it took tag r1, shifted every real one, and made a client with
+   *  nothing on file look like they had something. */
+  today?: string;
   /** Test-only: pin the delimiter nonce. Never passed in production. */
   nonce?: string;
   topics: HelpTopic[];
@@ -289,6 +293,8 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
   const question = deFence(input?.question);
 
   const content = [
+    typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Renewal and expiry dates below are absolute; work out "soon", "still active" and "overdue" from this date, never from your own.` : "",
+    "",
     renderTopics(topics),
     "",
     renderFacts(facts),

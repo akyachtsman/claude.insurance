@@ -457,8 +457,14 @@ test("creditedTopics: an incomplete corpus entry is not credited", () => {
 // exercise the real data, not a hand-copy of it. Self-skips if T1 is absent.
 // ---------------------------------------------------------------------------
 const GUIDE_PATH = new URL("../../../content/help-guide.json", import.meta.url);
+// NOT skipped when absent, which is what these did while the file was still
+// being written ("T1"). It ships now, and BOTH halves of the feature read it —
+// the page for its chips and credits, the Edge Function for its prompt. A rename
+// would have turned the only validation this corpus has into two silent passes,
+// and `test.md` is explicit that a skipped test is not evidence.
+assert.ok(existsSync(GUIDE_PATH), "content/help-guide.json is missing — the Help desk has no corpus");
 
-test("content/help-guide.json: every topic is well formed and seeds its chip", { skip: existsSync(GUIDE_PATH) ? false : "content/help-guide.json not present (T1)" }, () => {
+test("content/help-guide.json: every topic is well formed and seeds its chip", () => {
   const guide = JSON.parse(readFileSync(GUIDE_PATH, "utf8"));
   assert.ok(Array.isArray(guide.topics) && guide.topics.length > 0, "the corpus has topics");
   for (const t of guide.topics) {
@@ -486,7 +492,7 @@ test("content/help-guide.json: every topic is well formed and seeds its chip", {
 // true, and the wrong check. This one is the right check, and it runs.
 const MAIN_PATH = new URL("../../main.js", import.meta.url);
 
-test("content/help-guide.json: every route is a navigable static Keep address", { skip: existsSync(GUIDE_PATH) ? false : "content/help-guide.json not present (T1)" }, () => {
+test("content/help-guide.json: every route is a navigable static Keep address", () => {
   const guide = JSON.parse(readFileSync(GUIDE_PATH, "utf8"));
   const main = readFileSync(MAIN_PATH, "utf8");
 

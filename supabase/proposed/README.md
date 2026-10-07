@@ -142,7 +142,7 @@ hole — it creates a table a feature needs. It waits here for the same reason
 they do: CLAUDE.md requires explicit owner approval for migrations.
 
 **What it is.** One row per answered help-desk question
-(`id`, `owner`, `asked_at`, `question`), plus the RLS, column grants and index
+(`id`, `owner`, `asked_at`, `question`), plus the RLS, the service-role grant and the index
 around it. It is the state the `help-ask` throttle counts, satisfying **FR-16**
 ("the endpoint is throttled per client").
 
@@ -165,7 +165,7 @@ construction — no `UPDATE`/`DELETE` grant *and* no `UPDATE`/`DELETE` policy, s
 a later migration restating the grant table-wide does not by itself make the
 history erasable. Only the service-role key, which bypasses RLS, can prune it.
 
-**Why the grants are column-level.** Supabase's auto-expose is off in this
+**Why there are no client grants.** Supabase's auto-expose is off in this
 project, so a table with flawless RLS and no `GRANT` returns 42501 on every
 call — RLS narrows privileges, it never confers them. (Column-form precedent:
 `20260624171640_public_leads_and_rule_settings.sql` grants `anon` INSERT on a
@@ -213,7 +213,7 @@ free from the default.
 
 **To apply:** review, then move to `supabase/migrations/` in the same change
 that runs it, run the post-apply probe in the file's footer **as a client
-session** (service-role bypasses RLS *and* ignores column privileges, so every
+session** (service-role bypasses RLS — though NOT privileges — so every
 check would report a false pass — and the probe's delete and update steps are
 destructive under service-role, where they succeed), and drop its row from the
 table above. This is the migration half of the plan's **T13** owner gate;

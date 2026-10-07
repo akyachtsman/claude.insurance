@@ -410,9 +410,10 @@ export async function askHelp(question, { signal } = {}) {
     // failure to report, and not an answer either.
     if (signal?.aborted) return { answer: null, reason: "aborted" };
     if (error) {
-      // 410 is the retired stub still being deployed; a network failure and a
-      // 5xx are the same thing to a client. All three are "not available", and
-      // the caller does not need to know which (FR-17).
+    // A network failure, a 5xx and a 404 are the same thing to a client: all are
+    // "not available", and the caller does not need to know which (FR-17). (This
+    // said "410 is the retired stub still being deployed" — that was about
+    // `desk-ask`, which nothing calls; this endpoint is `help-ask`.)
       console.warn("askHelp failed —", error.message);
       return { answer: null, reason: "unavailable" };
     }

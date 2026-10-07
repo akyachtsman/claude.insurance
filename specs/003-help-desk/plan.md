@@ -25,14 +25,14 @@ So: the endpoint is **`help-ask`**, a new slug that also matches what the featur
 is called everywhere else after the rename. `desk-ask` stays unambiguously
 retired and its deletion stays a separate, closable owner item.
 
-⚠️ **JWT verification is OFF at the gateway (`--no-verify-jwt`), revised
-2026-10-06.** This section first said it "stays ON ... because this endpoint
-spends money per call". That reasoning was wrong: the handler resolves the caller
-from their JWT and 401s before the first database write and long before the
-provider call, so the gateway flag adds no protection — while it CAN reject the
-CORS preflight that `functions.invoke` forces, which would make the feature
-permanently unreachable in a way FR-17 renders identically to "not deployed".
-`supabase/config.toml` now carries the flag so a redeploy cannot flip it back.
+⚠️ **JWT verification stays ON at the gateway, revised twice.** This section
+first said it "stays ON ... because this endpoint spends money per call" (right
+answer, wrong reason), then said OFF because the flag "adds no protection" and
+"can reject the CORS preflight". Both of those were false and both were testable:
+`desk-ask` is deployed with `verify_jwt: true`, and probing it 2026-10-07 shows a
+no-Authorization preflight reaching the function (so CORS is unaffected) while an
+unauthenticated POST is refused by the gateway with no execution id (so the flag
+does stop junk traffic becoming a billable invocation). `supabase/config.toml` therefore carries NO block for this function; the MCP deploy tool's default is already the right one.
 
 ## Key decision 2 — records are read server-side, never sent by the client
 
@@ -80,7 +80,7 @@ the count of layers that can actually enforce anything, which is one.
 ## Key decision 4 — model and cost
 
 Per the `claude-api` skill: `claude-opus-5-5`, effort left at its `medium`
-default, `max_tokens: 2048`, no streaming, `stop_reason` checked before reading
+default, `max_tokens: 8192`, no streaming, `stop_reason` checked before reading
 `content`, `text` blocks extracted by type. Thinking cannot be disabled on this
 model and counts against `max_tokens`.
 

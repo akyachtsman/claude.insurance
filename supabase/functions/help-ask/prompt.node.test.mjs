@@ -403,3 +403,18 @@ test("the delimiter scrub and the control-character flatten are still in force",
   assert.ok(body.includes("[tag]"), "a forged delimiter was not replaced");
   assert.equal(body.split("\n").filter((l) => l.startsWith("- [")).length, 1, "the flatten stopped running");
 });
+
+test("the delimiter nonce is fresh per call — the property the redesign rests on", () => {
+  // Every other delimiter test pins `nonce: NONCE`, so replacing newNonce() with
+  // a constant changed nothing. The whole claim is "there is no string to type",
+  // which is only true while the nonce is unpredictable: this is the one test
+  // that must call buildPrompt WITHOUT one.
+  const tagOf = (body) => (body.match(/<question-([a-z0-9]+)>/) || [])[1];
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const tag = tagOf(buildPrompt({ question: "hi", topics: [], facts: [] }).messages[0].content);
+    assert.ok(tag && tag.length >= 8, `nonce too short or missing: ${tag}`);
+    seen.add(tag);
+  }
+  assert.ok(seen.size > 190, `only ${seen.size} distinct nonces in 200 calls — the delimiter is predictable`);
+});
