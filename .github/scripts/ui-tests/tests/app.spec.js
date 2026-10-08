@@ -2879,20 +2879,33 @@ test('S13: following a credit and coming back restores the answer — but only f
   await page.locator('.k-help__src a.k-ilink').first().click();
   await expect(page.locator('.k-help__a'), 'still on the Help page after following a credit').toHaveCount(0);
 
-  // ⚠️ RETURNING USES THE BROWSER BUTTON, and that is a finding rather than a
-  // convenience. The credited destinations are the Keep's own screens, and
-  // `originBackRow()` is rendered by only three call sites — entities.js (x2) and
-  // help-view.js. `#/keep/insurance` is not one, so a client who follows a credit
-  // to check an answer has no IN-APP way back; this asserted a back row there at
-  // first and failed for that reason. Recorded in CLAUDE.md; not fixed here,
-  // because adding one is a change to keep.js's own views, not to this feature.
-  await page.goBack();
+  // RETURNING USES THE DESTINATION'S OWN BACK CONTROL. It did not have one when
+  // this scenario was written — the assertion below failed, which is how the gap
+  // was found — and `#/keep` / `#/keep/assets` / `#/keep/insurance` were the three
+  // Keep views with no back affordance at all. They have one now, so the round
+  // trip FR-11 invites is exercised the way a client would make it, not with
+  // `page.goBack()`.
+  const dest = page.locator('.k-backrow a.k-back');
+  await expect(dest, 'the credited destination has no in-app way back to Help').toHaveCount(1);
+  await expect(dest, "the destination's back control is not origin-aware")
+    .toHaveAttribute('href', '#/keep/help');
+  await dest.click();
 
   // RESTORED: the answer and the question the client left behind.
   await expect(page.locator('.k-help__a'), 'coming back from a credited source lost the answer')
     .toHaveCount(1, { timeout: 10_000 });
   await expect(page.locator('.k-help__q')).toHaveText('Where do I see my policies?');
   await expect(page.locator('.k-help__input')).toHaveValue('Where do I see my policies?');
+
+  // ⚠️ AND IT MUST NOT APPEAR ON A FRESH LOAD. `originBackRow()` renders only when
+  // there is an in-app prior, which is what keeps a back control off a deep link
+  // and off the Keep's root. A reload is a real document load, so the nav stack is
+  // gone — unlike a hash change, which does not reload and left an earlier version
+  // of this check reporting a false positive.
+  await page.reload();
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-backrow'),
+    'a back control rendered on a freshly loaded page, with no in-app origin to return to').toHaveCount(0);
 
   // ── A DIFFERENT PERSON SIGNS IN ON THE SAME TAB ──────────────────────────
   // Via the ACCOUNT page, not the app bar: the bar's sign-out lives inside a

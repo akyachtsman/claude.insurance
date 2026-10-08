@@ -440,6 +440,12 @@ const KEEP_LABELS = {
   "#/keep/list": "entities",
   "#/keep/grid": "entities",
   "#/keep/insurance": "policies",
+  // Absent until 2026-10-08, so a back control pointing AT the assets table read
+  // a bare "Back" instead of naming it. The two add-* forms are deliberately
+  // still absent: pointing a user back INTO a half-filled form is not a
+  // destination worth naming, and `backLink` already gives those their own
+  // parent fallback.
+  "#/keep/assets": "assets",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
   "#/keep/requests": "my requests",

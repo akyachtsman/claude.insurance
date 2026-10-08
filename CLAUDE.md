@@ -568,18 +568,52 @@ in the duration: 1.4s instead of 6.3s). A transient state cannot be checked with
 a retrying assertion. `routeHelpAsk` now takes a **gate** the test releases, so
 the response cannot have arrived and one non-retrying snapshot is exact.
 
-### ⚠️ Recorded — a credited source has no in-app way back
+### ✅ RESOLVED — every credited destination has an origin-aware way back (2026-10-08)
 
-Found writing S13, 2026-10-08. FR-11 invites the client to follow a credited
-source to check an answer — and the destinations are the Keep's own screens,
-where `originBackRow()` is rendered by only **three** call sites: `entities.js`
-(×2) and `help-view.js`. `#/keep/insurance`, the commonest credit target, is not
-one. So a client who follows a credit has no in-app route back; only the browser
-button. S13 asserted a back row there at first and failed for exactly this reason,
-and now uses `page.goBack()` with the finding recorded beside it.
-Not fixed here because adding one is a change to `keep.js`'s own views, not to
-this feature — but it is the cheapest of the open UX items, and it undercuts the
-"follow it and check" promise FR-11 is built on.
+Found writing S13, fixed the same day. FR-11 invites the client to follow a
+credited source to check an answer, and the destinations are the Keep's own
+screens — so a one-way trip makes the invitation hollow.
+
+⚠️ **THE RECORD OF THIS, WRITTEN HOURS EARLIER, OVERSTATED IT TWICE.** It said
+`originBackRow()` is "rendered by only three call sites" and named
+`#/keep/insurance` as the gap. Both were products of grepping for ONE spelling:
+- **`backLink()` is also origin-aware** — it calls `originHref(fallback)`, and it
+  has nine call sites. A per-function scan for `originBackRow` alone reported 16
+  of 18 views as having nothing.
+- **`kProgress`'s cancel is too** — `renderKeepAddAsset` passes
+  `() => go(originHref("#/keep"))`, so the add-asset form was never missing one;
+  it renders `.k-back` inside `.k-progress`, not `.k-backrow`, so a probe keyed on
+  `.k-backrow` read it as absent.
+- A shared helper in `entities.js` gives `#/keep/list` and `#/keep/grid` theirs,
+  which the per-function scan attributed to `renderKeepEntities` only.
+
+**Measured against the running app** (the offline S11–S13 harness, navigating from
+`#/keep/help` and reading `.k-backrow a.k-back, .k-progress .k-back`), the real
+gap was **three views of fifteen**: `#/keep` (home), `#/keep/assets` and
+`#/keep/insurance`. Every other route already said "Back to help".
+
+Fixed by adding `originBackRow()` to those three, plus `#/keep/assets` to
+`KEEP_LABELS` so a control pointing AT the assets table names it instead of
+reading a bare "Back". Home is the debatable one and is in deliberately: `home` is
+a credited topic, and `originBackRow()` renders nothing without an in-app prior,
+so the root looks untouched unless you actually arrived from somewhere.
+
+**Verified by measurement, not inspection**: all 15 Keep routes now return to
+`#/keep/help` after a credit; and in a FRESH browser context a deep link to
+`#/keep`, `#/keep/assets`, `#/keep/insurance` and `#/keep/list` shows **no** back
+row, with an in-app visit then a reload going `true → false`.
+⚠️ The first suppression check was a false positive: `page.goto` to a different
+HASH does not reload the document, so the nav stack survived and the row stayed.
+A fresh context or a reload is required to test this at all.
+S13 now clicks the destination's own control instead of `page.goBack()`, and
+asserts the suppression. Both mutation-tested: removing the row from Policies
+fails with "no in-app way back to Help", and making `originBackRow()` render
+without a prior fails with "freshly loaded page".
+
+Still true and deliberately unchanged: the add-asset cancel reads a static
+**"Back"** rather than naming the origin, because `kProgress`'s label is fixed
+while its destination is computed. Cosmetic, and it belongs to the form widget
+rather than to this flow.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
@@ -745,7 +779,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S10 | Help desk page | Signed in, open `#/keep/help` → heading `.k-h1` "Help", the AI-generated label (`.k-help__ai`) present **before** any question is asked, suggestion chips (`.k-chiptog`) and the ask box (`.k-help__input`). Submitting a blank question shows `.k-error` and sends nothing. Submitting a real question yields **either** an answer (`.k-help__a`) or the unavailable notice (`.k-help__notice`) — never a blank region, and the `.k-help__ai` label is present in the answer case too | The AI-generated label is missing in either state, a blank question reaches the endpoint, or the answer region stays empty after an ask |
 | S11 | Help desk — the ANSWER branch (offline harness, **runs locally**) | Seeded session + `page.route`: the AI label is present before the ask, **while the request is held open**, and in the answer; the question is echoed; `.k-help__src` credits the topic by its **corpus title** (not the wire id) and carries the record line; `.k-help__broker` renders on a payload whose `reason` is `answered`, with a link to `#/keep/insurance`; exactly one `.k-help__ai` | The label is dropped in any of the three states, the broker channel is gated on the wire's `reason`, a credit renders as its id, or the record line is missing |
 | S12 | Help desk — the NOTICE branch (offline harness, **runs locally**) | A 404 from the function yields exactly one `.k-help__notice`, the label present, **no** `.k-help__a` and **no** `.k-help__broker`. A blank question shows `.k-error` and reaches the endpoint zero times | The notice state has no label, an answer renders beside a failure, the broker channel appears under an outage, or a blank question is sent |
-| S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit and returning restores the answer and the question. Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | The back control is hardcoded, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
+| S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit, the **destination's own** back control points at `#/keep/help` and returning restores the answer and the question; a reload then shows **no** back row (no in-app origin). Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | A back control is hardcoded or missing on a credited destination, one renders on a freshly loaded page, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 

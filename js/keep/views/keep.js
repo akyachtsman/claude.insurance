@@ -21,7 +21,7 @@ import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderK
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
 export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
 export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "./policies-view.js";
-import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
+import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, originBackRow, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
@@ -167,6 +167,13 @@ export async function renderKeepLanding() {
     : [el("div", { class: "k-report__empty", text: "No renewals in the next 60 days — you're all set." })];
 
   const view = page("home", [
+    // Home carries one too, and it is the debatable one: this is the Keep's root,
+    // so "back" here is not a step up a hierarchy. It is in because `home` is a
+    // CREDITED HELP TOPIC — a client who asks "what's on my home screen?", follows
+    // the credit and wants to return to the answer had no in-app route back.
+    // `originBackRow()` renders nothing on a fresh load or a deep link, so the
+    // root looks untouched unless you actually arrived from somewhere.
+    originBackRow(),
     el("section", { class: "k-welcome" }, [
       el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
       el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
@@ -233,6 +240,10 @@ export function renderKeepInsurance() {
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
 
   const view = page("insurance", [
+    // THE COMMONEST CREDITED DESTINATION — three of the corpus's fifteen topics
+    // route here (`insurance`, `policy`, `request`) and it had no back control at
+    // all, so following a credit to check an answer was one-way.
+    originBackRow(),
     el("h1", { class: "k-h1", text: "Policies" }),
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
     el("div", { class: "k-astats" }, [
