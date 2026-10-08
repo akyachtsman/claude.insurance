@@ -2530,3 +2530,396 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   expect(pageErrors, `Uncaught page errors: ${pageErrors.join('; ')}`).toHaveLength(0);
   expect(consoleErrors, `Unexpected console errors: ${consoleErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OFFLINE KEEP HARNESS — S11/S12 only.
+//
+// WHY THIS EXISTS. plan.md Key decision 3 names the VIEW the only
+// model-independent layer: it renders the AI-generated label (FR-10) and the
+// broker channel (FR-8) on every answer regardless of payload. Nothing executed
+// that branch. S10 self-skips off LIVE_TARGET locally, and against the live site
+// it can only reach the NOTICE branch until help-ask is deployed — and its
+// broker assertion sits behind `if (answer present)`, so it is skipped on
+// exactly the runs that cannot produce an answer. A safety layer with no
+// executed test is a safety layer nobody has run.
+//
+// WHAT MAKES IT POSSIBLE WITHOUT A BACKEND, measured rather than assumed:
+//   · The Keep's route guard calls `getSession()` (js/main.js:97), which reads
+//     localStorage and makes NO network call while the session is unexpired, and
+//     then passes `session.user` into `ensureData()` — so `/auth/v1/user` is
+//     never requested. The storage key is read from the vendored client itself:
+//     `sb-${hostname.split(".")[0]}-auth-token`.
+//   · The help corpus is fetched RELATIVELY (`fetch("content/help-guide.json")`,
+//     js/supabase.js), so the local static server serves the real 15-topic file.
+//     Credited-topic titles therefore resolve through the real corpus, not a
+//     fixture — which is the path CLAUDE.md's "one canonical label" rule governs.
+// So only `/rest/v1/*` and `/functions/v1/help-ask` need intercepting.
+//
+// ⚠️ THIS IS NOT THE COMMITTED `supabase.js` OVERLAY CLAUDE.md FORBIDS. That
+// rule exists so no mocked DATA PATH ships in the app. Nothing here touches the
+// app's modules: `page.route` intercepts the network, and the real client, real
+// adapter and real views run unmodified. The app under test is the app.
+// ─────────────────────────────────────────────────────────────────────────────
+const SB_REF = 'bdsegmjcgfmgzuxwiplj';
+const REST_RE = /\/rest\/v1\//;
+const AUTH_RE = /\/auth\/v1\//;
+const FN_RE = /\/functions\/v1\/help-ask/;
+
+// The real function's CORS shape, because the browser still applies CORS to a
+// fulfilled response — a route that omits these fails the fetch, not the test.
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+};
+
+// A structurally valid, UNSIGNED JWT. Nothing verifies it: the signature is
+// checked server-side, and every server call is intercepted. supabase-js reads
+// `exp`/`sub` from the payload, so those have to be real.
+function fakeJwt(sub) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, exp, aud: 'authenticated', role: 'authenticated' })}.sig`;
+}
+
+// Read `sub` back out of an unsigned JWT — how the REST fixture tells which
+// identity is calling, so the fixture is owner-scoped the way RLS would be.
+function subOf(jwt) {
+  try { return JSON.parse(Buffer.from(String(jwt).split('.')[1] || '', 'base64url').toString()).sub || null; }
+  catch { return null; }
+}
+
+const KEEP_USERS = {
+  a: { uid: '11111111-1111-1111-1111-111111111111', email: 'user@example.com', name: 'Demo Client' },
+  b: { uid: '22222222-2222-2222-2222-222222222222', email: 'other@example.com', name: 'Other Client' },
+};
+
+// One entity, one asset, one policy — the Help page renders none of them, but
+// ensureData() must succeed and getUser() must return an id for the owner stamp.
+const keepRows = (u) => ({
+  profiles: [{ id: u.uid, full_name: u.name, role: 'client', reminder_email: true, reminder_schedule: [60, 30, 14, 7, 1] }],
+  entities: [{ id: 'e1', owner: u.uid, kind: 'personal', name: 'Me', label: 'UBO', created_at: '2026-01-01T00:00:00Z' }],
+  assets: [{ id: 'a1', entity_id: 'e1', kind: 'home', name: 'Harbour House', value: 900000, created_at: '2026-01-01T00:00:00Z' }],
+  policies: [{ id: 'p1', asset_id: 'a1', line: 'Home', carrier: 'Acme', policy_number: 'HO-1', renewal_date: '2027-03-12' }],
+  entity_relationships: [],
+});
+
+const userObj = (u) => ({ id: u.uid, email: u.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {} });
+const sessionFor = (u) => ({
+  access_token: fakeJwt(u.uid),
+  token_type: 'bearer',
+  expires_in: 3600,
+  expires_at: Math.floor(Date.now() / 1000) + 3600,
+  refresh_token: 'fake-refresh',
+  user: userObj(u),
+});
+
+async function seedKeepSession(page, who = 'a') {
+  const u = KEEP_USERS[who];
+  await page.addInitScript(([key, session]) => {
+    try { window.localStorage.setItem(key, JSON.stringify(session)); } catch { /* private mode */ }
+  }, [`sb-${SB_REF}-auth-token`, sessionFor(u)]);
+
+  // Keyed off the BEARER the client sends, not off `u`: S13 changes identity in
+  // the same page, and a fixture pinned to the seeded user would keep serving the
+  // first client's rows to the second — which is the very confusion under test.
+  await page.route(REST_RE, async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    const bearer = (req.headers()['authorization'] || '').replace(/^Bearer\s+/i, '');
+    const sub = subOf(bearer);
+    const caller = Object.values(KEEP_USERS).find((k) => k.uid === sub) || u;
+    const rows = keepRows(caller);
+    const table = (req.url().match(/\/rest\/v1\/([A-Za-z_]+)/) || [])[1];
+    const list = rows[table] ?? [];
+    // `.maybeSingle()` sets an Accept of application/vnd.pgrst.object+json and
+    // the client then expects ONE object, not an array. Honouring the header is
+    // what makes the profiles read (the only maybeSingle on this path) parse.
+    const wantsObject = /pgrst\.object/.test(req.headers()['accept'] || '');
+    return route.fulfill({
+      status: 200, headers: { ...CORS, 'content-type': 'application/json' },
+      body: JSON.stringify(wantsObject ? (list[0] ?? null) : list),
+    });
+  });
+
+  // /auth/v1 — served so a REAL sign-out and sign-in round-trip works with no
+  // backend. The route guard itself reads localStorage and never comes here, but
+  // S13 needs the identity to actually CHANGE, and the only faithful way to do
+  // that is to drive the app's own sign-out button and login form.
+  //   · /token  → a session for whichever seeded identity the form posted, so
+  //               typing "other" (expanded to other@example.com by signIn)
+  //               genuinely signs in as a different owner.
+  //   · /logout → 204, as the real endpoint answers scope:'local'.
+  //   · /user   → the current identity, for any path that still asks.
+  await page.route(AUTH_RE, async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    const url = req.url();
+    const json = (body, status = 200) => route.fulfill({
+      status, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (/\/logout/.test(url)) return route.fulfill({ status: 204, headers: CORS });
+    if (/\/token/.test(url)) {
+      let email = '';
+      try { email = (JSON.parse(req.postData() || '{}').email || '').toLowerCase(); } catch { /* ignore */ }
+      const who = Object.values(KEEP_USERS).find((k) => k.email === email);
+      if (!who) return json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400);
+      return json({ ...sessionFor(who), ...{ user: userObj(who) } });
+    }
+    return json(userObj(u));
+  });
+  return u;
+}
+
+// Serve one help-ask response.
+//
+// ⚠️ `gate: true` RETURNS A RELEASE FUNCTION and holds the request until the
+// test calls it. It replaced a `delayMs` option, and the reason is a defect this
+// test had on its first run: the in-flight assertions used `toHaveCount`, which
+// RETRIES — so by the time it polled, the delay had elapsed, the answer had
+// rendered and restored the label, and the assertion passed against the ANSWER
+// state. Measured: deleting the label from the in-flight branch left the test
+// green (and 1.4s instead of 6.3s, the short-circuit visible in the duration).
+// A transient state cannot be checked with a retrying assertion. With a gate the
+// response CANNOT have arrived, so a single non-retrying snapshot is exact.
+function routeHelpAsk(page, body, { status = 200, gate = false } = {}) {
+  let release = () => {};
+  const held = new Promise((r) => { release = r; });
+  const armed = page.route(FN_RE, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    if (gate) await held;
+    return route.fulfill({
+      status, headers: { ...CORS, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  });
+  return armed.then(() => release);
+}
+
+// A payload shaped exactly as handler.ts sends one on the success path:
+// `usedTopics` are corpus IDS (titles are read back from the real corpus by
+// creditedTopics, per CLAUDE.md's "one canonical label" rule — a model's own
+// wording for a screen is not a label), `usedRecords` are display LINES.
+const ANSWER_PAYLOAD = {
+  answer: 'Your policies are listed on the Policies screen, and each one opens to its own detail page.',
+  usedTopics: ['insurance'],
+  usedRecords: ['Harbour House — type: home'],
+  reason: 'answered',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S11 — THE ANSWER BRANCH OF help-view.js, EXECUTED.
+// plan.md Key decision 3 calls this the only model-independent layer. Every
+// assertion below is a property the VIEW must hold whatever the payload says,
+// which is the whole claim: a model that ignored its instructions cannot remove
+// the AI label or the broker channel, because neither is read off the wire.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S11: an answer carries the AI label and the broker channel, and credits the real corpus', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+  // Gated, not delayed — see routeHelpAsk. The in-flight state is the one a
+  // client looks at longest, and it is where the label was previously dropped
+  // for the length of the call while this file's own header called it
+  // unconditional.
+  const release = await routeHelpAsk(page, ANSWER_PAYLOAD, { gate: true });
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1'), 'the Help page did not render — the seeded session was not accepted')
+    .toHaveText(/help/i, { timeout: 15_000 });
+
+  // FR-10 before any question is asked.
+  await expect(page.locator('.k-help__ai'), 'the AI-generated label is missing before any ask').toHaveCount(1);
+  await expect(page.locator('.k-help__input')).toBeVisible();
+
+  const input = page.locator('.k-help__input');
+  await input.fill('Where do I see my policies?');
+  await page.locator('.k-help__ask').click();
+
+  // IN FLIGHT. The request is held open, so this is NOT a race: one
+  // non-retrying snapshot reads both facts from the same DOM state. A retrying
+  // assertion here passes against the answer that arrives afterwards — which is
+  // how the first version of this test missed a deleted label entirely.
+  await expect(page.getByText(/looking/i), 'no in-flight state was shown').toBeVisible({ timeout: 3_000 });
+  const inFlight = await page.evaluate(() => ({
+    looking: /looking/i.test(document.querySelector('.k-help__out')?.textContent || ''),
+    labels: document.querySelectorAll('.k-help__ai').length,
+    answers: document.querySelectorAll('.k-help__a').length,
+  }));
+  expect(inFlight.looking, 'the snapshot was taken outside the in-flight state').toBe(true);
+  expect(inFlight.answers, 'an answer was already present while the request was held open').toBe(0);
+  expect(inFlight.labels, 'the AI label vanished WHILE the request was in flight').toBe(1);
+
+  release();
+
+  // ANSWERED.
+  await expect(page.locator('.k-help__a'), 'the answer never rendered').toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('.k-help__a')).toContainText('Policies screen');
+  await expect(page.locator('.k-help__q'), 'the question was not echoed above the answer')
+    .toHaveText('Where do I see my policies?');
+
+  // FR-11 — credits, resolved through the REAL corpus. The link text must be the
+  // corpus TITLE, not the id that crossed the wire: that is the canonical-label
+  // rule, and asserting the title is what distinguishes the two.
+  const credit = page.locator('.k-help__src');
+  await expect(credit, 'no "Based on" block rendered').toHaveCount(1);
+  await expect(credit.locator('.k-lbl')).toHaveText(/based on/i);
+  const topicLink = credit.locator('a.k-ilink').first();
+  await expect(topicLink, 'the credited topic rendered as its wire id instead of the corpus title')
+    .not.toHaveText('insurance');
+  await expect(topicLink).toHaveAttribute('href', /#\/keep\//);
+  await expect(credit.locator('.k-imuted'), 'the credited record line is missing')
+    .toHaveText('Harbour House — type: home');
+
+  // FR-8 — unconditional, and NOT gated on `reason: "refused"`. This payload
+  // says `answered`, so a hand-off that read the wire would be absent here.
+  const broker = page.locator('.k-help__broker');
+  await expect(broker, 'FR-8 broker channel missing from an ANSWER (reason: "answered")').toHaveCount(1);
+  await expect(broker).toContainText(/your broker/i);
+  await expect(broker.locator('a.k-ilink')).toHaveAttribute('href', '#/keep/insurance');
+
+  // Exactly one label in the answer state — not zero, and not one per block.
+  await expect(page.locator('.k-help__ai'), 'the AI label is missing or duplicated in the answer state').toHaveCount(1);
+
+  // The ask box is usable again, and focus was returned rather than left on body.
+  await expect(input).toBeEnabled();
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S12 — THE FAILURE BRANCH, AND THE DISTINCTION S10 CANNOT DRAW.
+// FR-17 gives every failure ONE notice. The label rides along (the notice state
+// was once the only screen with no AI line on it), and the broker channel must
+// NOT appear — it is attached to answers, not to outages, and offering "your
+// broker can put this in writing" under "the desk isn't available" would read as
+// a refusal the desk never made.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S12: an unavailable desk shows one notice with the label, and no broker channel', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+  // The shape the browser sees when the function is not deployed: supabase-js
+  // surfaces a non-2xx as an error with no body, which answerShape() maps to
+  // `unavailable`. This is FR-17's single path, and the state the page is in
+  // RIGHT NOW on the live site.
+  await routeHelpAsk(page, { message: 'not found' }, { status: 404 });  // ungated: no in-flight assertions here
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+
+  // A blank question must not reach the endpoint at all.
+  let asked = 0;
+  page.on('request', r => { if (/\/functions\/v1\/help-ask/.test(r.url())) asked++; });
+  await page.locator('.k-help__input').fill('   ');
+  await page.locator('.k-help__ask').click();
+  await expect(page.locator('.k-error'), 'a blank question produced no error').not.toHaveText('');
+  expect(asked, 'a blank question reached the endpoint').toBe(0);
+
+  await page.locator('.k-help__input').fill('Where do I see my policies?');
+  await page.locator('.k-help__ask').click();
+
+  await expect(page.locator('.k-help__notice'), 'no notice rendered for a failed ask')
+    .toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('.k-help__notice')).toContainText(/isn't available|couldn't|try again/i);
+  await expect(page.locator('.k-help__ai'), 'the AI label is missing in the NOTICE state').toHaveCount(1);
+  await expect(page.locator('.k-help__a'), 'an answer rendered alongside a failure notice').toHaveCount(0);
+  await expect(page.locator('.k-help__broker'),
+    'the broker channel rendered under a FAILURE notice — it belongs to answers, not outages').toHaveCount(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S13 — THE BACK FLOW, AND THE TWO-IDENTITY CASE.
+// Two things CLAUDE.md records as absent, in one scenario because they share a
+// mechanism: `lastAsk`, the module-level cache that survives a hash navigation.
+//
+//   · test.md requires a back-flow test for any new back affordance. FR-11
+//     invites the client to follow a credited source to check an answer, and
+//     before the cache existed doing so DISCARDED the answer — the back control
+//     promised "Back to help" and delivered an empty page, and re-asking cost
+//     another paid call and one of twenty hourly slots.
+//   · That cache then leaked ACROSS A SIGN-OUT: module state outlives one, so
+//     the next person to sign in on the same tab saw the previous client's
+//     question, answer and record lines. A security review caught it after the
+//     push; this is the test that would have caught it instead. The identity
+//     really changes here — the app's own sign-out button and login form run,
+//     against a gateway fixture that issues a session for whichever identity was
+//     posted and a REST fixture scoped to the bearer's `sub`.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S13: following a credit and coming back restores the answer — but only for the client who asked it', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+  await routeHelpAsk(page, ANSWER_PAYLOAD);
+
+  // HELP'S OWN BACK ROW is the new affordance, so it is the one test.md requires
+  // a flow test for: arrive from a real Keep page and the control must point at
+  // THAT page, not at a hardcoded parent.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  const back = page.locator('.k-backrow a.k-back');
+  await expect(back, "Help has no back control after arriving from another Keep page").toHaveCount(1);
+  await expect(back, 'the back control is not origin-aware — it does not point at where we came from')
+    .toHaveAttribute('href', '#/keep/list');
+
+  await page.locator('.k-help__input').fill('Where do I see my policies?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.locator('.k-help__a')).toHaveCount(1, { timeout: 15_000 });
+
+  // FOLLOW THE CREDIT — the thing FR-11 exists to invite.
+  await page.locator('.k-help__src a.k-ilink').first().click();
+  await expect(page.locator('.k-help__a'), 'still on the Help page after following a credit').toHaveCount(0);
+
+  // ⚠️ RETURNING USES THE BROWSER BUTTON, and that is a finding rather than a
+  // convenience. The credited destinations are the Keep's own screens, and
+  // `originBackRow()` is rendered by only three call sites — entities.js (x2) and
+  // help-view.js. `#/keep/insurance` is not one, so a client who follows a credit
+  // to check an answer has no IN-APP way back; this asserted a back row there at
+  // first and failed for that reason. Recorded in CLAUDE.md; not fixed here,
+  // because adding one is a change to keep.js's own views, not to this feature.
+  await page.goBack();
+
+  // RESTORED: the answer and the question the client left behind.
+  await expect(page.locator('.k-help__a'), 'coming back from a credited source lost the answer')
+    .toHaveCount(1, { timeout: 10_000 });
+  await expect(page.locator('.k-help__q')).toHaveText('Where do I see my policies?');
+  await expect(page.locator('.k-help__input')).toHaveValue('Where do I see my policies?');
+
+  // ── A DIFFERENT PERSON SIGNS IN ON THE SAME TAB ──────────────────────────
+  // Via the ACCOUNT page, not the app bar: the bar's sign-out lives inside a
+  // header menu that has to be opened first, and this scenario is about identity
+  // isolation, not about the menu. `#/keep/account` renders one directly
+  // (keep.js renderKeepAccount).
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard'), 'sign-out did not reach the login card').toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.k-authcard input[type=text]').fill('other');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h'), 'the second identity did not reach the dashboard')
+    .toBeVisible({ timeout: 15_000 });
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__a'),
+    "the previous client's ANSWER was shown to the next person to sign in").toHaveCount(0);
+  await expect(page.locator('.k-help__src'),
+    "the previous client's RECORD LINES were shown to the next person to sign in").toHaveCount(0);
+  await expect(page.locator('.k-help__input'),
+    "the previous client's QUESTION was left in the ask box").toHaveValue('');
+  // The page is still a working Help page for them, not a blank region.
+  await expect(page.locator('.k-help__ai')).toHaveCount(1);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

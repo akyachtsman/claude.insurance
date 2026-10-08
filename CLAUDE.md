@@ -229,8 +229,16 @@ sandbox. A stale ceiling reads as current and silently suppresses a check that
 would catch a real defect — this one suppressed two whole viewport profiles.
 
 **What still does not run here: S5/S6/S9**, which need a live Supabase read the
-sandbox browser cannot complete. That half of the record is unchanged and was
-NOT re-measured on 2026-10-06.
+sandbox browser cannot complete. Re-measured 2026-10-08: S5 and S6 still fail
+locally, and they fail identically on the pre-change spec — checked explicitly
+before attributing the local suite's state to a new change.
+
+**S11–S13 DO run here, on all four projects** (measured 2026-10-08: 12 passed,
+~32s, desktop + tablet + mobile-chrome + iphone). They are the Keep's first
+locally-executable authenticated scenarios, and the reason they work is that the
+route guard reads `localStorage` rather than the network — see the S11–S13 record
+below. That does not change the S5/S6/S9 line: those exercise real reads, and
+these intercept them.
 
 ⚠️ **The ladder grades browser STARTUP only, and says so itself:** *"network
 egress, DNS, TLS, filesystem limits and every other sandbox constraint are all
@@ -520,28 +528,58 @@ reuse is not a drop-in either.
 Also missing while this stands: the entity **subtype** ("LLC") is never sent, so
 "what kind of entity is Coastal Cafe?" can only answer "business".
 
-### ⚠️ OPEN — nothing executes `help-view.js`, the only MODEL-INDEPENDENT layer
+### ✅ RESOLVED — `help-view.js`'s answer branch is executed (S11–S13, 2026-10-08)
 
-**Found by review round 4. Recorded, not fixed.** `specs/003-help-desk/plan.md`
-Key decision 3 names the view the one layer that cannot be talked out of the
-unconditional AI-generated label and the FR-8 broker hand-off — and no test runs
-its answer branch:
-- **S10 self-skips** off `LIVE_TARGET` on the local server, and against the live
-  site it can only reach the **notice** branch until `help-ask` is deployed.
-- Its `.k-help__broker` assertion sits behind `if (count('.k-help__a'))`, so it is
-  skipped on exactly the runs that cannot produce an answer.
-- `help-view.js` has **no unit tests** (it is DOM code; the repo has no jsdom).
+Was OPEN: `specs/003-help-desk/plan.md` Key decision 3 names the view the only
+**model-independent** layer — it renders the AI label (FR-10) and the broker
+channel (FR-8) on every answer regardless of payload — and nothing ran that
+branch. S10 self-skips off `LIVE_TARGET` locally, reaches only the NOTICE branch
+live until `help-ask` deploys, and its broker assertion sits behind
+`if (answer present)` so it is skipped on exactly the runs that cannot answer.
 
-The reviewer demonstrated the gap is closable in ~100 lines: stub the function
-response with Playwright `page.route` plus a seeded `localStorage` session, which
-reaches the answer branch with no backend and no paid call. That is the
-highest-value remaining test work on this feature. It is **not** the committed
-offline `supabase.js` overlay CLAUDE.md forbids — `page.route` intercepts the
-network, it does not replace a module.
-Also absent: a back-flow test (`test.md` requires one for any new back
-affordance — `help-view.js`'s "Back to help" and the credited links) and a
-two-identity scenario, which is what would have caught the `lastAsk` sign-out
-leak instead of a security review catching it after the push.
+**Closed by S11, S12 and S13** — three scenarios that need no backend and no paid
+call, all four viewport projects green locally (webkit included). What each one
+asserts lives in the **Project-Specific Test Scenarios** table below and nowhere
+else: a second copy here would be the two-records-one-fact drift this file has
+been bitten by more than once.
+
+**How it works, and why it is not the overlay this file forbids.** The guard calls
+`getSession()` (`js/main.js:97`), which reads `localStorage` with **no network
+call** while unexpired, then passes `session.user` into `ensureData()` — so
+`/auth/v1/user` is never requested. The storage key is read off the vendored
+client itself (`sb-${hostname.split(".")[0]}-auth-token`), and the corpus is
+fetched **relatively**, so the local static server serves the real 15-topic file
+and credits resolve through the real corpus. Only `/rest/v1/*` and
+`/functions/v1/help-ask` are intercepted, with `page.route`. **Nothing touches the
+app's modules** — the real client, adapter and views run unmodified, which is the
+distinction from the committed `supabase.js` overlay this file rules out (that
+rule is about a mocked DATA PATH shipping in the app).
+The REST fixture is keyed on the **bearer's `sub`**, not on the seeded user, so
+S13's identity switch is genuinely owner-scoped the way RLS is.
+
+**Mutation-tested, 10 of 10 caught**, including the two historical defects: gating
+the broker channel on the model-controlled `reason`, and dropping the owner stamp
+from the restore (which reproduces the sign-out leak a security review caught
+after the fact). ⚠️ **One mutation survived the first version** — deleting the AI
+label from the in-flight branch — because the in-flight assertions used
+`toHaveCount`, which RETRIES: by the time it polled, the response had arrived and
+the answer had restored the label, so it passed against the wrong state (visible
+in the duration: 1.4s instead of 6.3s). A transient state cannot be checked with
+a retrying assertion. `routeHelpAsk` now takes a **gate** the test releases, so
+the response cannot have arrived and one non-retrying snapshot is exact.
+
+### ⚠️ Recorded — a credited source has no in-app way back
+
+Found writing S13, 2026-10-08. FR-11 invites the client to follow a credited
+source to check an answer — and the destinations are the Keep's own screens,
+where `originBackRow()` is rendered by only **three** call sites: `entities.js`
+(×2) and `help-view.js`. `#/keep/insurance`, the commonest credit target, is not
+one. So a client who follows a credit has no in-app route back; only the browser
+button. S13 asserted a back row there at first and failed for exactly this reason,
+and now uses `page.goBack()` with the finding recorded beside it.
+Not fixed here because adding one is a change to `keep.js`'s own views, not to
+this feature — but it is the cheapest of the open UX items, and it undercuts the
+"follow it and check" promise FR-11 is built on.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
@@ -705,6 +743,9 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S8 | Contact validation (deferred-PII guardrail) | On the contact step: submitting with no name shows `.error`; name without email/phone shows an "email or phone" error; the step is not left until valid | A lead is accepted without a name or any contact method |
 | S9 | Keep auth gate | Deep-link `#/keep` while signed out → redirects to the login form (`.k-authcard`). Submitting the prefilled demo credential reaches the dashboard (`.k-welcome__h`, "Welcome back, …"); a wrong password shows `.k-error` and stays on login. Sign-out returns to login. | Unauthenticated `#/keep` renders the dashboard, valid login fails to enter, or invalid login silently proceeds |
 | S10 | Help desk page | Signed in, open `#/keep/help` → heading `.k-h1` "Help", the AI-generated label (`.k-help__ai`) present **before** any question is asked, suggestion chips (`.k-chiptog`) and the ask box (`.k-help__input`). Submitting a blank question shows `.k-error` and sends nothing. Submitting a real question yields **either** an answer (`.k-help__a`) or the unavailable notice (`.k-help__notice`) — never a blank region, and the `.k-help__ai` label is present in the answer case too | The AI-generated label is missing in either state, a blank question reaches the endpoint, or the answer region stays empty after an ask |
+| S11 | Help desk — the ANSWER branch (offline harness, **runs locally**) | Seeded session + `page.route`: the AI label is present before the ask, **while the request is held open**, and in the answer; the question is echoed; `.k-help__src` credits the topic by its **corpus title** (not the wire id) and carries the record line; `.k-help__broker` renders on a payload whose `reason` is `answered`, with a link to `#/keep/insurance`; exactly one `.k-help__ai` | The label is dropped in any of the three states, the broker channel is gated on the wire's `reason`, a credit renders as its id, or the record line is missing |
+| S12 | Help desk — the NOTICE branch (offline harness, **runs locally**) | A 404 from the function yields exactly one `.k-help__notice`, the label present, **no** `.k-help__a` and **no** `.k-help__broker`. A blank question shows `.k-error` and reaches the endpoint zero times | The notice state has no label, an answer renders beside a failure, the broker channel appears under an outage, or a blank question is sent |
+| S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit and returning restores the answer and the question. Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | The back control is hardcoded, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
