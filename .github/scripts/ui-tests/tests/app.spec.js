@@ -2696,6 +2696,28 @@ function routeHelpAsk(page, body, { status = 200, gate = false } = {}) {
   return armed.then(() => release);
 }
 
+// Several asks, each served its OWN body and released INDEPENDENTLY, so a test
+// can land them out of order. routeHelpAsk above holds one gate for every
+// request, which cannot express "the second answer arrives before the first" —
+// and that ordering is the only way to exercise two live renders of the Help
+// page, each with its own `inFlight` controller.
+// Returns `release(i)`, which lets request i (0-based, in arrival order) answer.
+function routeHelpAskSequence(page, bodies) {
+  const gates = bodies.map(() => { let r = () => {}; const p = new Promise((res) => { r = res; }); return { p, r }; });
+  let n = 0;
+  const armed = page.route(FN_RE, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    const i = n++;
+    if (i >= bodies.length) throw new Error(`routeHelpAskSequence: request ${i + 1} but only ${bodies.length} bodies`);
+    await gates[i].p;
+    return route.fulfill({
+      status: 200, headers: { ...CORS, 'content-type': 'application/json' },
+      body: JSON.stringify(bodies[i]),
+    });
+  });
+  return armed.then(() => (i) => gates[i].r());
+}
+
 // A payload shaped exactly as handler.ts sends one on the success path:
 // `usedTopics` are corpus IDS (titles are read back from the real corpus by
 // creditedTopics, per CLAUDE.md's "one canonical label" rule — a model's own
@@ -2708,6 +2730,18 @@ const ANSWER_PAYLOAD = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ EVERY POST-NAVIGATION HEADING ASSERTION IN S11-S15 NAMES ITS OWN PAGE, and
+// that is not style. `await expect(page.locator('.k-h1')).toBeVisible()` after a
+// goto passes INSTANTLY against the heading of the page you are leaving — every
+// Keep inner page has a `.k-h1` — so it waits for nothing, the test moves on
+// before the destination has mounted, and two async renders race. It surfaced as
+// "element was detached from the DOM" on a fill, which reads like a race in the
+// app and is not one. Measured headings: list/grid "Entities", assets "Assets",
+// insurance "Policies", requests "My requests", request "Request a policy
+// enhancement", account "Account", documents "Documents", help "Help".
+// This is the same class as the dead `.app-header h1` selector CLAUDE.md
+// records: an assertion that cannot fail is not a check.
+//
 // S11 — THE ANSWER BRANCH OF help-view.js, EXECUTED.
 // plan.md Key decision 3 calls this the only model-independent layer. Every
 // assertion below is a property the VIEW must hold whatever the payload says,
@@ -2863,7 +2897,7 @@ test('S13: following a credit and coming back restores the answer — but only f
   // a flow test for: arrive from a real Keep page and the control must point at
   // THAT page, not at a hardcoded parent.
   await page.goto('./#/keep/list');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
   const back = page.locator('.k-backrow a.k-back');
@@ -2913,7 +2947,7 @@ test('S13: following a credit and coming back restores the answer — but only f
   // isolation, not about the menu. `#/keep/account` renders one directly
   // (keep.js renderKeepAccount).
   await page.goto('./#/keep/account');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
   await page.getByRole('button', { name: /sign out/i }).first().click();
   await expect(page.locator('.k-authcard'), 'sign-out did not reach the login card').toBeVisible({ timeout: 10_000 });
 
@@ -2956,7 +2990,7 @@ test('S13: following a credit and coming back restores the answer — but only f
   await page.goto('./#/keep/add-asset');
   await expect(page.locator('.k-progress')).toBeVisible({ timeout: 10_000 });
   await page.goto('./#/keep/assets');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/assets/i, { timeout: 10_000 });
   await expect(page.locator('.k-backrow'),
     'a completed single-use form is still offered as a back destination').toHaveCount(0);
 
@@ -2968,9 +3002,9 @@ test('S13: following a credit and coming back restores the answer — but only f
   //     the fix it read a bare "Back" pointing at the form just submitted, which
   //     is how a duplicate enhancement request gets created.
   await page.goto('./#/keep/request');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/request a policy enhancement/i, { timeout: 10_000 });
   await page.goto('./#/keep/requests');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/my requests/i, { timeout: 10_000 });
   await expect(page.locator('.k-backrow a.k-back'),
     'My requests points its back control at the request form it just submitted')
     .toHaveAttribute('href', '#/keep');
@@ -2982,9 +3016,9 @@ test('S13: following a credit and coming back restores the answer — but only f
   //     the tail passed without it: the suite proved the exclusions it added and
   //     nothing proved what they must not swallow.
   await page.goto('./#/keep/requests');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/my requests/i, { timeout: 10_000 });
   await page.goto('./#/keep/insurance');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/policies/i, { timeout: 10_000 });
   await expect(page.locator('.k-backrow a.k-back'),
     'the My requests LIST was swallowed by the request-form exclusion')
     .toHaveAttribute('href', '#/keep/requests');
@@ -3034,7 +3068,7 @@ test('S14: an answer that arrives after its asker signed out is never shown to t
   // sign-out directly — the app-bar one is inside a header menu, and this
   // scenario is about identity, not menus.
   await page.goto('./#/keep/account');
-  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
   await page.getByRole('button', { name: /sign out/i }).first().click();
   await expect(page.locator('.k-authcard'), 'sign-out did not reach the login card').toBeVisible({ timeout: 10_000 });
 
@@ -3070,6 +3104,81 @@ test('S14: an answer that arrives after its asker signed out is never shown to t
     "the previous client's question was left in the ask box").toHaveValue('');
   // Still a working Help page for B, not a blank region.
   await expect(page.locator('.k-help__ai')).toHaveCount(1);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S15 — TWO LIVE RENDERS. The newest ask owns the cache.
+// `lastAsk` is module-level; `inFlight` is per render. So a newer render's ask
+// does not abort an older render's request, and both are live at once. If the
+// older one lands LAST, an unconditional write replaced the shared cache with a
+// stale question and answer — invisible on screen, because the page still shows
+// the newer one, and revealed only when the client follows a credit and comes
+// back. Found by Codex; this drives the out-of-order landing directly.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S15: an older ask landing last does not overwrite the newer cached answer', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  const OLD = { ...ANSWER_PAYLOAD, answer: 'OLDER ANSWER about the first question.' };
+  const NEW = { ...ANSWER_PAYLOAD, answer: 'NEWER ANSWER about the second question.' };
+
+  await seedKeepSession(page, 'a');
+  const release = await routeHelpAskSequence(page, [OLD, NEW]);
+
+  // RENDER 1 asks, and its request is held.
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await page.locator('.k-help__input').fill('FIRST question');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  // AWAY AND BACK — a SECOND renderKeepHelp(), with its own `inFlight`. Render
+  // 1's request is still live, because nothing here can abort it.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+
+  // ⚠️ SETTLE BEFORE INTERACTING. Measured: arriving at Help produces TWO
+  // childList additions to <main> within ~100ms — the router clears and
+  // `renderKeepHelp()` mounts after awaiting `loadHelpGuide()` — and then it is
+  // stable. The first version of this scenario filled the ask box in that window
+  // and failed with "element was detached from the DOM", which reads like a race
+  // in the app and is not one. Waiting on a node the FINAL mount renders, then a
+  // short settle, is deterministic; `.k-h1` alone is not, because the first mount
+  // already carries it.
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await page.waitForTimeout(300);
+
+  // RENDER 2 asks.
+  await page.locator('.k-help__input').fill('SECOND question');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  // OUT OF ORDER: the SECOND request answers first, the FIRST lands after it.
+  release(1);
+  await expect(page.locator('.k-help__a'), 'the newer answer never rendered').toContainText(/NEWER ANSWER/, { timeout: 10_000 });
+  release(0);
+  // Let the older response land and attempt its write before reading the cache.
+  await page.waitForTimeout(1_500);
+
+  // THE CACHE IS READ ON RENDER, so leave and come back — exactly what following
+  // a credited source and returning does.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+
+  await expect(page.locator('.k-help__a'),
+    'coming back restored the OLDER answer — a late request overwrote the newer cache')
+    .toContainText(/NEWER ANSWER/, { timeout: 10_000 });
+  await expect(page.locator('.k-help__a'), 'the older answer is what was restored').not.toContainText(/OLDER ANSWER/);
+  await expect(page.locator('.k-help__q'), 'the restored question is the older one').toHaveText('SECOND question');
+  await expect(page.locator('.k-help__input')).toHaveValue('SECOND question');
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

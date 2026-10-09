@@ -886,6 +886,31 @@ Still true and deliberately unchanged: the add-asset cancel reads a static
 while its destination is computed. Cosmetic, and it belongs to the form widget
 rather than to this flow.
 
+### ⚠️ A `.k-h1` VISIBILITY ASSERTION AFTER A NAVIGATION CHECKS NOTHING
+
+Found 2026-10-09 writing S15, and it had been latent in S13 since the day before.
+**Every** Keep inner page renders a `.k-h1`, so
+`await expect(page.locator('.k-h1')).toBeVisible()` immediately after a `goto`
+passes **against the heading of the page being left**. It waits for nothing: the
+test moves on before the destination has mounted, and two async renders race.
+
+It surfaced as `locator.fill` failing with *"element was detached from the DOM"*
+— which reads like a race in the **app** and is not one. Measured with a
+MutationObserver: arriving at Help produces two childList additions to `<main>`
+within ~100 ms (the router clears, then `renderKeepHelp()` mounts after awaiting
+`loadHelpGuide()`), and is stable after that. The interaction was landing inside
+that window because the preceding assertion had not waited at all.
+
+Fixed by making all nine of them name their own page. **Measured** headings, not
+guessed: `list`/`grid` "Entities", `assets` "Assets", `insurance` "Policies",
+`requests` "My requests", `request` "Request a policy enhancement", `account`
+"Account", `documents` "Documents", `help` "Help". S11–S15 then went 5/5 on three
+consecutive runs where they had been intermittent.
+
+This is the same class as the dead `.app-header h1` selector recorded in the UI
+Test Configuration table: **an assertion that cannot fail is not a check.** The
+difference is that a dead selector fails loudly and this one passes quietly.
+
 ### ⚠️ OPEN (owner decision) — the route guard is a net, not a proof
 
 `check-keep-back-routes.js` asserts `BACK_ELIGIBLE`'s keys are exactly
@@ -1091,6 +1116,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S12 | Help desk — the NOTICE branch (offline harness, **runs locally**) | A 404 from the function yields exactly one `.k-help__notice`, the label present, **no** `.k-help__a` and **no** `.k-help__broker`. A blank question shows `.k-error` and reaches the endpoint zero times | The notice state has no label, an answer renders beside a failure, the broker channel appears under an outage, or a blank question is sent |
 | S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit, the **destination's own** back control points at `#/keep/help` and returning restores the answer and the question; a reload then shows **no** back row (no in-app origin). Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | A back control is hardcoded or missing on a credited destination, one renders on a freshly loaded page, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
 | S14 | Help desk — the SIGN-OUT RACE (offline harness, **runs locally**) | Client A asks with the response **held open**; A signs out via `#/keep/account`; client B signs in; only then is the response released. B's Help page must show **no** `.k-help__a`, **no** `.k-help__src`, **no** `.k-help__q` and an empty ask box — while still rendering as a working page (`.k-help__ai` present). ⚠️ The settle goes **before** navigating B to Help, not after: `renderKeepHelp()` reads the cache once, at render time, so releasing and navigating straight away renders B's page before the cache is written and the scenario passes against the bug (measured — both mutations survived the first version). | The previous client's answer, credited record values or question appear for the next client to sign in |
+| S15 | Help desk — TWO LIVE RENDERS (offline harness, **runs locally**) | Ask on Help, navigate away, return (a second `renderKeepHelp()`, with its own `inFlight`), ask again — then land the responses **out of order**, newer first. The visible answer is the newer one; leaving and returning must restore the **newer** answer and question, never the older. ⚠️ Needs `routeHelpAskSequence`, which gates each request independently — `routeHelpAsk`'s single gate cannot express the ordering. | A late request overwrites the shared cache, so following a credit and returning restores a stale answer under a stale question |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 

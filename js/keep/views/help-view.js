@@ -39,6 +39,22 @@ const AI_NOTE =
 // review of the commit that added the cache.
 let lastAsk = null;
 
+// Monotonic ask id. MODULE-LEVEL, and the asymmetry it exists to fix is that
+// `lastAsk` is module-level while `inFlight` is PER RENDER: each
+// renderKeepHelp() closes over its own controller, so a newer render's ask does
+// NOT abort an older render's request. Ask on Help, navigate away, come back
+// (a second render), ask again — both requests are live. If the newer one
+// answers first and the older one lands after it, the older write replaced the
+// shared cache with a stale question and answer. The page kept showing the newer
+// answer, so nothing looked wrong until the client followed a credited source
+// and came back, which restores from the cache: the older answer, under the
+// older question. Found by Codex.
+// A generation token rather than hoisting `inFlight` to module scope: two live
+// renders of the same page is the situation being handled, and a shared
+// controller would have one render aborting the other's request as a side effect
+// of being rendered.
+let askSeq = 0;
+
 export async function renderKeepHelp() {
   const guide = await loadHelpGuide();
 
@@ -163,6 +179,7 @@ export async function renderKeepHelp() {
     // now drives the whole race with a held response rather than asserting on
     // the field's presence.
     const asker = getUser()?.id ?? null;
+    const seq = ++askSeq;
 
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
@@ -197,6 +214,10 @@ export async function renderKeepHelp() {
     // mutation means defence in depth, so it is labelled as such rather than
     // left looking load-bearing.
     if ((getUser()?.id ?? null) !== asker) return;
+
+    // A newer ask exists, and it is NOT one this render aborted — see askSeq.
+    // Writing here would replace a newer answer with an older one.
+    if (seq !== askSeq) return;
 
     const shaped = answerShape(payload);
     lastAsk = { shaped, question, owner: asker };
