@@ -177,7 +177,12 @@ const DOCUMENTED = {
   profiles: ["id"],
   entities: ["id", "name", "kind"],
   assets: ["id", "name", "type", "value", "entity_id"],
-  policies: ["line", "carrier", "number", "renewal_date", "premium_amount", "premium_period", "coverages", "asset_id"],
+  // `status` and `effective_date` added 2026-10-09: the prompt invited the model
+  // to decide "still active" and the digest carried only `renewal_date`, so a
+  // cancelled or not-yet-started policy read as active. CLAUDE.md's disclosure
+  // paragraph was widened in the same change, which is what this list gates.
+  policies: ["line", "carrier", "number", "status", "effective_date", "renewal_date",
+             "premium_amount", "premium_period", "coverages", "asset_id"],
 };
 
 test("help-ask selects exactly the columns CLAUDE.md says it discloses", () => {

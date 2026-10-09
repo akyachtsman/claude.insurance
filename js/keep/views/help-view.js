@@ -39,21 +39,46 @@ const AI_NOTE =
 // review of the commit that added the cache.
 let lastAsk = null;
 
-// Monotonic ask id. MODULE-LEVEL, and the asymmetry it exists to fix is that
-// `lastAsk` is module-level while `inFlight` is PER RENDER: each
-// renderKeepHelp() closes over its own controller, so a newer render's ask does
-// NOT abort an older render's request. Ask on Help, navigate away, come back
-// (a second render), ask again — both requests are live. If the newer one
-// answers first and the older one lands after it, the older write replaced the
-// shared cache with a stale question and answer. The page kept showing the newer
-// answer, so nothing looked wrong until the client followed a credited source
-// and came back, which restores from the cache: the older answer, under the
-// older question. Found by Codex.
-// A generation token rather than hoisting `inFlight` to module scope: two live
-// renders of the same page is the situation being handled, and a shared
-// controller would have one render aborting the other's request as a side effect
-// of being rendered.
-let askSeq = 0;
+
+// ⚠️ THE BUSY GATE IS MODULE-LEVEL, and that is the point: `inFlight` below is
+// per render, so it could not survive one. Start an ask, navigate away, come
+// back before it settles — the new renderKeepHelp() builds a fresh `inFlight =
+// null` with every control ENABLED, so a second submit launched a second
+// provider call while the first was still running. Repeat the navigation and the
+// client is billed for several answers and burns several throttle slots, while
+// the UI claims one at a time.
+// That harm was already written down a few lines below ("a second ask does not
+// replace the first, it adds to it") — it was simply only solved WITHIN a
+// render. Found by Codex.
+// Keyed on the owner, not a bare boolean: if A's ask is still in flight when B
+// signs in on the same tab, B must not be locked out of their own desk.
+// Carries `seq` so an earlier ask's completion cannot release a later one's gate.
+// Owners with a provider call in flight. ⚠️ A SET, NOT A SINGLE SLOT, and that
+// is not tidiness — a single slot had a real hole. `pending = { owner }` is
+// overwritten by the next client's ask, so: A asks, A signs out, B signs in and
+// asks (overwriting A's entry), A signs back in and asks — and A's gate is gone,
+// so A now has TWO live calls whose answers can land out of order. A generation
+// token used to sit alongside this to make that safe, and it was the only guard
+// with no scenario driving it. Keying the gate properly removes the hole AND the
+// need for the token: with this, a second ask by the SAME owner is impossible
+// while the first is live, so an out-of-order same-owner pair cannot arise.
+// Cross-owner is handled by the owner captured before the await (S14).
+// Entries are deleted in a `finally`, so nothing accumulates.
+const pendingByOwner = new Set();   // owner ids with a call in flight
+
+// The Help view currently on screen. `ask()` renders its RESULT through this
+// rather than through its own closures, because the render that started an ask
+// may no longer be the one the client is looking at.
+//
+// ⚠️ THIS IS A CONSEQUENCE OF THE GATE ABOVE AND HAD TO BE HANDLED WITH IT.
+// Navigating away mid-ask and back has always meant the answer renders into the
+// FIRST render's nodes, which `mount()` has since detached — so it never reached
+// the screen. That was survivable only because the second render's controls were
+// enabled and the client could ask again; the gate removes that escape, and
+// without this the client would wait, see the controls re-enable, and be shown
+// nothing at all. The answer was already in `lastAsk`, so it appeared on the
+// next visit to Help — which is not a defence of leaving it there.
+let liveView = null;  // { renderAnswer, renderNotice, setBusy, input }
 
 export async function renderKeepHelp() {
   const guide = await loadHelpGuide();
@@ -179,7 +204,11 @@ export async function renderKeepHelp() {
     // now drives the whole race with a held response rather than asserting on
     // the field's presence.
     const asker = getUser()?.id ?? null;
-    const seq = ++askSeq;
+    // REFUSE rather than supersede. Superseding still bills the first call — the
+    // Edge Function keeps going whatever the browser does — so the only thing
+    // that actually protects spend is not sending the second one.
+    if (pendingByOwner.has(asker)) return;
+    pendingByOwner.add(asker);
 
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
@@ -194,10 +223,23 @@ export async function renderKeepHelp() {
       el("p", { class: "k-help__ai", text: AI_NOTE }),
     );
 
-    const payload = await askHelp(question, { signal: controller.signal });
+    let payload;
+    try {
+      payload = await askHelp(question, { signal: controller.signal });
+    } finally {
+      // Release on EVERY exit, including a throw. `askHelp` has a catch-all and
+      // returns a shaped payload rather than throwing, so this is insurance
+      // against that contract changing — not a live case. It matters because a
+      // leaked gate is not a glitch: it locks the client out of the desk
+      // entirely until they reload the page.
+      pendingByOwner.delete(asker);
+    }
     if (controller.signal.aborted) return;        // superseded by a newer ask
     inFlight = null;
-    setBusy(false);
+    // Through liveView: this render may be the detached one. `?? ` falls back to
+    // our own closures so a single render (the ordinary case) is unchanged.
+    const view = liveView ?? { renderAnswer, renderNotice, setBusy, input };
+    view.setBusy(false);
 
     // The client who asked is no longer the client who is here: do not cache
     // this answer and do not render it. `lastAsk` is deliberately left alone
@@ -215,20 +257,18 @@ export async function renderKeepHelp() {
     // left looking load-bearing.
     if ((getUser()?.id ?? null) !== asker) return;
 
-    // A newer ask exists, and it is NOT one this render aborted — see askSeq.
-    // Writing here would replace a newer answer with an older one.
-    if (seq !== askSeq) return;
-
     const shaped = answerShape(payload);
     lastAsk = { shaped, question, owner: asker };
-    if (shaped.ok) renderAnswer(shaped, question); else renderNotice(shaped);
+    if (shaped.ok) view.renderAnswer(shaped, question); else view.renderNotice(shaped);
+    // The ask box of the view on screen, not of the render that asked.
+    if (view.input !== input) view.input.value = question;
 
     // Disabling the focused control drops focus to <body>, and nothing put it
     // back — so after one question a keyboard or screen-reader user had to tab
     // from the top of the page (bar, nav, search, two menus) to ask another.
     // Restored only when WE are the ones who dropped it: if the reader has tabbed
     // somewhere else while waiting, stealing focus back is worse than the bug.
-    if (document.activeElement === document.body) input.focus();
+    if (document.activeElement === document.body) view.input.focus();
   }
 
   const form = el("form", { class: "k-help__form", attrs: { novalidate: "novalidate" },
@@ -256,6 +296,13 @@ export async function renderKeepHelp() {
   // asked it. A null owner on either side never matches, which is the safe
   // direction: it costs a restore, not a disclosure.
   const me = getUser()?.id ?? null;
+  // A render that arrives mid-ask shows the ask as in progress, rather than
+  // offering controls that would launch a second paid call. This is the half of
+  // the module-level gate the client can see.
+  if (me && pendingByOwner.has(me)) setBusy(true);
+  // Registered AFTER the restore check so a render that throws before this point
+  // cannot become the target for an in-flight answer.
+  liveView = { renderAnswer, renderNotice, setBusy, input };
   if (lastAsk && me && lastAsk.owner === me) {
     input.value = lastAsk.question;
     if (lastAsk.shaped.ok) renderAnswer(lastAsk.shaped, lastAsk.question); else renderNotice(lastAsk.shaped);

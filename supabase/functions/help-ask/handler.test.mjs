@@ -402,7 +402,14 @@ const SENTINEL_TABLES = {
 
 // Exactly what CLAUDE.md's "Anthropic is a sub-processor" paragraph lists.
 const MAY_CROSS = ["SENT-entity-name", "SENT-kind", "SENT-asset-name", "SENT-type",
-                   "SENT-line", "SENT-carrier", "SENT-number", "SENT-cov-label", "SENT-cov-limit"];
+                   "SENT-line", "SENT-carrier", "SENT-number", "SENT-cov-label", "SENT-cov-limit",
+                   // Added 2026-10-09 with `effective_date` (asserted by value
+                   // below, being a date): without them the prompt's own
+                   // invitation to judge "still active" had nothing but
+                   // `renewal_date` to work from, so a cancelled policy read as
+                   // active. A correctness fix that widens the constraint, which
+                   // is why it is listed here rather than filtered out.
+                   "SENT-status"];
 
 test("exactly the documented columns cross to the provider — no more, no less", async () => {
   let sent = "";
@@ -424,7 +431,8 @@ test("exactly the documented columns cross to the provider — no more, no less"
     `documented columns did NOT reach the provider: ${missing.join(", ")} — the constraint over-states what is sent`);
 
   // The numeric fields have no sentinel, so assert them by value.
-  for (const [label, v] of [["asset value", "4242"], ["premium", "2400"], ["renewal date", "2027-03-12"]]) {
+  for (const [label, v] of [["asset value", "4242"], ["premium", "2400"], ["renewal date", "2027-03-12"],
+                            ["effective date", "2026-03-12"]]) {
     assert.ok(sent.includes(v), `${label} did not reach the prompt`);
   }
 });

@@ -2715,7 +2715,7 @@ function routeHelpAskSequence(page, bodies) {
       body: JSON.stringify(bodies[i]),
     });
   });
-  return armed.then(() => (i) => gates[i].r());
+  return armed.then(() => ({ release: (i) => gates[i].r(), requests: () => n }));
 }
 
 // A payload shaped exactly as handler.ts sends one on the success path:
@@ -3053,12 +3053,21 @@ test('S14: an answer that arrives after its asker signed out is never shown to t
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));
 
+  // ⚠️ THE SECOND CLIENT DELIBERATELY DOES NOT ASK IN THIS SCENARIO, and that is
+  // the whole reason it exists. `askSeq` is unchanged, so the generation token
+  // cannot fire: the owner captured before the await is the ONLY thing standing
+  // between A's answer and B's screen. An earlier version of this test had B ask
+  // first, which made the seq check fire and let both owner-check mutations pass.
+  // S16 covers the other ordering.
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "CLIENT A'S PRIVATE ANSWER about their dwelling limit." };
+
   await seedKeepSession(page, 'a');
-  const release = await routeHelpAsk(page, ANSWER_PAYLOAD, { gate: true });
+  const fn = await routeHelpAskSequence(page, [A_ANS]);
 
   // CLIENT A ASKS, and the response is held open.
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
   await page.locator('.k-help__input').fill('What is my dwelling limit?');
   await page.locator('.k-help__ask').click();
   await expect(page.getByText(/looking/i), 'the request is not in flight, so there is no race to test')
@@ -3079,21 +3088,22 @@ test('S14: an answer that arrives after its asker signed out is never shown to t
   await expect(page.locator('.k-welcome__h'), 'the second identity did not reach the dashboard')
     .toBeVisible({ timeout: 15_000 });
 
-  // ONLY NOW does A's answer come back. This ordering is the test.
-  release();
+  // The page a sign-in lands on must not offer a back control to the login card.
+  await expect(page.locator('.k-backrow'),
+    'the page a sign-in lands on offers a back control — it points at the login card').toHaveCount(0);
 
-  // ⚠️ SETTLE BEFORE NAVIGATING, NOT AFTER — and this ordering is the whole
-  // test, not a timing nicety. `renderKeepHelp()` reads the cache ONCE, at
-  // render time. The first version of this scenario released the response and
-  // navigated straight to Help, so B's page rendered BEFORE A's response had
-  // landed and written the cache: nothing was there to leak yet, and the
-  // scenario passed against the unfixed code. Both mutations survived it.
-  // A's response has to land, write, and only then can B's render read it.
-  await page.waitForTimeout(1_500);
-
+  // B OPENS HELP and asks NOTHING.
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
 
+  // ONLY NOW does A's answer come back — into a page B is looking at.
+  fn.release(0);
+  await page.waitForTimeout(1_500);
+
+  await expect(page.locator('.k-help__out'),
+    "the previous client's answer rendered into the next client's page")
+    .not.toContainText(/CLIENT A'S PRIVATE ANSWER/);
   await expect(page.locator('.k-help__a'),
     "the previous client's ANSWER was shown to the next client to sign in").toHaveCount(0);
   await expect(page.locator('.k-help__src'),
@@ -3102,83 +3112,178 @@ test('S14: an answer that arrives after its asker signed out is never shown to t
     "the previous client's QUESTION was shown to the next client").toHaveCount(0);
   await expect(page.locator('.k-help__input'),
     "the previous client's question was left in the ask box").toHaveValue('');
-  // Still a working Help page for B, not a blank region.
+
+  // ⚠️ AND NOT IN THE CACHE EITHER. The cache is read on RENDER, so leaving and
+  // returning is where a wrongly-stamped entry surfaces — the assertions above
+  // would pass on a page that simply had not re-read it yet.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__a'),
+    "the previous client's answer was CACHED under the next client's id").toHaveCount(0);
   await expect(page.locator('.k-help__ai')).toHaveCount(1);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S15 — TWO LIVE RENDERS. The newest ask owns the cache.
-// `lastAsk` is module-level; `inFlight` is per render. So a newer render's ask
-// does not abort an older render's request, and both are live at once. If the
-// older one lands LAST, an unconditional write replaced the shared cache with a
-// stale question and answer — invisible on screen, because the page still shows
-// the newer one, and revealed only when the client follows a credit and comes
-// back. Found by Codex; this drives the out-of-order landing directly.
+// S16 — THE OTHER ORDERING: the second client ASKS while the first client's
+// request is still outstanding. Two properties live here and nowhere else:
+//   · the in-flight gate is keyed on the OWNER, so B is not locked out of their
+//     own desk by a departed client's call (a bare boolean passes S15);
+//   · A's older answer landing AFTER B's must not touch B's view or cache — here
+//     the generation token fires before the owner check, since askSeq has moved.
 // ─────────────────────────────────────────────────────────────────────────────
-test('S15: an older ask landing last does not overwrite the newer cached answer', async ({ page, renderWitness }) => {
+test('S16: a second client can ask while the first client\'s call is outstanding, and the late answer is ignored', async ({ page, renderWitness }) => {
   renderWitness();
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));
 
-  const OLD = { ...ANSWER_PAYLOAD, answer: 'OLDER ANSWER about the first question.' };
-  const NEW = { ...ANSWER_PAYLOAD, answer: 'NEWER ANSWER about the second question.' };
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "CLIENT A'S PRIVATE ANSWER about their dwelling limit." };
+  const B_ANS = { ...ANSWER_PAYLOAD, answer: "CLIENT B'S OWN ANSWER about their own policies." };
 
   await seedKeepSession(page, 'a');
-  const release = await routeHelpAskSequence(page, [OLD, NEW]);
+  const fn = await routeHelpAskSequence(page, [A_ANS, B_ANS]);
 
-  // RENDER 1 asks, and its request is held.
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await page.locator('.k-help__input').fill('What is my dwelling limit?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await page.locator('.k-authcard input[type=text]').fill('other');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+
+  // B MUST BE ABLE TO ASK, with A's call still outstanding. A bare-boolean gate
+  // would leave these controls disabled because of a client who has left.
+  await expect(page.locator('.k-help__input'),
+    "the second client is locked out by the first client's in-flight ask").toBeEnabled();
+  await page.locator('.k-help__input').fill('What are my own policies?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+  expect(fn.requests(), "the second client's ask never reached the endpoint").toBe(2);
+
+  // A's OLDER answer lands first, into a page B is looking at.
+  fn.release(0);
+  await page.waitForTimeout(1_500);
+  await expect(page.locator('.k-help__out'),
+    "the previous client's answer rendered into the next client's page")
+    .not.toContainText(/CLIENT A'S PRIVATE ANSWER/);
+
+  // Then B's own.
+  fn.release(1);
+  await expect(page.locator('.k-help__a'),
+    "the second client's own answer never arrived").toContainText(/CLIENT B'S OWN ANSWER/, { timeout: 10_000 });
+
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__a'),
+    "coming back restored the previous client's answer").toContainText(/CLIENT B'S OWN ANSWER/, { timeout: 10_000 });
+  await expect(page.locator('.k-help__out')).not.toContainText(/CLIENT A'S PRIVATE ANSWER/);
+  await expect(page.locator('.k-help__q')).toHaveText('What are my own policies?');
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S15 — THE BUSY GATE SURVIVES A RERENDER, so a second paid call cannot start.
+// `inFlight` is per render. Start an ask, navigate away, come back before it
+// settles, and the new renderKeepHelp() used to build a fresh `inFlight = null`
+// with every control ENABLED — so a second submit launched a second provider
+// call while the first was still running. Repeat the navigation and the client
+// is billed for several answers and burns several throttle slots, while the UI
+// claims one at a time. Aborting the browser's side does not stop the Edge
+// Function, so superseding is not a fix; refusing to send is. Found by Codex.
+// This asserts on the REQUEST COUNT, because that is the thing that costs money
+// — a disabled-looking button that still fires is the defect.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S15: a rerender mid-ask cannot start a second paid call', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  const ONE = { ...ANSWER_PAYLOAD, answer: 'THE ONE ANSWER for the only question asked.' };
+  // Two bodies armed on purpose: if a second request is ever sent, it is served
+  // rather than hanging, so the failure shows up as a COUNT of 2 instead of as a
+  // timeout somewhere unrelated.
+  const TWO = { ...ANSWER_PAYLOAD, answer: 'A SECOND PAID ANSWER that should never have been requested.' };
+
+  await seedKeepSession(page, 'a');
+  const fn = await routeHelpAskSequence(page, [ONE, TWO]);
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
   await page.locator('.k-help__input').fill('FIRST question');
   await page.locator('.k-help__ask').click();
   await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+  expect(fn.requests(), 'the first ask did not reach the endpoint').toBe(1);
 
-  // AWAY AND BACK — a SECOND renderKeepHelp(), with its own `inFlight`. Render
-  // 1's request is still live, because nothing here can abort it.
-  await page.goto('./#/keep/list');
-  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
-  await page.goto('./#/keep/help');
-  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
-
-  // ⚠️ SETTLE BEFORE INTERACTING. Measured: arriving at Help produces TWO
-  // childList additions to <main> within ~100ms — the router clears and
-  // `renderKeepHelp()` mounts after awaiting `loadHelpGuide()` — and then it is
-  // stable. The first version of this scenario filled the ask box in that window
-  // and failed with "element was detached from the DOM", which reads like a race
-  // in the app and is not one. Waiting on a node the FINAL mount renders, then a
-  // short settle, is deterministic; `.k-h1` alone is not, because the first mount
-  // already carries it.
-  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
-  await page.waitForTimeout(300);
-
-  // RENDER 2 asks.
-  await page.locator('.k-help__input').fill('SECOND question');
-  await page.locator('.k-help__ask').click();
-  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
-
-  // OUT OF ORDER: the SECOND request answers first, the FIRST lands after it.
-  release(1);
-  await expect(page.locator('.k-help__a'), 'the newer answer never rendered').toContainText(/NEWER ANSWER/, { timeout: 10_000 });
-  release(0);
-  // Let the older response land and attempt its write before reading the cache.
-  await page.waitForTimeout(1_500);
-
-  // THE CACHE IS READ ON RENDER, so leave and come back — exactly what following
-  // a credited source and returning does.
+  // AWAY AND BACK — a second renderKeepHelp(), with its own `inFlight`. The
+  // first request is still live, because nothing here can abort it.
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
   await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
 
+  // THE GATE SURVIVED THE RERENDER: the fresh controls are disabled.
+  await expect(page.locator('.k-help__ask'),
+    'the rerendered Ask button is enabled while a call is still in flight').toBeDisabled();
+  await expect(page.locator('.k-help__input'),
+    'the rerendered ask box is editable while a call is still in flight').toBeDisabled();
+
+  // ⚠️ AND SUBMITTING ANYWAY SENDS NOTHING — asserted by BYPASSING `disabled`,
+  // because that attribute is not the protection. A `click({ force: true })` on
+  // a disabled button fires no handler at all, so the first version of this
+  // check passed with the JS gate DELETED: it was testing the styling, not the
+  // spend. Re-enabling the controls in the page and calling requestSubmit() is
+  // the hostile version — "a disabled-looking button that still fires" — and it
+  // reaches `ask()` exactly as a stale enabled render would.
+  await page.evaluate(() => {
+    const inp = document.querySelector('.k-help__input');
+    const btn = document.querySelector('.k-help__ask');
+    inp.disabled = false; btn.disabled = false;
+    inp.value = 'SECOND question, while the first is still in flight';
+    document.querySelector('form.k-help__form').requestSubmit();
+  });
+  await page.waitForTimeout(500);
+  expect(fn.requests(),
+    'a rerender mid-ask started a SECOND paid provider call').toBe(1);
+
+  // The one answer lands — and it must reach the render on SCREEN, not the
+  // detached one that asked for it.
+  fn.release(0);
   await expect(page.locator('.k-help__a'),
-    'coming back restored the OLDER answer — a late request overwrote the newer cache')
-    .toContainText(/NEWER ANSWER/, { timeout: 10_000 });
-  await expect(page.locator('.k-help__a'), 'the older answer is what was restored').not.toContainText(/OLDER ANSWER/);
-  await expect(page.locator('.k-help__q'), 'the restored question is the older one').toHaveText('SECOND question');
-  await expect(page.locator('.k-help__input')).toHaveValue('SECOND question');
+    'the answer never reached the render the client is looking at').toContainText(/THE ONE ANSWER/, { timeout: 10_000 });
+  expect(fn.requests(), 'more than one call was made in total').toBe(1);
+
+  // ⚠️ AND THE GATE MUST RELEASE. Controls re-enabling is not evidence — that is
+  // `setBusy(false)`, which runs whatever the gate does, so a LEAKED gate passed
+  // the first version of this test while silently refusing every later ask. The
+  // only proof is that a fresh ask reaches the endpoint.
+  await expect(page.locator('.k-help__input')).toBeEnabled({ timeout: 10_000 });
+  await page.locator('.k-help__input').fill('A LATER question, after the first settled');
+  await page.locator('.k-help__ask').click();
+  fn.release(1);
+  await expect(page.locator('.k-help__a'),
+    'a later ask was refused — the in-flight gate leaked and locked the desk')
+    .toContainText(/A SECOND PAID ANSWER/, { timeout: 10_000 });
+  expect(fn.requests(), 'the later ask did not reach the endpoint').toBe(2);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

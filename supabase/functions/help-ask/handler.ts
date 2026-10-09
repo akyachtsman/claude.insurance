@@ -196,6 +196,8 @@ interface PolicyRow {
   line: string;
   carrier: string | null;
   number: string | null;
+  status: string | null;
+  effective_date: string | null;
   renewal_date: string | null;
   premium_amount: number | null;
   premium_period: string | null;
@@ -274,7 +276,7 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
   if (!assetIds.length) return facts;
 
   const policies = await inChunks<PolicyRow>(assetIds, (chunk) => db.from("policies")
-    .select("line, carrier, number, renewal_date, premium_amount, premium_period, coverages, asset_id")
+    .select("line, carrier, number, status, effective_date, renewal_date, premium_amount, premium_period, coverages, asset_id")
     .in("asset_id", chunk), "policies");
   const assetName = new Map(assets.map((a) => [a.id, a.name] as const));
   for (const p of policies) {
@@ -295,6 +297,30 @@ async function ownRecords(db: Db, owner: string): Promise<RecordFact[]> {
     // plainest FR-8 fact there is, so the fix is to surface it, not to stop
     // selecting it — and the documented scope is now accurate either way.
     if (p.number) facts.push({ kind: "policy", name: p.line, label: "policy number", value: String(p.number) });
+    // ⚠️ STATUS AND EFFECTIVE DATE — ADDED 2026-10-09, and they are a
+    // CORRECTNESS fix, not an enrichment. The prompt tells the model to work out
+    // `"still active"` from today's date, and the only date it had was
+    // `renewal_date`. So a policy that is CANCELLED, or one whose cover has not
+    // STARTED yet, could be read back as active: a future renewal date looks
+    // exactly like an active policy renewing later. Answering "is my flood
+    // policy still active?" wrongly is the worst class of error this feature can
+    // make, because reading a policy state back is precisely what it is for.
+    // Found by Codex; both columns existed in `policies` the whole time and
+    // neither was selected.
+    //
+    // Disclosure: `effective_date` is ALREADY rendered to the client on the
+    // policy detail page (`policies-view.js` — "Effective"), and `status` is
+    // broker-written policy state, not contact data, credentials or document
+    // content. So this widens the digest by two low-sensitivity fields the
+    // client's own screens already show or could. CLAUDE.md's Anthropic
+    // data-scope paragraph is updated in the same change — per its own rule that
+    // widening the select is a change to that constraint, not an implementation
+    // detail.
+    if (p.status) facts.push({ kind: "policy", name: p.line, label: "status", value: String(p.status) });
+    facts.push({
+      kind: "policy", name: p.line, label: "cover starts",
+      value: p.effective_date ? String(p.effective_date) : "no effective date on file",
+    });
     // Absent is stated as absent. `null` renewal is a real state in this schema
     // and the repo's rule is that it is never rendered as a confident value.
     facts.push({

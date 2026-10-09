@@ -407,7 +407,25 @@ profile**, never by listing a directory.
   a **compact digest** of that client's own records to the Claude API to ground
   the answer. The digest is **exactly these columns** (`help-ask/handler.ts` — the logic moved there so it could be executed):
   entities `name, kind`; assets `name, type, value`; policies `line, carrier,
-  number, renewal_date, premium_amount, premium_period, coverages`. **`coverages`
+  number, status, effective_date, renewal_date, premium_amount, premium_period,
+  coverages`.
+  ⚠️ **`status` and `effective_date` were added 2026-10-09 — a CORRECTNESS fix,
+  not an enrichment.** The prompt told the model to work out `"still active"` and
+  the digest carried only `renewal_date`, so a **cancelled** policy, or one whose
+  cover had not started, read as active: a future renewal date looks exactly like
+  an active policy renewing later. Answering "is my flood policy still active?"
+  wrongly is the worst error this feature can make, because reading a policy
+  state back is precisely what it is for. Both columns had existed in `policies`
+  all along and neither was selected; found by Codex.
+  What it costs in disclosure is small and checkable: `effective_date` is
+  **already rendered to the client** on the policy detail page ("Effective"), and
+  `status` is broker-written policy state — not contact details, credentials or
+  document content. The prompt now names both and **forbids the inference it used
+  to invite** ("a renewal date in the future does NOT by itself mean a policy is
+  active"). Two tests gate this list against the code and **both failed on the
+  change**, which is exactly their job: `handler.test.mjs`'s sentinel sweep
+  ("no more, no less") and `schema.test.mjs`'s documented-column list.
+  **`coverages`
   was added 2026-10-06 and is the widest of these** — it is the broker-written
   jsonb the policy view renders limits from, so coverage LABELS and LIMITS now
   cross the boundary (capped at 20 lines per policy, since it is unbounded and
@@ -1115,9 +1133,9 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S11 | Help desk — the ANSWER branch (offline harness, **runs locally**) | Seeded session + `page.route`: the AI label is present before the ask, **while the request is held open**, and in the answer; the question is echoed; `.k-help__src` credits the topic by its **corpus title** (not the wire id) and carries the record line; `.k-help__broker` renders on a payload whose `reason` is `answered`, with a link to `#/keep/insurance`; exactly one `.k-help__ai` | The label is dropped in any of the three states, the broker channel is gated on the wire's `reason`, a credit renders as its id, or the record line is missing |
 | S12 | Help desk — the NOTICE branch (offline harness, **runs locally**) | A 404 from the function yields exactly one `.k-help__notice`, the label present, **no** `.k-help__a` and **no** `.k-help__broker`. A blank question shows `.k-error` and reaches the endpoint zero times | The notice state has no label, an answer renders beside a failure, the broker channel appears under an outage, or a blank question is sent |
 | S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit, the **destination's own** back control points at `#/keep/help` and returning restores the answer and the question; a reload then shows **no** back row (no in-app origin). Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | A back control is hardcoded or missing on a credited destination, one renders on a freshly loaded page, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
-| S14 | Help desk — the SIGN-OUT RACE (offline harness, **runs locally**) | Client A asks with the response **held open**; A signs out via `#/keep/account`; client B signs in; only then is the response released. B's Help page must show **no** `.k-help__a`, **no** `.k-help__src`, **no** `.k-help__q` and an empty ask box — while still rendering as a working page (`.k-help__ai` present). ⚠️ The settle goes **before** navigating B to Help, not after: `renderKeepHelp()` reads the cache once, at render time, so releasing and navigating straight away renders B's page before the cache is written and the scenario passes against the bug (measured — both mutations survived the first version). | The previous client's answer, credited record values or question appear for the next client to sign in |
-| S15 | Help desk — TWO LIVE RENDERS (offline harness, **runs locally**) | Ask on Help, navigate away, return (a second `renderKeepHelp()`, with its own `inFlight`), ask again — then land the responses **out of order**, newer first. The visible answer is the newer one; leaving and returning must restore the **newer** answer and question, never the older. ⚠️ Needs `routeHelpAskSequence`, which gates each request independently — `routeHelpAsk`'s single gate cannot express the ordering. | A late request overwrites the shared cache, so following a credit and returning restores a stale answer under a stale question |
-
+| S14 | Help desk — the SIGN-OUT RACE, owner check (offline harness, **runs locally**) | Client A asks with the response **held open**; A signs out via `#/keep/account`; client B signs in and **asks nothing**; only then is the response released. Nothing of A's may render into B's page or be cached under B's id — checked again after leaving and returning, since the cache is read on render. ⚠️ **B deliberately does not ask**: that keeps the generation state unchanged so the owner captured before the await is the ONLY guard in play. An earlier version had B ask, which let both owner-check mutations pass. | The previous client's answer, credits or question reach the next client, on screen or via the cache |
+| S15 | Help desk — the BUSY GATE survives a rerender (offline harness, **runs locally**) | Ask, navigate away, return before it settles: the rerendered controls must be disabled, and **re-enabling them in the page and calling `form.requestSubmit()` must still send nothing** — asserted on the endpoint's REQUEST COUNT, because that is what costs money. Then the answer must reach the render **on screen** (not the detached one that asked), and a fresh ask afterwards must reach the endpoint. ⚠️ Both halves were added because the first version passed with the gate deleted (it was testing `disabled`, which blocks the handler by itself) and with the gate LEAKED (controls re-enable via `setBusy`, whatever the gate does). | A rerender mid-ask starts a second paid provider call, the answer never reaches the screen, or the gate leaks and locks the desk |
+| S16 | Help desk — a second client asks mid-flight (offline harness, **runs locally**) | A asks (held), A signs out, B signs in and **asks their own question** — which must reach the endpoint, since the gate is keyed on the owner and a bare boolean would lock B out over a departed client's call. A's older answer lands **first**: it must not render into B's page. Then B's own lands and must survive a leave-and-return. | The second client is locked out, or the first client's late answer displaces theirs |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

@@ -316,7 +316,14 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
   const records = renderFacts(facts);
 
   const content = [
-    typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Renewal and expiry dates below are absolute; work out "soon", "still active" and "overdue" from this date, never from your own.` : "",
+    // ⚠️ "STILL ACTIVE" IS GROUNDED IN THE RECORD, NOT INFERRED FROM RENEWAL.
+    // This line used to say only `work out "soon", "still active" and "overdue"
+    // from this date` — an open invitation to decide activity from the one date
+    // the digest carried, `renews`. A CANCELLED policy, or one whose cover has
+    // not started, has a future renewal date and therefore looked active.
+    // `status` and `cover starts` are now in the digest (handler.ts), so the
+    // instruction names them and forbids the inference it used to invite.
+    typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Dates below are absolute; work out "soon" and "overdue" from this date, never from your own. Whether a policy is STILL ACTIVE is a matter of record, not arithmetic: say it only from that policy's own "status" and "cover starts" lines, and if neither is on file say the records do not say. A renewal date in the future does NOT by itself mean a policy is active — it may be cancelled, or not yet started.` : "",
     "",
     renderTopics(topics),
     "",
