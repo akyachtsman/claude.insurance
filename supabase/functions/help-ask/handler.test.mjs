@@ -43,7 +43,12 @@ function fakeDb(tables = {}, opts = {}) {
             op === "eq" ? r[col] === val
               : op === "in" ? val.includes(r[col])
               : op === "gte" ? String(r[col]) >= String(val)
-              : true));
+              : op === "lt" ? String(r[col]) < String(val)
+              // ⚠️ THROW, do not pass. This used to be `: true`, so a filter the
+              // fake did not implement was SILENTLY IGNORED — and a test written
+              // for a fix that depends on that filter would pass against code
+              // that never applied it. Found while adding `lt`.
+              : (() => { throw new Error(`fakeDb: unimplemented filter op ${op} on ${table}.${col}`); })()));
         if (q._order) rows = [...rows].sort((a, b) => String(a[q._order]).localeCompare(String(b[q._order])));
         if (q._range) rows = rows.slice(q._range[0], q._range[1] + 1);
         return { data: rows, error: null, count: rows.length };
@@ -61,6 +66,7 @@ function fakeDb(tables = {}, opts = {}) {
         eq(c, v) { q.filters.push(["eq", c, v]); return chain; },
         in(c, v) { q.filters.push(["in", c, v]); return chain; },
         gte(c, v) { q.filters.push(["gte", c, v]); return chain; },
+        lt(c, v) { q.filters.push(["lt", c, v]); return chain; },
         order(c) { q._order = c; return chain; },
         range(a, b) { q._range = [a, b]; return chain; },
         insert(row) {
@@ -228,6 +234,42 @@ test("the daily cap DOES count every client — the stated trade-off, asserted",
   const theirs = Array.from({ length: 400 }, (_, i) => ({ id: `o${i}`, owner: OTHER, asked_at: hour }));
   const { d } = deps({ tables: seed({ help_queries: theirs }) });
   assert.equal((await (await ask(d)).json()).reason, "rate_limited");
+});
+
+test("the shared-cap retry time is read from rows that will SURVIVE the rejection", async () => {
+  // Two cases in one test because the pair is the point: the same cap, the same
+  // refusal, a retry time present in one and absent in the other.
+  //
+  // ⚠️ `asked_at` here is HOURS old, not `new Date()`. The other daily-cap tests
+  // seed "now", which the 5s grace window excludes — so they would report no
+  // retry time whatever the arithmetic did, and could not tell these cases apart.
+  const hoursAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString();
+
+  // 400 SETTLED rows: one really must expire, so there is a real number.
+  const settled = Array.from({ length: 400 }, (_, i) => ({ id: `s${i}`, owner: OTHER, asked_at: hoursAgo(6) }));
+  const a = await (await ask(deps({ tables: seed({ help_queries: settled }) }).d)).json();
+  assert.equal(a.reason, "rate_limited");
+  assert.equal(a.scope, "shared");
+  assert.ok(Number.isFinite(a.retryAfter) && a.retryAfter > 0,
+    `a real shared-cap wait reported no retry time: ${JSON.stringify(a)}`);
+  // The oldest row is 6h old, so it expires in ~18h. Generous bounds: the claim
+  // under test is "derived from that row", not the clock.
+  assert.ok(a.retryAfter > 17 * 3600 && a.retryAfter < 19 * 3600,
+    `retryAfter is not the oldest row's expiry: ${a.retryAfter}s`);
+
+  // 399 SETTLED rows plus ONE CONCURRENT PEER, which is about to delete its own
+  // reservation — so the table falls straight back to 399 and the next ask fits
+  // immediately. Promising a ~24h wait here is the defect.
+  const racing = [
+    ...Array.from({ length: 399 }, (_, i) => ({ id: `s${i}`, owner: OTHER, asked_at: hoursAgo(6) })),
+    { id: "peer", owner: OTHER, asked_at: new Date().toISOString() },
+  ];
+  const b = await (await ask(deps({ tables: seed({ help_queries: racing }) }).d)).json();
+  assert.equal(b.reason, "rate_limited", "the cap did not fire at all — the setup is wrong, not the fix");
+  assert.equal(b.scope, "shared");
+  assert.ok(b.retryAfter == null,
+    `a concurrent reservation produced a retry time of ${b.retryAfter}s — the client is told to wait for a row ` +
+    `that will still be there, when the rows that pushed it over the cap are being released right now`);
 });
 
 test("a refused ask gives its reservation back; an answered one keeps it", async () => {

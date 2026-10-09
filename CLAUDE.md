@@ -904,6 +904,45 @@ Still true and deliberately unchanged: the add-asset cancel reads a static
 while its destination is computed. Cosmetic, and it belongs to the form widget
 rather than to this flow.
 
+### ⚠️ Recorded — the shared-cap retry time is approximate by construction
+
+`help-ask` refuses on the aggregate daily cap and tells the client how long to
+wait. That number is derived from the oldest row that has to expire, and the
+count it indexes into **cannot be made exact without a schema change.**
+
+The original bug (Codex, 2026-10-09): the count was `total`, which includes every
+**concurrent reservation** — and each rejected request deletes its own row on the
+way out. With 399 retained rows, two simultaneous asks both see 401, both pick
+the oldest retained row, and both promise a wait of up to **24 hours** while the
+table drops straight back to 399 and the next ask is admissible immediately.
+
+Now counted from **survivors**: rows in the window older than a 5-second grace,
+so anything that might be a peer about to release is excluded. Symmetric in the
+race, unlike filtering on the request's own timestamp — a peer that reserved
+microseconds *earlier* is excluded too. Deliberately conservative: it can tell a
+client to retry sooner than strictly possible (they get another refusal, which is
+cheap and honest) and it will not promise a wait that is not real. Two tests pin
+both directions; the mutation back to `total` fails with a 64,800s promise.
+
+⛔ **THE EXACT ANSWER NEEDS THE RESERVE AND THE COUNT TO BE ONE ATOMIC
+STATEMENT** — a Postgres function, so a migration and an owner decision. Until
+then a burst of 400 genuine asks inside the grace window reports no number at
+all, which is the understating direction. Not approximated further on purpose.
+
+### ⚠️ Recorded — `check-undefined-calls.js` cries wolf on regex literals
+
+Its own comment says it is "deliberately conservative: it under-reports rather
+than cry wolf." On a **regex literal** it does the opposite: `/^#\/keep\/help(?:[/?]|$)/`
+is read as a call to an undeclared `help`, and the guard fails. Hit 2026-10-09
+writing the Help route check.
+Worked around rather than fixed, and the workaround is better code anyway: the
+check parses the hash the way `main.js` does (strip query, split, drop empties)
+instead of matching a second regex that could disagree with the router — the same
+reasoning as `keepSubRoute` in `shell.js`. The guard's parser is not touched
+because distinguishing a regex literal from division is not something to get
+half-right inside a shared guard. Expect it again on any regex containing
+`word(`.
+
 ### ⚠️ A `.k-h1` VISIBILITY ASSERTION AFTER A NAVIGATION CHECKS NOTHING
 
 Found 2026-10-09 writing S15, and it had been latent in S13 since the day before.
@@ -1136,6 +1175,8 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S14 | Help desk — the SIGN-OUT RACE, owner check (offline harness, **runs locally**) | Client A asks with the response **held open**; A signs out via `#/keep/account`; client B signs in and **asks nothing**; only then is the response released. Nothing of A's may render into B's page or be cached under B's id — checked again after leaving and returning, since the cache is read on render. ⚠️ **B deliberately does not ask**: that keeps the generation state unchanged so the owner captured before the await is the ONLY guard in play. An earlier version had B ask, which let both owner-check mutations pass. | The previous client's answer, credits or question reach the next client, on screen or via the cache |
 | S15 | Help desk — the BUSY GATE survives a rerender (offline harness, **runs locally**) | Ask, navigate away, return before it settles: the rerendered controls must be disabled, and **re-enabling them in the page and calling `form.requestSubmit()` must still send nothing** — asserted on the endpoint's REQUEST COUNT, because that is what costs money. Then the answer must reach the render **on screen** (not the detached one that asked), and a fresh ask afterwards must reach the endpoint. ⚠️ Both halves were added because the first version passed with the gate deleted (it was testing `disabled`, which blocks the handler by itself) and with the gate LEAKED (controls re-enable via `setBusy`, whatever the gate does). | A rerender mid-ask starts a second paid provider call, the answer never reaches the screen, or the gate leaks and locks the desk |
 | S16 | Help desk — a second client asks mid-flight (offline harness, **runs locally**) | A asks (held), A signs out, B signs in and **asks their own question** — which must reach the endpoint, since the gate is keyed on the owner and a bare boolean would lock B out over a departed client's call. A's older answer lands **first**: it must not render into B's page **and must not re-enable B's controls**, since B's own request is still in flight — `setBusy(false)` used to run before the owner check, which left an enabled form the gate then silently refused. Then B's own lands and must survive a leave-and-return. | The second client is locked out, their form is enabled while their own call is running, or the first client's late answer displaces theirs |
+| S17 | Help desk — a stale render must not MOUNT (offline harness, **runs locally**) | Hold `content/help-guide.json` with `page.route`, start the first Help visit, navigate to `#/keep/list`, then release: the stale `renderKeepHelp()` must not `mount()` over Entities, the URL must not move, and Help must still work on a later visit. ⚠️ The corpus fetch is the ONLY await in that function and the real one is too fast to race, so holding it is the scenario. | A page the client navigated to is replaced by Help while the URL names the other route |
+| S18 | Help desk — an OLDER render must not mount over a NEWER one (offline harness, **runs locally**) | Same setup with **one gate per corpus request**: start render 1, go away and back (render 2), then release render 2's fetch FIRST. Type into render 2's ask box, release render 1, and that typed value must survive. ⚠️ Releasing them in ORDER is not a test — the continuations run in await order and the newer render mounts last by luck; a mutation removing the generation check survived that version. S17's hash check cannot catch this (the hash still says Help) and the generation check cannot catch S17's (nothing calls the function again, so the generation never moves). | An older render replaces the newer one with a blank form, or two Help views are mounted at once |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

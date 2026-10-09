@@ -80,8 +80,39 @@ const pendingByOwner = new Set();   // owner ids with a call in flight
 // next visit to Help — which is not a defence of leaving it there.
 let liveView = null;  // { renderAnswer, renderNotice, setBusy, input }
 
+// Which Help render is current. Bumped on entry, checked after the only await,
+// so a render the client has navigated past cannot mount over what replaced it.
+let helpRenderGen = 0;
+// Parsed the way `main.js` parses it — strip the query, split, drop empties —
+// rather than matched with a second regex that could disagree with the router
+// about what a hash names. Same reasoning as `keepSubRoute` in shell.js, and it
+// tolerates the trailing-slash and query-string forms for free.
+// (It also avoids a false positive in check-undefined-calls.js, which reads
+// `help(` inside a regex literal as a call to an undeclared `help`. Recorded in
+// CLAUDE.md: the guard's own comment says it under-reports rather than cry wolf,
+// and on regex literals it does the opposite.)
+const onHelp = () =>
+  location.hash.replace(/^#/, "").split("?")[0].split("/").filter(Boolean)[1] === "help";
+
 export async function renderKeepHelp() {
+  const gen = ++helpRenderGen;
   const guide = await loadHelpGuide();
+
+  // ⚠️ TWO WAYS THIS RENDER IS ALREADY OBSOLETE, and both end with `mount()`
+  // replacing a page the client is actually on while the URL names a different
+  // route. `loadHelpGuide()` fetches the corpus on the FIRST Help visit, and
+  // nothing cancels this function when the route changes under it. Found by
+  // Codex, against the commit that made this render also register `liveView` —
+  // so a stale render could additionally become the target for an in-flight
+  // answer.
+  //   · The client left Help entirely. A newer route has mounted; `helpRenderGen`
+  //     is untouched because nothing called THIS function again, so only the
+  //     hash can tell.
+  //   · A newer Help render started (away and straight back) and may already
+  //     have mounted. The hash still says Help, so only the generation can tell.
+  // Both checks, because neither covers the other.
+  if (gen !== helpRenderGen) return;
+  if (!onHelp()) return;
 
   const input = el("input", {
     class: "k-help__input",

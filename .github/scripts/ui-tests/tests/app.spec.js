@@ -3298,3 +3298,122 @@ test('S15: a rerender mid-ask cannot start a second paid call', async ({ page, r
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S17 — A HELP RENDER THE CLIENT HAS NAVIGATED PAST MUST NOT MOUNT.
+// `renderKeepHelp()` awaits the corpus on the FIRST Help visit, and nothing
+// cancels it when the route changes underneath. So a slow
+// `content/help-guide.json` plus a client who moves on meant the older render
+// resumed and `mount()`ed Help over the page they were actually looking at,
+// with the URL still naming the other route. Found by Codex, against the commit
+// that made this render also register `liveView` — so a stale render could
+// additionally become the target for an in-flight answer.
+// The corpus fetch is HELD here, which is the whole scenario: it is the only
+// await in that function, and the real one is fast enough that this is not
+// otherwise reproducible.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S17: a Help render the client navigated past does not mount over the destination', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+
+  // Hold the corpus. Served from the local static server, relatively, so this is
+  // the real file on release — credits still resolve through the real corpus.
+  let releaseCorpus = () => {};
+  const held = new Promise((r) => { releaseCorpus = r; });
+  let corpusRequests = 0;
+  await page.route(/content\/help-guide\.json/, async (route) => {
+    corpusRequests += 1;
+    await held;
+    return route.fallback();
+  });
+
+  // FIRST Help visit: the render starts and parks on the corpus.
+  await page.goto('./#/keep/help');
+  await expect.poll(() => corpusRequests, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect(page.locator('.k-help__input'),
+    'the Help page rendered before the corpus arrived — this scenario cannot test anything')
+    .toHaveCount(0);
+
+  // The client moves on, and that page mounts.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+
+  // NOW the corpus arrives and the stale Help render resumes.
+  releaseCorpus();
+  await page.waitForTimeout(1_500);
+
+  await expect(page.locator('.k-h1'),
+    'a stale Help render mounted over the page the client had navigated to')
+    .toHaveText(/entities/i);
+  await expect(page.locator('.k-help__input'),
+    "Help's ask box appeared on a page whose URL is not Help").toHaveCount(0);
+  expect(new URL(page.url()).hash, 'the URL moved on its own').toBe('#/keep/list');
+
+  // And Help still works when the client goes back to it — the guard must reject
+  // the stale render, not poison the route.
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__input')).toBeVisible();
+  await expect(page.locator('.k-help__ai')).toHaveCount(1);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S18 — AND THE OTHER STALE-RENDER CASE: a NEWER Help render, not a different
+// route. S17's hash check cannot see this one (the hash still says Help), and
+// the generation check cannot see S17's (nothing calls this function again, so
+// the generation never moves). Two checks, two scenarios.
+// Reachable only when the SECOND corpus fetch resolves BEFORE the first, which
+// is why each request gets its own gate and they are released out of order. A
+// mutation removing the generation check SURVIVED a version of this that
+// released them in order — the continuations then run in await order and the
+// newer render mounts last by luck, not by design.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S18: an older Help render does not mount over a newer one', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+
+  // One gate per corpus request, released by index.
+  const gates = [0, 1, 2].map(() => { let r = () => {}; const p = new Promise((res) => { r = res; }); return { p, r }; });
+  let n = 0;
+  await page.route(/content\/help-guide\.json/, async (route) => {
+    const i = n++;
+    await gates[Math.min(i, gates.length - 1)].p;
+    return route.fallback();
+  });
+
+  // RENDER 1 parks on the corpus.
+  await page.goto('./#/keep/help');
+  await expect.poll(() => n, { timeout: 10_000 }).toBe(1);
+
+  // Away and straight back: RENDER 2, on the same route, parks on its own fetch.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect.poll(() => n, { timeout: 10_000 }).toBe(2);
+
+  // OUT OF ORDER: render 2's corpus arrives first, so render 2 mounts; render 1
+  // resumes afterwards and must be rejected on its generation alone — the hash
+  // says Help, so nothing else can reject it.
+  gates[1].r();
+  await expect(page.locator('.k-help__input'), 'the newer render never mounted').toBeVisible({ timeout: 10_000 });
+  // A marker only render 2's DOM can carry: type into its ask box. If render 1
+  // mounts over it, its own empty box replaces this one.
+  await page.locator('.k-help__input').fill('typed into the NEWER render');
+  gates[0].r();
+  await page.waitForTimeout(1_500);
+
+  await expect(page.locator('.k-help__input'),
+    'an older Help render mounted over the newer one, replacing it with a blank form')
+    .toHaveValue('typed into the NEWER render');
+  await expect(page.locator('.k-help__ai'), 'more than one Help view is mounted').toHaveCount(1);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

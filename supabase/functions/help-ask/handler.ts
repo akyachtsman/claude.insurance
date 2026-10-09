@@ -511,13 +511,45 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // the oldest must expire before the next ask fits; that row's `asked_at`
     // plus 24h is the answer. If it cannot be read, send NO retryAfter — the
     // client then says "in a few minutes" instead of a number that is wrong.
-    const offset = Math.max(0, (total ?? 0) - DAILY_TOTAL_CAP - 1);
-    const { data: oldest } = await admin.from("help_queries")
-      .select("asked_at").gte("asked_at", dayAgo)
-      .order("asked_at", { ascending: true }).range(offset, offset);
-    const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
-    const secs = Number.isFinite(at) ? Math.ceil((at + 86_400_000 - Date.now()) / 1000) : NaN;
-    const retryAfter = Number.isFinite(secs) && secs > 0 ? secs : null;
+    // ⚠️ COUNTED FROM SURVIVORS, NOT FROM `total`, and the arithmetic below was
+    // never the bug. `total` includes every CONCURRENT reservation, and each
+    // rejected one deletes its own row on the way out. With 399 retained rows,
+    // two simultaneous asks both see 401, both pick the oldest retained row, and
+    // both tell their client to wait for it to expire — up to 24 hours — when
+    // the table drops straight back to 399 and the next ask is admissible
+    // immediately. Found by Codex.
+    //
+    // A row younger than GRACE_MS might be such a peer, and nothing here can
+    // tell a peer's row from a real one, so they are all excluded: the count is
+    // what will still be present once this rejection has released itself. That
+    // is deliberately the conservative direction — it can tell a client to retry
+    // sooner than strictly possible (they get another refusal, which is cheap
+    // and honest), and it will not promise a 24-hour wait that is not real.
+    // Symmetric in the race, unlike filtering on this request's own timestamp:
+    // a peer that reserved microseconds EARLIER is excluded too.
+    //
+    // ⚠️ The exact answer needs the reserve and the count to be ONE atomic
+    // statement — a Postgres function, so a migration and an owner decision.
+    // Recorded in CLAUDE.md rather than approximated further.
+    const GRACE_MS = 5_000;
+    const settled = new Date(Date.now() - GRACE_MS).toISOString();
+    const { count: survivors, error: survErr } = await admin.from("help_queries")
+      .select("id", { count: "exact", head: true })
+      .gte("asked_at", dayAgo).lt("asked_at", settled);
+    // An ask fits when the retained count is at most CAP-1, so `survivors - CAP`
+    // is the 0-based index of the last row that has to expire. Negative means
+    // nothing does — the cap was reached by reservations that are going away, so
+    // send NO number and let the consumer say "in a few minutes".
+    const offset = (survivors ?? 0) - DAILY_TOTAL_CAP;
+    let retryAfter: number | null = null;
+    if (!survErr && offset >= 0) {
+      const { data: oldest } = await admin.from("help_queries")
+        .select("asked_at").gte("asked_at", dayAgo)
+        .order("asked_at", { ascending: true }).range(offset, offset);
+      const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
+      const secs = Number.isFinite(at) ? Math.ceil((at + 86_400_000 - Date.now()) / 1000) : NaN;
+      retryAfter = Number.isFinite(secs) && secs > 0 ? secs : null;
+    }
     return await releaseAnd("rate_limited", { scope: "shared", ...(retryAfter ? { retryAfter } : {}) });
   }
 
