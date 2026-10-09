@@ -63,9 +63,37 @@ export async function getSession() {
   return data.session;
 }
 
+// ── Login generation ────────────────────────────────────────────────────────
+// Bumped on every signIn and signOut, and on NOTHING else. A view that caches
+// something private across navigations binds it to this, so signing out ends it.
+//
+// ⚠️ NOT FOLDED INTO `invalidate()`, which three data writes also call
+// (addEntity, addRelationship, addAsset) — the Help desk's cached answer would
+// then vanish whenever the client added an asset.
+//
+// ⚠️ AND NOT DERIVABLE FROM THE USER ID, which is the whole reason it exists.
+// The login screen prefills ONE shared demo credential, so two different people
+// signing into the SAME account on a shared machine is the ordinary case here,
+// not a contrived one — CLAUDE.md already records exactly this for
+// `help_queries`' RLS ("every visitor using that demo authenticates as the SAME
+// owner, so `using (owner = auth.uid())` is not a per-person fence there"). An
+// owner-scoped guard cannot tell A's session from B's when both are that
+// account; only a generation can. Found by Codex on PR #254, against a fix that
+// had already been through three rounds on owner-scoping alone.
+// ⚠️ The bump in `signOut` is SUBSUMED today, and is kept deliberately. No
+// scenario can distinguish it, because the Keep's route guard means nobody can
+// reach a cached-answer view while signed out, and the next `signIn` bumps the
+// epoch before they could — mutation testing confirms removing it changes
+// nothing. It stays because the CONTRACT ("bumped on every signIn and signOut")
+// is what makes this primitive safe for the next consumer: one that can render
+// while signed out would be relying on it.
+let loginEpoch = 0;
+export function authEpoch() { return loginEpoch; }
+
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };
+  loginEpoch += 1;
   invalidate();
   return { ok: true, session: data.session };
 }
@@ -78,6 +106,7 @@ export async function signOut() {
   // out real visitors and any concurrently running test worker.
   // A dedicated test identity is the proper end state; this removes the hazard.
   await supabase.auth.signOut({ scope: "local" });
+  loginEpoch += 1;
   invalidate();
 }
 

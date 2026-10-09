@@ -10,7 +10,7 @@
 // violation. This file is what still holds when that inference goes wrong.
 import { el, mount } from "../../dom.js";
 import { icon } from "../../icons.js";
-import { askHelp, loadHelpGuide, getUser } from "../../supabase.js";
+import { askHelp, loadHelpGuide, getUser, authEpoch} from "../../supabase.js";
 import {
   cleanQuestion, validateQuestion, suggestionChips, answerShape, creditedTopics,
 } from "../logic/help.js";
@@ -235,6 +235,8 @@ export async function renderKeepHelp() {
     // now drives the whole race with a held response rather than asserting on
     // the field's presence.
     const asker = getUser()?.id ?? null;
+    // The LOGIN this ask belongs to, not just the account. See `authEpoch`.
+    const askEpoch = authEpoch();
     // REFUSE rather than supersede. Superseding still bills the first call — the
     // Edge Function keeps going whatever the browser does — so the only thing
     // that actually protects spend is not sending the second one.
@@ -290,6 +292,24 @@ export async function renderKeepHelp() {
     // re-enabling the current client's controls — and S14 fails without it.
     // Left as a record because a comment that keeps calling a guard redundant
     // after it stopped being redundant is how a later edit deletes it.
+    // ⚠️ THE EPOCH IS THE GUARD THAT MATTERS HERE, and the owner comparison is
+    // what it replaced as the primary. The login screen prefills one shared demo
+    // credential, so A can sign out and B sign back into the SAME account in the
+    // same tab — `getUser()?.id` is then still equal to `asker`, this check used
+    // to pass, and A's question, answer and credited record values rendered for
+    // B. Signing out did not protect them.
+    //
+    // ⚠️ THE OWNER COMPARISON BELOW IS NOW SUBSUMED, and stating that here rather
+    // than discovering it later is the point: mutation testing confirms that
+    // deleting it — here AND in the restore check — passes every scenario,
+    // because every identity change goes through `signIn`/`signOut` and both bump
+    // the epoch. It is kept against a FORESEEABLE change rather than a
+    // hypothetical one: a third auth entry point (a magic link, a re-auth on
+    // refresh) that forgets to bump would leave the epoch equal across two
+    // different clients, and then this line is the only thing left. That is the
+    // one case it still covers; it covers nothing else, and it is not what fixed
+    // the shared-account defect.
+    if (authEpoch() !== askEpoch) return;
     if ((getUser()?.id ?? null) !== asker) return;
 
     // Through liveView: this render may be the detached one. `??` falls back to
@@ -298,7 +318,7 @@ export async function renderKeepHelp() {
     view.setBusy(false);
 
     const shaped = answerShape(payload);
-    lastAsk = { shaped, question, owner: asker };
+    lastAsk = { shaped, question, owner: asker, epoch: askEpoch };
     if (shaped.ok) view.renderAnswer(shaped, question); else view.renderNotice(shaped);
     // The ask box of the view on screen, not of the render that asked.
     if (view.input !== input) view.input.value = question;
@@ -343,7 +363,10 @@ export async function renderKeepHelp() {
   // Registered AFTER the restore check so a render that throws before this point
   // cannot become the target for an in-flight answer.
   liveView = { renderAnswer, renderNotice, setBusy, input };
-  if (lastAsk && me && lastAsk.owner === me) {
+  // Same reasoning as the completion guard: a COMPLETED answer must not outlive
+  // the login that asked for it either, or signing out leaves it on screen for
+  // the next person to sign into the same account.
+  if (lastAsk && me && lastAsk.owner === me && lastAsk.epoch === authEpoch()) {
     input.value = lastAsk.question;
     if (lastAsk.shaped.ok) renderAnswer(lastAsk.shaped, lastAsk.question); else renderNotice(lastAsk.shaped);
   }

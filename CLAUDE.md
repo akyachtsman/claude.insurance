@@ -904,6 +904,38 @@ Still true and deliberately unchanged: the add-asset cancel reads a static
 while its destination is computed. Cosmetic, and it belongs to the form widget
 rather than to this flow.
 
+### ⚠️ `authEpoch()` — why an OWNER-scoped guard is not enough in this app
+
+`js/supabase.js` exports a login generation, bumped on every `signIn` and
+`signOut` and on nothing else. Any view that caches something private across
+navigations binds to it.
+
+**It exists because owner-scoping cannot fence people apart here.** The login
+screen prefills ONE shared demo credential, so two different people signing into
+the SAME account on a shared machine is the ordinary case, not a contrived one —
+this file already records exactly that for `help_queries`' RLS ("every visitor
+using that demo authenticates as the SAME owner, so `using (owner = auth.uid())`
+is not a per-person fence there"). The Help desk's answer cache and its in-flight
+completion guard were both owner-scoped, had been through **three review rounds**
+on owner-scoping alone, and still let A's question, answer and credited record
+values reach B after a sign-out and sign-in on that one account. Found by Codex,
+round 17.
+
+⚠️ **NOT folded into `invalidate()`**, which three data writes also call — the
+cached answer would vanish whenever a client added an asset.
+
+**What is and is not load-bearing, measured rather than asserted:**
+| guard | mutation result | kept because |
+|---|---|---|
+| epoch check on completion | **fails S19b** | it is the fix |
+| epoch in the restore check | **fails S19** | it is the fix |
+| owner comparison (both places) | **survives** | a third auth entry point that forgot to bump would leave the epoch equal across two clients; that one case, and nothing else |
+| the bump in `signOut` | **survives** | the route guard means nobody reaches a cached view while signed out, and the next `signIn` bumps first — kept so the primitive's stated contract holds for its next consumer |
+
+The two survivors are labelled as survivors **in the code**, up front. Twice in
+this PR a guard's comment kept calling it load-bearing after it had stopped
+being so, and both times the correction came a round later.
+
 ### ⚠️ Recorded — the shared-cap retry time is approximate by construction
 
 `help-ask` refuses on the aggregate daily cap and tells the client how long to
@@ -1194,6 +1226,8 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S16 | Help desk — a second client asks mid-flight (offline harness, **runs locally**) | A asks (held), A signs out, B signs in and **asks their own question** — which must reach the endpoint, since the gate is keyed on the owner and a bare boolean would lock B out over a departed client's call. A's older answer lands **first**: it must not render into B's page **and must not re-enable B's controls**, since B's own request is still in flight — `setBusy(false)` used to run before the owner check, which left an enabled form the gate then silently refused. Then B's own lands and must survive a leave-and-return. | The second client is locked out, their form is enabled while their own call is running, or the first client's late answer displaces theirs |
 | S17 | Help desk — a stale render must not MOUNT (offline harness, **runs locally**) | Hold `content/help-guide.json` with `page.route`, start the first Help visit, navigate to `#/keep/list`, then release: the stale `renderKeepHelp()` must not `mount()` over Entities, the URL must not move, and Help must still work on a later visit. ⚠️ The corpus fetch is the ONLY await in that function and the real one is too fast to race, so holding it is the scenario. | A page the client navigated to is replaced by Help while the URL names the other route |
 | S18 | Help desk — an OLDER render must not mount over a NEWER one (offline harness, **runs locally**) | Same setup with **one gate per corpus request**: start render 1, go away and back (render 2), then release render 2's fetch FIRST. Type into render 2's ask box, release render 1, and that typed value must survive. ⚠️ Releasing them in ORDER is not a test — the continuations run in await order and the newer render mounts last by luck; a mutation removing the generation check survived that version. S17's hash check cannot catch this (the hash still says Help) and the generation check cannot catch S17's (nothing calls the function again, so the generation never moves). | An older render replaces the newer one with a blank form, or two Help views are mounted at once |
+| S19 | Help desk — sign-out must END the desk, SAME account (offline harness, **runs locally**) | Ask and get an answer, sign out, then sign back in **with the same prefilled demo credential** — a different person at the same machine. No `.k-help__a`, no `.k-help__src`, no `.k-help__q`, empty ask box. ⚠️ **Every other identity scenario switches to a DIFFERENT client, so all of them pass against an owner-scoped guard.** This one cannot: `getUser()?.id` is identical, and CLAUDE.md already records that `owner = auth.uid()` is not a per-person fence on the shared demo credential. | A completed answer, its question or its credited record values survive a sign-out |
+| S19b | Help desk — an in-flight answer after a same-account sign-out (offline harness, **runs locally**) | As S19 but the response is **held** across the sign-out and sign-in, then released: it must not render into the next person's view and must not be cached for them (checked by leaving and returning, since the cache is read on render). The desk must still work for them. | The previous session's answer lands in the next person's page or cache |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

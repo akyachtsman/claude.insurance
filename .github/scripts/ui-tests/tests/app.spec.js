@@ -3417,3 +3417,114 @@ test('S18: an older Help render does not mount over a newer one', async ({ page,
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S19 — SIGNING OUT MUST END THE DESK, EVEN ON THE SAME ACCOUNT.
+// Every earlier identity scenario (S14, S16) switches to a DIFFERENT client, so
+// every one of them passes against an owner-scoped guard. This one signs back
+// into the SAME account — which is the ordinary case here, not a contrived one:
+// the login screen prefills one shared demo credential, and CLAUDE.md already
+// records that `owner = auth.uid()` is not a per-person fence on it.
+// Two phases, because a completed answer and an in-flight one are different
+// defects: one is a cache that outlived its login, the other is a response that
+// lands into the next person's view.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S19: a completed answer does not survive sign-out onto the same shared account', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "THE FIRST PERSON'S ANSWER, about their own dwelling limit." };
+  await seedKeepSession(page, 'a');
+  const fn = await routeHelpAskSequence(page, [A_ANS]);
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await page.locator('.k-help__input').fill('What is my dwelling limit?');
+  await page.locator('.k-help__ask').click();
+  fn.release(0);
+  await expect(page.locator('.k-help__a')).toContainText(/THE FIRST PERSON'S ANSWER/, { timeout: 10_000 });
+  await expect(page.locator('.k-help__src'), 'the credits did not render, so there is nothing to leak')
+    .toHaveCount(1);
+
+  // SIGN OUT, then sign back in with the SAME prefilled credential — a different
+  // person at the same shared machine. `getUser()?.id` is identical, so an
+  // owner-scoped guard cannot tell them apart.
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await page.locator('.k-authcard input[type=text]').fill('user');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+
+  await expect(page.locator('.k-help__a'),
+    "the previous session's ANSWER survived a sign-out onto the same account").toHaveCount(0);
+  await expect(page.locator('.k-help__src'),
+    "the previous session's CREDITED RECORD VALUES survived a sign-out").toHaveCount(0);
+  await expect(page.locator('.k-help__q'),
+    "the previous session's QUESTION survived a sign-out").toHaveCount(0);
+  await expect(page.locator('.k-help__input'),
+    "the previous session's question was left in the ask box").toHaveValue('');
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+test('S19b: an in-flight answer does not land for the next person on the same shared account', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "THE FIRST PERSON'S ANSWER, about their own dwelling limit." };
+  await seedKeepSession(page, 'a');
+  const fn = await routeHelpAskSequence(page, [A_ANS]);
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await page.locator('.k-help__input').fill('What is my dwelling limit?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  // Sign out and back in on the SAME account while it is still in flight.
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await page.locator('.k-authcard input[type=text]').fill('user');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+
+  // ONLY NOW does it come back, into the next person's view.
+  fn.release(0);
+  await page.waitForTimeout(1_500);
+
+  await expect(page.locator('.k-help__out'),
+    "the previous session's answer rendered into the next person's page")
+    .not.toContainText(/THE FIRST PERSON'S ANSWER/);
+  await expect(page.locator('.k-help__a')).toHaveCount(0);
+
+  // And it must not have been cached for them either — the cache is read on
+  // render, so leaving and returning is where a wrongly-stamped entry surfaces.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__a'),
+    "the previous session's answer was CACHED for the next person on the same account").toHaveCount(0);
+  // Still a working desk for them.
+  await expect(page.locator('.k-help__input')).toBeEnabled();
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
