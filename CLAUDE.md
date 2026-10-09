@@ -812,6 +812,24 @@ login** rather than a deep link:
    outlive its route either — and **fails closed**, reporting that it could not
    run rather than comparing two empty sets. Mutation-tested on four cases:
    dropped classification, stale entry, renamed table, router case removed.
+   ⚠️ **AND `dispatchKeep` HAS TWO ROUTE FORMS, NOT ONE** — the first version of
+   the guard only really read one. `login` is answered by an **early return above
+   the switch**, because it must render before `getSession()` is consulted, and
+   the guard hardcoded that single route (`if (/sub === "login"/)`). So a second
+   session-free route added the same way (`if (sub === "reset-password") return
+   …`) would have been invisible to the scan, left unclassified, and the guard
+   would still have printed "18 routes match" — set equality advertised while a
+   whole syntactic form was exempt. Found by Codex, with the mutation already run.
+   The pre-switch region is now read per STATEMENT, and the distinction it draws
+   is real: a returning statement comparing `sub` to string literals contributes
+   those routes, while `if (!session) return renderKeepLogin()` is route-
+   independent and correctly ignored. A returning statement that mentions `sub`
+   in a shape the scan cannot read **fails the guard by name** rather than being
+   skipped — that is what stops the next novel shape being silently exempt too.
+   Re-mutated 6/6: the second early return (`===`, `==`, and split over lines),
+   an unreadable `AUTH_ROUTES.has(sub)` (fails closed), a route-independent early
+   return (correctly ignored), and a commented-out `case` (correctly ignored,
+   since both files are now comment-stripped before scanning).
    ⚠️ One mutation **survived** the pre-redesign assertions and is worth keeping in
    mind: deleting the regex's `(?:[/?]|$)` tail passed, because the suite proved
    the exclusions it had added and nothing proved what they must **not** swallow.

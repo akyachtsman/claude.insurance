@@ -32,6 +32,25 @@
 // that it could not read what it needs and exits non-zero, rather than
 // certifying a comparison it did not make. An empty set compared against an
 // empty set is the silent pass this guard must never produce.
+//
+// ⚠️ AND NOT EVERY ROUTE IS A `case`. `dispatchKeep` answers `login` with an
+// EARLY RETURN above the switch, because that route must render before
+// `getSession()` is consulted. The first version of this guard hardcoded that
+// one route — `if (/sub === "login"/)` — which meant a second session-free route
+// added the same way (`if (sub === "reset-password") return …`) would be
+// invisible to the scan, left unclassified in the table, and the guard would
+// still print "18 routes match". A guard that advertises set equality and
+// quietly exempts a whole syntactic form is worse than no guard. Found by Codex
+// on the PR that introduced it, with the mutation already run.
+//
+// So the pre-switch region is now scanned on its own terms, and the distinction
+// it has to draw is real: `if (sub === "login") return …` IS a route, while
+// `if (!session) return renderKeepLogin()` is auth logic that applies to all of
+// them. The rule is per statement — a returning statement that compares `sub` to
+// string literals contributes those routes; one that mentions `sub` without a
+// literal this scan can read is UNRECOGNISED and fails the guard by name. That
+// is the "or fail when an unrecognized one exists" half, and it is what keeps
+// the next novel shape from being silently exempt too.
 
 import { readFileSync } from "node:fs";
 
@@ -42,24 +61,58 @@ const fail = [];
 const router = readFileSync(ROUTER, "utf8");
 const shell = readFileSync(SHELL, "utf8");
 
-// --- the router's cases -----------------------------------------------------
-// dispatchKeep's body only; `case undefined:` is `#/keep` itself and maps to "".
+// Strip comments so a commented-out `case` or the word `sub` in prose cannot be
+// read as code. Crude on purpose: it runs over source this repo controls, and
+// over-stripping fails the guard loudly rather than passing it quietly.
+const codeOnly = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+// --- the router's routes ----------------------------------------------------
+// dispatchKeep's body only. Two syntactic forms carry routes, and BOTH are read:
+// the switch's `case` labels (`case undefined:` is `#/keep` itself and maps to
+// ""), and early returns above the switch.
 const dispatch = router.match(/function dispatchKeep[\s\S]*?\n}/);
 if (!dispatch) fail.push(`${ROUTER}: could not find dispatchKeep — this guard cannot run`);
 const routerRoutes = new Set();
 if (dispatch) {
-  for (const m of dispatch[0].matchAll(/^\s*case\s+(?:"([^"]+)"|undefined)\s*:/gm)) {
-    routerRoutes.add(m[1] === undefined ? "" : m[1]);
+  const body = codeOnly(dispatch[0]);
+  const switchAt = body.search(/switch\s*\(\s*sub\s*\)/);
+  if (switchAt < 0) {
+    fail.push(
+      `${ROUTER}: dispatchKeep has no \`switch (sub)\` — this guard cannot tell its ` +
+      `route cases from its early returns, so it will not certify either`
+    );
+  } else {
+    for (const m of body.slice(switchAt).matchAll(/\bcase\s+(?:"([^"]+)"|undefined)\s*:/g)) {
+      routerRoutes.add(m[1] === undefined ? "" : m[1]);
+    }
+    // Early returns, per STATEMENT so a condition split over several lines is
+    // still read with its own `return`.
+    for (const stmt of body.slice(0, switchAt).split(";")) {
+      if (!/\breturn\b/.test(stmt)) continue;
+      const lits = [...stmt.matchAll(/\bsub\s*={2,3}\s*"([^"]*)"/g)].map((m) => m[1]);
+      if (lits.length) { for (const l of lits) routerRoutes.add(l); continue; }
+      // Mentions `sub` but in a shape this scan cannot read -> fail by name.
+      // A returning statement that does NOT mention `sub` is route-independent
+      // (`if (!session) return renderKeepLogin()`) and is correctly ignored.
+      if (/\bsub\b/.test(stmt)) {
+        fail.push(
+          `${ROUTER}: an early return in dispatchKeep tests \`sub\` in a form this guard ` +
+          `cannot read, so it may be a route that never gets classified:\n` +
+          `      ${stmt.trim().replace(/\s+/g, " ").slice(0, 120)}\n` +
+          `  Either write it as \`sub === "<route>"\`, or teach this guard the new shape. ` +
+          `It will not certify set equality while a route-shaped branch is unreadable.`
+        );
+      }
+    }
   }
-  // `login` is handled by an early return above the switch, not by a case.
-  if (/sub\s*===\s*"login"/.test(dispatch[0])) routerRoutes.add("login");
 }
-if (dispatch && routerRoutes.size === 0) {
-  fail.push(`${ROUTER}: dispatchKeep matched but yielded no routes — the case pattern no longer fits`);
+if (dispatch && routerRoutes.size === 0 && !fail.length) {
+  fail.push(`${ROUTER}: dispatchKeep matched but yielded no routes — the patterns no longer fit`);
 }
 
 // --- the shell's table ------------------------------------------------------
-const table = shell.match(/const BACK_ELIGIBLE = \{([\s\S]*?)\n\};/);
+const table = codeOnly(shell).match(/const BACK_ELIGIBLE = \{([\s\S]*?)\n\};/);
 if (!table) fail.push(`${SHELL}: could not find the BACK_ELIGIBLE table — this guard cannot run`);
 const tableRoutes = new Map();
 if (table) {
