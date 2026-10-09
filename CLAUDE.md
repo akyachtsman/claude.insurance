@@ -924,6 +924,19 @@ round 17.
 ⚠️ **NOT folded into `invalidate()`**, which three data writes also call — the
 cached answer would vanish whenever a client added an asset.
 
+⚠️ **AND THE SAME-TAB BUMPS ARE NOT ENOUGH.** `signIn`/`signOut` run only in the
+tab that called them, and the vendored client broadcasts auth changes to the
+others over a **BroadcastChannel** — so signing out and back into the shared
+account in a second tab left the first tab's Help view holding a stale
+generation, and the round-17 fix did not hold one tab across. An
+`onAuthStateChange` listener now bumps on `SIGNED_IN` / `SIGNED_OUT` /
+`USER_UPDATED`; `TOKEN_REFRESHED` and `INITIAL_SESSION` are deliberately excluded
+(a refresh runs on a timer and would discard a client's own answer mid-use). The
+same-tab bumps are kept, so a double bump is normal — only inequality is read,
+and it means `authEpoch()` is correct the moment `signIn` returns rather than
+whenever the event lands. S20 uses two real tabs in one context; nothing
+simulates the broadcast. Found by Codex, round 18.
+
 **What is and is not load-bearing, measured rather than asserted:**
 | guard | mutation result | kept because |
 |---|---|---|
@@ -935,6 +948,25 @@ cached answer would vanish whenever a client added an asset.
 The two survivors are labelled as survivors **in the code**, up front. Twice in
 this PR a guard's comment kept calling it load-bearing after it had stopped
 being so, and both times the correction came a round later.
+
+### ⚠️ `setBusy` after an ask has been WRONG TWICE, in opposite directions
+
+Worth its own entry because the two fixes pull against each other and a third
+edit will be tempted to undo one of them.
+
+| round | shape | what broke |
+|---|---|---|
+| 14 | `setBusy(false)` **before** the owner check | a departed client's completion RE-ENABLED the current client's form while their own call was in flight — an enabled control that silently does nothing |
+| 17 | `setBusy(false)` **after** the checks | the mirror image: on a mismatch it returned before any `setBusy`, so on the shared account B's view stayed DEAD after A's call settled, until B navigated away and back |
+
+Both found by Codex. The resolution is neither position: the busy state is
+**recomputed from `pendingByOwner`** immediately after the gate is released, on
+every path including the mismatches. B is enabled iff B has nothing in flight,
+which satisfies both rounds at once, and it makes the aborted path correct for
+free (a newer ask holds the gate, so the state stays).
+⚠️ S19b's assertion deliberately runs **before** any rerender — the earlier
+version checked enablement only after navigating away and back, which is exactly
+what masked round 18's half.
 
 ### ⚠️ Recorded — the shared-cap retry time is approximate by construction
 
@@ -1228,6 +1260,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S18 | Help desk — an OLDER render must not mount over a NEWER one (offline harness, **runs locally**) | Same setup with **one gate per corpus request**: start render 1, go away and back (render 2), then release render 2's fetch FIRST. Type into render 2's ask box, release render 1, and that typed value must survive. ⚠️ Releasing them in ORDER is not a test — the continuations run in await order and the newer render mounts last by luck; a mutation removing the generation check survived that version. S17's hash check cannot catch this (the hash still says Help) and the generation check cannot catch S17's (nothing calls the function again, so the generation never moves). | An older render replaces the newer one with a blank form, or two Help views are mounted at once |
 | S19 | Help desk — sign-out must END the desk, SAME account (offline harness, **runs locally**) | Ask and get an answer, sign out, then sign back in **with the same prefilled demo credential** — a different person at the same machine. No `.k-help__a`, no `.k-help__src`, no `.k-help__q`, empty ask box. ⚠️ **Every other identity scenario switches to a DIFFERENT client, so all of them pass against an owner-scoped guard.** This one cannot: `getUser()?.id` is identical, and CLAUDE.md already records that `owner = auth.uid()` is not a per-person fence on the shared demo credential. | A completed answer, its question or its credited record values survive a sign-out |
 | S19b | Help desk — an in-flight answer after a same-account sign-out (offline harness, **runs locally**) | As S19 but the response is **held** across the sign-out and sign-in, then released: it must not render into the next person's view and must not be cached for them (checked by leaving and returning, since the cache is read on render). The desk must still work for them. | The previous session's answer lands in the next person's page or cache |
+| S20 | Help desk — a CROSS-TAB auth change (offline harness, **runs locally**) | Two real tabs in ONE browser context, so they share storage and the BroadcastChannel. Tab 1 asks with the response held; tab 2 signs out and back into the **same** shared account; tab 1's held response is then released and must not render or cache. ⚠️ `signIn`/`signOut` bump the login generation only in the tab that calls them — the client broadcasts the change to the others, so a same-tab-only epoch left tab 1 holding a stale one and every check passed. | An auth change in another tab does not end this tab's Help session |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

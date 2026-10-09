@@ -3515,6 +3515,17 @@ test('S19b: an in-flight answer does not land for the next person on the same sh
     .not.toContainText(/THE FIRST PERSON'S ANSWER/);
   await expect(page.locator('.k-help__a')).toHaveCount(0);
 
+  // ⚠️ AND THEIR CONTROLS MUST BE USABLE RIGHT HERE, BEFORE ANY RERENDER. The
+  // gate is keyed on the OWNER, and this is the same shared account — so A's
+  // pending entry disabled B's view, and the `finally` releasing it is not
+  // enough: the epoch mismatch used to return before any `setBusy`, leaving B's
+  // form dead until they navigated away and back. The earlier version of this
+  // scenario checked enablement only AFTER that navigation and so passed.
+  await expect(page.locator('.k-help__input'),
+    "the next person's ask box is still disabled after the previous session's call settled").toBeEnabled();
+  await expect(page.locator('.k-help__ask'),
+    "the next person's Ask button is still disabled after the previous session's call settled").toBeEnabled();
+
   // And it must not have been cached for them either — the cache is read on
   // render, so leaving and returning is where a wrongly-stamped entry surfaces.
   await page.goto('./#/keep/list');
@@ -3525,6 +3536,68 @@ test('S19b: an in-flight answer does not land for the next person on the same sh
     "the previous session's answer was CACHED for the next person on the same account").toHaveCount(0);
   // Still a working desk for them.
   await expect(page.locator('.k-help__input')).toBeEnabled();
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S20 — CROSS-TAB. The same defect as S19b, one tab across.
+// `signIn`/`signOut` bump the login generation only in the tab that called
+// them, and the vendored Supabase client broadcasts auth changes to the others
+// over a BroadcastChannel. So signing out and back into the shared account in a
+// SECOND tab left the first tab's Help view holding a stale generation, after
+// which a held completion passed every check and rendered the previous person's
+// answer for the new one. Found by Codex against the round-17 fix.
+// Two real tabs in ONE browser context, so they share storage and the channel —
+// nothing here simulates the broadcast.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S20: an auth change in another tab ends this tab\'s Help session too', async ({ context, renderWitness }) => {
+  renderWitness();
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "THE FIRST PERSON'S ANSWER, about their own dwelling limit." };
+
+  const tab1 = await context.newPage();
+  const pageErrors = [];
+  tab1.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(tab1, 'a');
+  const fn = await routeHelpAskSequence(tab1, [A_ANS]);
+
+  // TAB 1 asks, held.
+  await tab1.goto('./#/keep/help');
+  await expect(tab1.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(tab1.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await tab1.locator('.k-help__input').fill('What is my dwelling limit?');
+  await tab1.locator('.k-help__ask').click();
+  await expect(tab1.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  // TAB 2, same context: sign out and back into the SAME shared account there.
+  const tab2 = await context.newPage();
+  await seedKeepSession(tab2, 'a');
+  await tab2.goto('./#/keep/account');
+  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await tab2.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await tab2.locator('.k-authcard input[type=text]').fill('user');
+  await tab2.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await tab2.getByRole('button', { name: /log in/i }).click();
+  await expect(tab2.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+
+  // Give the broadcast time to reach tab 1, then release tab 1's held response.
+  await tab1.waitForTimeout(1_000);
+  fn.release(0);
+  await tab1.waitForTimeout(1_500);
+
+  await expect(tab1.locator('.k-help__out'),
+    "a sign-out in another tab did not end this tab's session — the previous person's answer rendered")
+    .not.toContainText(/THE FIRST PERSON'S ANSWER/);
+  await expect(tab1.locator('.k-help__a')).toHaveCount(0);
+
+  // Nor cached: the cache is read on render.
+  await tab1.goto('./#/keep/list');
+  await expect(tab1.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  await tab1.goto('./#/keep/help');
+  await expect(tab1.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(tab1.locator('.k-help__a'),
+    "the previous session's answer was cached across a cross-tab sign-out").toHaveCount(0);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

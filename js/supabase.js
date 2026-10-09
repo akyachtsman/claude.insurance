@@ -90,6 +90,29 @@ export async function getSession() {
 let loginEpoch = 0;
 export function authEpoch() { return loginEpoch; }
 
+// ⚠️ CROSS-TAB. The bumps in `signIn`/`signOut` below only run in the tab that
+// called them, and the Supabase client BROADCASTS auth changes to the others
+// over a BroadcastChannel. So: sign out and sign back into the shared demo
+// account in a SECOND tab, and the first tab's Help view kept its old epoch —
+// after which a held completion passed both the epoch and the owner check and
+// rendered the previous person's question, answer and credited values for the
+// new one. The same defect round 17 fixed, one tab across. Found by Codex,
+// round 18, against that fix.
+//
+// TOKEN_REFRESHED and INITIAL_SESSION are deliberately NOT identity changes: a
+// refresh happens on a timer and would throw away a client's own answer mid-use,
+// and INITIAL_SESSION fires on every load before anything has been cached.
+//
+// The same-tab bumps are KEPT as well, so a double bump is normal. Harmless —
+// only inequality is ever read — and it means `authEpoch()` is already correct
+// when `signIn` returns, rather than depending on when the event lands.
+supabase.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") {
+    loginEpoch += 1;
+    invalidate();
+  }
+});
+
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };

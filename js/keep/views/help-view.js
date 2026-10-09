@@ -267,8 +267,25 @@ export async function renderKeepHelp() {
       // entirely until they reload the page.
       pendingByOwner.delete(asker);
     }
-    if (controller.signal.aborted) return;        // superseded by a newer ask
     inFlight = null;
+
+    // ⚠️ RECOMPUTED FROM THE GATE — not set to false, and NOT SKIPPED on the
+    // mismatch paths below. This has now been wrong twice in opposite
+    // directions. Round 14: `setBusy(false)` ran before the owner check, so a
+    // departed client's completion RE-ENABLED the current client's form while
+    // their own call was in flight. Round 17 moved it after the checks, which
+    // fixed that and created the mirror image: A asks, signs out, B signs into
+    // the same shared account and opens Help — the owner-keyed gate disables B's
+    // view, the `finally` above releases it, but the epoch mismatch returned
+    // before any setBusy, so B's controls stayed disabled until they navigated
+    // away and back. Found by Codex both times.
+    // Reading the gate answers both: B is enabled iff B has nothing in flight.
+    // It also makes the aborted path correct for free — a newer ask holds the
+    // gate, so the busy state stays.
+    const who = getUser()?.id ?? null;
+    (liveView ?? { setBusy }).setBusy(Boolean(who) && pendingByOwner.has(who));
+
+    if (controller.signal.aborted) return;        // superseded by a newer ask
 
     // ⚠️ THE OWNER CHECK COMES BEFORE setBusy, AND THE ORDER IS THE WHOLE POINT.
     // It used to sit after it, so a departed client's completion unconditionally
@@ -314,8 +331,7 @@ export async function renderKeepHelp() {
 
     // Through liveView: this render may be the detached one. `??` falls back to
     // our own closures so a single render (the ordinary case) is unchanged.
-    const view = liveView ?? { renderAnswer, renderNotice, setBusy, input };
-    view.setBusy(false);
+    const view = liveView ?? { renderAnswer, renderNotice, input };
 
     const shaped = answerShape(payload);
     lastAsk = { shaped, question, owner: asker, epoch: askEpoch };
