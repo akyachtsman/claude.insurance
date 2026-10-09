@@ -210,6 +210,21 @@ function rateLimitNotice(seconds, scope) {
   }
   const hours = scope === "shared" || (!scope && Number.isFinite(seconds) && seconds > 5400);
   if (hours) {
+    // ⚠️ A SHORT SHARED WAIT IS NOT "TODAY'S LIMIT". The shared cap can be
+    // reached by reservations that are being RELEASED — a handful of concurrent
+    // asks at the boundary — in which case the function sends a wait of seconds
+    // and the next ask is admissible almost immediately. "Reached its limit for
+    // today. Please try again in about a minute." is incoherent, and the version
+    // of this that omitted the number entirely was worse: `waitPhrase` returns ""
+    // and the fallback said **"tomorrow"**, which is the ~24h overstatement the
+    // function-side fix had just removed. Found by Codex, who checked the
+    // CONSUMER of that fix rather than the fix.
+    // Threshold is waitPhrase's own first bucket, so the two cannot disagree
+    // about what counts as short.
+    const s = Number(seconds);
+    if (Number.isFinite(s) && s > 0 && s < 90) {
+      return `The help desk is briefly at its limit. Please try again ${waitPhrase(s)}.`;
+    }
     return `The help desk has reached its limit for today. Please try again ${waitPhrase(seconds) || "tomorrow"}.`;
   }
   return `You've asked a few questions in a short time. Please try again ${waitPhrase(seconds) || "in a few minutes"}.`;

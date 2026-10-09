@@ -267,9 +267,14 @@ test("the shared-cap retry time is read from rows that will SURVIVE the rejectio
   const b = await (await ask(deps({ tables: seed({ help_queries: racing }) }).d)).json();
   assert.equal(b.reason, "rate_limited", "the cap did not fire at all — the setup is wrong, not the fix");
   assert.equal(b.scope, "shared");
-  assert.ok(b.retryAfter == null,
-    `a concurrent reservation produced a retry time of ${b.retryAfter}s — the client is told to wait for a row ` +
-    `that will still be there, when the rows that pushed it over the cap are being released right now`);
+  // ⚠️ A SHORT NUMBER, NOT NO NUMBER. Omitting it was this fix's first version,
+  // and `rateLimitNotice` renders a shared-cap refusal with no number as
+  // "Please try again TOMORROW" — so omitting reproduced the ~24h overstatement
+  // in the view. The assertion is therefore on the RANGE, which is what the
+  // client actually reads through waitPhrase's first bucket (<90s).
+  assert.ok(Number.isFinite(b.retryAfter) && b.retryAfter > 0 && b.retryAfter < 90,
+    `a concurrent reservation produced ${JSON.stringify(b.retryAfter)} — it must be a SHORT wait: the rows that ` +
+    `pushed the cap over are being released right now, and both no-number and a 24h number read as "tomorrow"`);
 });
 
 test("a refused ask gives its reservation back; an answered one keeps it", async () => {

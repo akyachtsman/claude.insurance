@@ -924,10 +924,27 @@ client to retry sooner than strictly possible (they get another refusal, which i
 cheap and honest) and it will not promise a wait that is not real. Two tests pin
 both directions; the mutation back to `total` fails with a 64,800s promise.
 
+⚠️ **AND THE FIRST VERSION OF THAT FIX DID NOT ACTUALLY FIX IT**, which is the
+part worth keeping. It *omitted* `retryAfter` for the concurrent case, on the
+strength of a comment — inherited from the code before it — claiming the consumer
+would then say "in a few minutes". **It does not.** `rateLimitNotice`
+(`js/keep/logic/help.js`) reads a `scope: "shared"` refusal with no number as
+**"Please try again tomorrow"**, so omitting the number reproduced the same ~24h
+overstatement *in the view*. Found by Codex, who read the consumer rather than
+the fix. Two halves now:
+- the function sends a **short** number (the grace window in seconds), not
+  nothing — a positive value is what keeps the view off its `|| "tomorrow"`
+  fallback, and it distinguishes "clears in seconds" from "could not be read",
+  which still omits and still says tomorrow, correctly;
+- the view no longer says *"reached its limit for today … in about a minute"*.
+  Under 90s — `waitPhrase`'s own first bucket, so the two cannot disagree about
+  what counts as short — it reads "The help desk is briefly at its limit."
+Both mutation-tested, on both sides of the wire.
+
 ⛔ **THE EXACT ANSWER NEEDS THE RESERVE AND THE COUNT TO BE ONE ATOMIC
 STATEMENT** — a Postgres function, so a migration and an owner decision. Until
-then a burst of 400 genuine asks inside the grace window reports no number at
-all, which is the understating direction. Not approximated further on purpose.
+then a burst of 400 genuine asks inside the grace window reports the same short
+wait, which is the understating direction. Not approximated further on purpose.
 
 ### ⚠️ Recorded — `check-undefined-calls.js` cries wolf on regex literals
 

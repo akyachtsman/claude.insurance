@@ -537,12 +537,24 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       .select("id", { count: "exact", head: true })
       .gte("asked_at", dayAgo).lt("asked_at", settled);
     // An ask fits when the retained count is at most CAP-1, so `survivors - CAP`
-    // is the 0-based index of the last row that has to expire. Negative means
-    // nothing does — the cap was reached by reservations that are going away, so
-    // send NO number and let the consumer say "in a few minutes".
+    // is the 0-based index of the last row that has to expire.
+    //
+    // ⚠️ NEGATIVE MEANS NOTHING HAS TO EXPIRE, AND THAT SENDS A SHORT NUMBER —
+    // not nothing. Omitting it was this fix's first version, on the strength of a
+    // comment claiming the consumer would then say "in a few minutes". IT DOES
+    // NOT: `rateLimitNotice` reads a shared-cap refusal with no number as
+    // **"Please try again tomorrow"** (js/keep/logic/help.js), so omitting the
+    // number reproduced the ~24-hour overstatement this whole branch exists to
+    // remove — it just moved it from the function to the view. The claim was
+    // inherited from the code before it and was never true for `scope: "shared"`.
+    // Found by Codex, who read the consumer rather than the fix.
+    // GRACE_MS is how long a peer's row stays excluded, so that is the honest
+    // wait; sent as seconds, rounded up, and never zero.
     const offset = (survivors ?? 0) - DAILY_TOTAL_CAP;
     let retryAfter: number | null = null;
-    if (!survErr && offset >= 0) {
+    if (!survErr && offset < 0) {
+      retryAfter = Math.ceil(GRACE_MS / 1000);
+    } else if (!survErr) {
       const { data: oldest } = await admin.from("help_queries")
         .select("asked_at").gte("asked_at", dayAgo)
         .order("asked_at", { ascending: true }).range(offset, offset);

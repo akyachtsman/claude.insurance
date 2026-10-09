@@ -539,6 +539,23 @@ test("a shared-cap refusal does not blame the client, whatever the wait", () => 
   assert.ok(!/you've asked/i.test(bare.notice), `bare shared-cap refusal blamed the client: ${bare.notice}`);
   assert.match(bare.notice, /limit for today/i);
 
+  // ⚠️ A SHORT SHARED WAIT MUST NOT SAY "TODAY" OR "TOMORROW". The shared cap can
+  // be reached by concurrent reservations that are being released, in which case
+  // the function sends a wait of SECONDS. "Reached its limit for today. Please
+  // try again in about a minute." is incoherent, and the earlier version of the
+  // function omitted the number instead — which landed on the `|| "tomorrow"`
+  // fallback and reproduced the ~24h overstatement it was meant to remove, in
+  // the view rather than the function. This is the consumer half of that fix.
+  const brief = answerShape({ answer: null, reason: "rate_limited", retryAfter: 5, scope: "shared" });
+  assert.ok(!/tomorrow/i.test(brief.notice), `a 5-second shared wait said "tomorrow": ${brief.notice}`);
+  assert.ok(!/for today/i.test(brief.notice), `a 5-second shared wait claimed today's limit: ${brief.notice}`);
+  assert.ok(!/you've asked/i.test(brief.notice), `a short shared-cap refusal blamed the client: ${brief.notice}`);
+  assert.match(brief.notice, /in about a minute/,
+    `a short shared wait must still name a wait: ${brief.notice}`);
+  // And the boundary stays with the long wording: 90s is waitPhrase's own cutoff.
+  assert.match(answerShape({ answer: null, reason: "rate_limited", retryAfter: 4000, scope: "shared" }).notice,
+    /limit for today/i, "a genuinely long shared wait lost its wording");
+
   // The per-client cap keeps its own wording, including over the old threshold.
   const mine = answerShape({ answer: null, reason: "rate_limited", retryAfter: 3600, scope: "client" });
   assert.match(mine.notice, /you've asked a few questions/i);
