@@ -569,9 +569,34 @@ profile**, never by listing a directory.
   editing a `.eq()` out of the handler. `service_role` is used for `help_queries`
   alone, and that works only because `supabase/proposed/20261006_help_queries.sql`
   grants it explicitly.
-  **Also true and NOT fixed here:** the deployed `notify-enhancement` reads
-  `enhancement_requests` under the same key, so it has the same denial. Verify
-  before relying on its emails; outside feature 003's scope.
+  **⚠️ NOW MEASURED, AND WORSE THAN "VERIFY BEFORE RELYING":** this said *"the
+  deployed `notify-enhancement` reads `enhancement_requests` under the same key,
+  so it has the same denial. Verify before relying on its emails."* Verified
+  2026-10-09, both halves:
+  - `has_table_privilege('service_role', …)` is **false** for SELECT, INSERT and
+    UPDATE on `profiles`, `entities`, `assets`, `policies`,
+    `enhancement_requests`, `leads` and `rule_settings` — every table in the
+    schema. The sole exception is **`help_queries`**, where SELECT and INSERT are
+    true *because `20261006120000` granted them explicitly*. That is direct
+    confirmation that the grant in that migration is load-bearing rather than
+    tidiness, which is what its comments claim.
+  - `notify-enhancement/index.ts` builds an `admin` client from
+    `SUPABASE_SERVICE_ROLE_KEY` (line 87) and its **first** database call is
+    `admin.from("enhancement_requests").select("*")…maybeSingle()` (line 100),
+    with three `update`s on the same table after it (lines 137, 189, 211).
+  So the function returns `42501` on the first query of **every** invocation. It
+  is not "unverified" — it is **non-functional**, and this file lists it as
+  "deployed and ACTIVE", which reads as working. No enhancement-request email has
+  ever been sent.
+  **The remedy is one statement**, and it is deliberately NOT applied here:
+  `grant select, update on public.enhancement_requests to service_role;`
+  Widening `service_role`'s reach over a client table is a security decision, not
+  a bug fix — and feature 003 deliberately went the other way, reading client
+  records through the **caller's own** client so RLS still scopes them. The same
+  question applies here and should be answered on purpose: whether this function
+  needs cross-client reach at all, or should take the caller's JWT like
+  `help-ask` does. Outside feature 003's scope; recorded so it is a decision
+  rather than a surprise.
 - **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
   (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
   `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.
