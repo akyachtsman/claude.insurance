@@ -236,26 +236,35 @@ export async function renderKeepHelp() {
     }
     if (controller.signal.aborted) return;        // superseded by a newer ask
     inFlight = null;
-    // Through liveView: this render may be the detached one. `?? ` falls back to
+
+    // ⚠️ THE OWNER CHECK COMES BEFORE setBusy, AND THE ORDER IS THE WHOLE POINT.
+    // It used to sit after it, so a departed client's completion unconditionally
+    // RE-ENABLED the current client's controls — while that client's own request
+    // was still in flight. The gate then silently refused their submit, leaving
+    // an enabled form that did nothing: the worst of both, since the client can
+    // see no reason it is not working. Found by Codex, on the commit that
+    // introduced `liveView`.
+    // The client who asked is no longer the client who is here: do not touch
+    // their controls, do not cache this answer and do not render it. `lastAsk`
+    // is deliberately left alone rather than cleared — whatever the CURRENT
+    // client has is theirs, and wiping it would let a departed client's
+    // in-flight request delete it.
+    //
+    // ⚠️ THIS LINE WAS LABELLED "BELT, NOT THE FIX" AND THAT IS NO LONGER TRUE.
+    // It was accurate when the only thing downstream was the cache write: the
+    // capture of `asker` above was what closed the disclosure, and a mutation
+    // removing this check still passed S14, so it was honestly marked as defence
+    // in depth. Moving `setBusy` below it made it load-bearing in its own right
+    // — it is now the only thing stopping a departed client's completion from
+    // re-enabling the current client's controls — and S14 fails without it.
+    // Left as a record because a comment that keeps calling a guard redundant
+    // after it stopped being redundant is how a later edit deletes it.
+    if ((getUser()?.id ?? null) !== asker) return;
+
+    // Through liveView: this render may be the detached one. `??` falls back to
     // our own closures so a single render (the ordinary case) is unchanged.
     const view = liveView ?? { renderAnswer, renderNotice, setBusy, input };
     view.setBusy(false);
-
-    // The client who asked is no longer the client who is here: do not cache
-    // this answer and do not render it. `lastAsk` is deliberately left alone
-    // rather than cleared — whatever the CURRENT client has is theirs, and
-    // wiping it would let a departed client's in-flight request delete it.
-    //
-    // ⚠️ THIS LINE IS BELT, NOT THE FIX, and saying so is the point: a mutation
-    // that removed it while KEEPING the capture above still passed S14. The
-    // capture is what closes the hole — `lastAsk.owner` is then A's id, so the
-    // restore check below cannot match for B. This line is kept because it stops
-    // a departed client's answer being cached at all, which narrows the window if
-    // the restore check is ever loosened — and that check has already been the
-    // site of one defect (it originally carried no owner at all). A surviving
-    // mutation means defence in depth, so it is labelled as such rather than
-    // left looking load-bearing.
-    if ((getUser()?.id ?? null) !== asker) return;
 
     const shaped = answerShape(payload);
     lastAsk = { shaped, question, owner: asker };

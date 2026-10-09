@@ -470,3 +470,40 @@ test("trailer parsing stays linear on whitespace — the third ReDoS of this sha
     assert.ok(!dropped(text), `${JSON.stringify(text)} is answer text, not a rule`);
   }
 });
+
+test('stating a policy ACTIVE requires an affirmative status line, not just a past start date', () => {
+  // ⚠️ THIS GUARDS A PROMPT RULE, which is unusual here and deliberate: this one
+  // instruction is the whole of what stops a cancelled policy being read back as
+  // active, and it has already been wrong twice in two commits. First it invited
+  // the model to decide activity from `renewal_date` (the only date it had).
+  // Then the fix said "say it from the policy's own status and cover starts
+  // lines, and if NEITHER is on file say the records do not say" — which permits
+  // activity from `cover starts` ALONE. `policies.status` is nullable, so
+  // "no status, past effective date" is a real row, and a past effective date
+  // proves cover BEGAN, never that it continues. Both found by Codex.
+  //
+  // Asserted as properties of the text rather than an exact string, so rewording
+  // is free and the three load-bearing claims are not.
+  const body = buildPrompt({
+    nonce: "n", question: "is my flood policy still active?", topics: [], facts: [],
+    today: "2026-10-09",
+  }).messages[0].content;
+
+  const instruction = body.split("\n").find((l) => l.startsWith("TODAY IS"));
+  assert.ok(instruction, "the dated instruction is missing entirely");
+
+  // 1. Activity is conditioned on a status line, and the condition is ONLY IF.
+  assert.match(instruction, /\bONLY IF\b[^.]*"status"/,
+    `activity must be gated on a "status" line with an ONLY IF, not merely mentioned alongside it: ${instruction}`);
+  // 2. The absent-status case resolves to "the records do not say", NOT to a
+  //    date-based inference. The word "NEITHER" is specifically what was wrong.
+  assert.match(instruction, /NO "status" line[^.]*records do not say/,
+    `a missing status line must resolve to "the records do not say": ${instruction}`);
+  assert.doesNotMatch(instruction, /if NEITHER/i,
+    `"if neither is on file" permits activity from the date alone — the defect this test exists for`);
+  // 3. Both dates are explicitly disqualified as evidence of activity.
+  assert.match(instruction, /cover BEGAN, never that it continues/,
+    `the effective date must be disqualified as evidence that cover CONTINUES: ${instruction}`);
+  assert.match(instruction, /renewal date in the future does NOT mean a policy is active/,
+    `a future renewal date must be disqualified as evidence of activity: ${instruction}`);
+});

@@ -3182,6 +3182,17 @@ test('S16: a second client can ask while the first client\'s call is outstanding
     "the previous client's answer rendered into the next client's page")
     .not.toContainText(/CLIENT A'S PRIVATE ANSWER/);
 
+  // ⚠️ AND IT MUST NOT HAVE RE-ENABLED B'S CONTROLS. B's own request is still in
+  // flight. `setBusy(false)` used to run before the owner check, so a departed
+  // client's completion released the current client's form — and the gate then
+  // silently refused the submit, leaving an enabled form that did nothing. An
+  // enabled control that does not work is worse than a disabled one, because the
+  // client can see no reason for it.
+  await expect(page.locator('.k-help__ask'),
+    "a departed client's completion re-enabled the current client's Ask button").toBeDisabled();
+  await expect(page.locator('.k-help__input'),
+    "a departed client's completion re-enabled the current client's ask box").toBeDisabled();
+
   // Then B's own.
   fn.release(1);
   await expect(page.locator('.k-help__a'),

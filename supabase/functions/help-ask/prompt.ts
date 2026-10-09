@@ -323,7 +323,17 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
     // not started, has a future renewal date and therefore looked active.
     // `status` and `cover starts` are now in the digest (handler.ts), so the
     // instruction names them and forbids the inference it used to invite.
-    typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Dates below are absolute; work out "soon" and "overdue" from this date, never from your own. Whether a policy is STILL ACTIVE is a matter of record, not arithmetic: say it only from that policy's own "status" and "cover starts" lines, and if neither is on file say the records do not say. A renewal date in the future does NOT by itself mean a policy is active — it may be cancelled, or not yet started.` : "",
+    //
+    // ⚠️ AN AFFIRMATIVE `status` IS REQUIRED, and the first version of this fix
+    // did not say so. It read "say it only from that policy's own "status" and
+    // "cover starts" lines, and if NEITHER is on file say the records do not
+    // say" — which permits activity to be stated from `cover starts` alone, and
+    // `status` is NULLABLE, so "no status line, past effective date" is a real
+    // row. A past effective date proves cover BEGAN; it says nothing about
+    // whether it continues, so a cancelled policy with no status would still
+    // read as active. The date's only job here is the opposite one: stopping a
+    // FUTURE-dated policy being called active. Found by Codex, on the fix.
+    typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Dates below are absolute; work out "soon" and "overdue" from this date, never from your own. Whether a policy is STILL ACTIVE is a matter of record, not arithmetic. Say a policy is active ONLY IF it has a "status" line that says so AND its "cover starts" date is not in the future. If it has NO "status" line, say the records do not say whether it is active: a "cover starts" date in the past shows only that cover BEGAN, never that it continues, and a renewal date in the future does NOT mean a policy is active — it may be cancelled, or not yet started.` : "",
     "",
     renderTopics(topics),
     "",
