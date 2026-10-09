@@ -79,14 +79,29 @@ alter policy "er_underwriter_update" on public.enhancement_requests
 --     account can rewrite those columns, not only the status.
 -- Both recorded in CLAUDE.md's security constraints.
 --
--- POST-APPLY PROBE — run as a REAL BROKER session (service-role bypasses RLS and
--- reports a false pass). Assert on SQLSTATE 42501 / "new row violates
--- row-level security policy", not on message text:
---   as broker:      update enhancement_requests set status='approved'     -> DENY
---   as broker:      update enhancement_requests set status='underwriting' -> OK
---   as underwriter: update enhancement_requests set status='approved'     -> OK
--- ⚠️ The deny case is the one that must be asserted. A probe that only checks
--- `pg_policies.with_check IS NOT NULL` passes against the broken version.
+-- POST-APPLY PROBE — run as REAL BROKER AND UNDERWRITER sessions (service-role
+-- bypasses RLS and reports a false pass). Assert on SQLSTATE 42501 / "new row
+-- violates row-level security policy", not on message text.
+--
+-- RUN 2026-10-09 against the live project, password grants against
+-- /auth/v1/token then PostgREST with each bearer. The WHOLE documented lifecycle,
+-- both directions, not just the denial:
+--
+--   broker      -> broker_review   HTTP 204   allow
+--   broker      -> underwriting    HTTP 204   allow
+--   broker      -> approved        HTTP 403   DENY   <- the fix
+--   underwriter -> approved        HTTP 204   allow
+--   underwriter -> requested       HTTP 403   DENY   (in neither role's set)
+--
+-- The seeded demo row was then restored to 'requested' as `postgres`.
+--
+-- ⚠️ BOTH HALVES ARE THE PROBE. The denial is what the migration is for, and the
+-- allows are what proves it did not break the demo lifecycle instead — a policy
+-- tightened one notch too far refuses the underwriter's own approval and looks
+-- like a working guard. An earlier version of this note listed only three cases
+-- and no measurements.
+-- ⚠️ And a probe that only checks `pg_policies.with_check IS NOT NULL` passes
+-- against the broken version, which is how the original shipped.
 --
 -- INVERSE (reversible-by-design, per data.md) — restores the ineffective form,
 -- i.e. the hole:
