@@ -10,7 +10,7 @@
 // violation. This file is what still holds when that inference goes wrong.
 import { el, mount } from "../../dom.js";
 import { icon } from "../../icons.js";
-import { askHelp, loadHelpGuide, getUser, authEpoch} from "../../supabase.js";
+import { askHelp, loadHelpGuide, getUser, authEpoch, onAuthChange} from "../../supabase.js";
 import {
   cleanQuestion, validateQuestion, suggestionChips, answerShape, creditedTopics,
 } from "../logic/help.js";
@@ -79,6 +79,24 @@ const pendingByOwner = new Set();   // owner ids with a call in flight
 // nothing at all. The answer was already in `lastAsk`, so it appeared on the
 // next visit to Help — which is not a defence of leaving it there.
 let liveView = null;  // { renderAnswer, renderNotice, setBusy, input }
+
+// ⚠️ THE EPOCH GUARDS WHAT IS WRITTEN AND RESTORED, NOT WHAT IS ALREADY HELD.
+// A login change — here or in another tab — must drop this module's state
+// outright, or A's question, answer and credited record values sit in memory and
+// in a mounted view after the browser session stops being A's. `main.js`
+// re-dispatches the route on the same signal, which replaces the DOM; this is
+// the half that clears the references behind it. Found by Codex, round 19.
+// The gate is cleared too: a new login must not inherit a departed client's
+// in-flight slot, and that ask's own `finally` keys on its own owner anyway.
+//
+// ⚠️ THIS IS BELT — measured, and labelled rather than left to be discovered.
+// Deleting it passes every scenario, because `main.js`'s re-dispatch replaces the
+// DOM and the epoch blocks the restore, so nothing is OBSERVABLE without it. It
+// is kept on data-hygiene grounds, which no UI test can express: without it the
+// previous person's question, answer and credited record values stay in this
+// module's memory after their session has ended. Cheap, and the right default for
+// private data.
+onAuthChange(() => { lastAsk = null; liveView = null; pendingByOwner.clear(); });
 
 // Which Help render is current. Bumped on entry, checked after the only await,
 // so a render the client has navigated past cannot mount over what replaced it.

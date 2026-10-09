@@ -924,6 +924,32 @@ round 17.
 ⚠️ **NOT folded into `invalidate()`**, which three data writes also call — the
 cached answer would vanish whenever a client added an asset.
 
+⚠️ **AND THE EPOCH ALONE WAS NOT ENOUGH EITHER — three layers, three rounds.**
+Rounds 17–19 were the same disclosure mechanism one layer out each time, and each
+fix was right about the layer it addressed and silent about the next:
+
+| round | what was guarded | what was not |
+|---|---|---|
+| 17 | the account | a second *session* on the shared account |
+| 18 | the session, same tab | the session **across tabs** (BroadcastChannel) |
+| 19 | what is WRITTEN and RESTORED | what is **already rendered** |
+
+So the signal now does three things, not one: bump the epoch, **re-dispatch the
+route** (`main.js`, so an unauthenticated Keep route goes to the login card and
+the DOM is replaced), and **clear the view's module state** (`help-view.js`).
+⚠️ **`SIGNED_IN` IS NOT A NEW LOGIN** — the client re-establishes the session on
+tab refocus and emits it for the *same* session, so bumping on the event alone
+discarded a paid answer when the client switched tabs. The generation is keyed on
+`loginKeyOf` = user + `last_sign_in_at`, which is measured to change between two
+sign-ins 1.5s apart on the shared credential and not to move on a refresh.
+⚠️ **A FIRST gain of a session is silent; a gain after a LOSS announces.**
+`INITIAL_SESSION` arrives with a **null** session before storage recovery, so the
+`SIGNED_IN` that follows looked like a change and re-dispatched on every load —
+**S18 caught that as a second corpus fetch**, i.e. the fix for one stale-render
+race caused another. The invariant that makes the silence safe: the clear fires on
+losing or switching a login, so by the time this tab has no key, nothing is held
+under the old one.
+
 ⚠️ **AND THE SAME-TAB BUMPS ARE NOT ENOUGH.** `signIn`/`signOut` run only in the
 tab that called them, and the vendored client broadcasts auth changes to the
 others over a **BroadcastChannel** — so signing out and back into the shared
@@ -944,6 +970,8 @@ simulates the broadcast. Found by Codex, round 18.
 | epoch in the restore check | **fails S19** | it is the fix |
 | owner comparison (both places) | **survives** | a third auth entry point that forgot to bump would leave the epoch equal across two clients; that one case, and nothing else |
 | the bump in `signOut` | **survives** | the route guard means nobody reaches a cached view while signed out, and the next `signIn` bumps first — kept so the primitive's stated contract holds for its next consumer |
+| `help-view.js`'s own `onAuthChange` clear | **survives** | the re-dispatch replaces the DOM and the epoch blocks the restore, so nothing is *observable* without it — kept on data-hygiene grounds no UI test can express: the previous person's answer would otherwise stay in module memory |
+| the `last_sign_in_at` half of the login key | **survives** | a same-account re-login is only reachable through a sign-out, which already clears — kept for re-authentication with no sign-out (a password change, `USER_UPDATED`), where the bare id compares equal and the staleness is silent |
 
 The two survivors are labelled as survivors **in the code**, up front. Twice in
 this PR a guard's comment kept calling it load-bearing after it had stopped
@@ -1261,6 +1289,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S19 | Help desk — sign-out must END the desk, SAME account (offline harness, **runs locally**) | Ask and get an answer, sign out, then sign back in **with the same prefilled demo credential** — a different person at the same machine. No `.k-help__a`, no `.k-help__src`, no `.k-help__q`, empty ask box. ⚠️ **Every other identity scenario switches to a DIFFERENT client, so all of them pass against an owner-scoped guard.** This one cannot: `getUser()?.id` is identical, and CLAUDE.md already records that `owner = auth.uid()` is not a per-person fence on the shared demo credential. | A completed answer, its question or its credited record values survive a sign-out |
 | S19b | Help desk — an in-flight answer after a same-account sign-out (offline harness, **runs locally**) | As S19 but the response is **held** across the sign-out and sign-in, then released: it must not render into the next person's view and must not be cached for them (checked by leaving and returning, since the cache is read on render). The desk must still work for them. | The previous session's answer lands in the next person's page or cache |
 | S20 | Help desk — a CROSS-TAB auth change (offline harness, **runs locally**) | Two real tabs in ONE browser context, so they share storage and the BroadcastChannel. Tab 1 asks with the response held; tab 2 signs out and back into the **same** shared account; tab 1's held response is then released and must not render or cache. ⚠️ `signIn`/`signOut` bump the login generation only in the tab that calls them — the client broadcasts the change to the others, so a same-tab-only epoch left tab 1 holding a stale one and every check passed. | An auth change in another tab does not end this tab's Help session |
+| S21 | Help desk — an answer ALREADY RENDERED is cleared (offline harness, **runs locally**) | Tab 1 asks and **receives**; tab 2 signs out of the shared account; tab 1 is never touched again. The answer, its credits and the question must leave tab 1's page on the broadcast alone. ⚠️ Distinct from S20: there the epoch stops the answer being WRITTEN, here it has already been written and rendered, and the epoch guards neither. | The previous person's answer stays on screen after their session ended elsewhere |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

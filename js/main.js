@@ -15,7 +15,7 @@ import {
   renderKeepDocuments, renderKeepAccount, renderKeepSecurity,
 } from "./keep/views/keep.js";
 import { renderKeepHelp } from "./keep/views/help-view.js";
-import { getSession, ensureData } from "./supabase.js";
+import { getSession, ensureData, onAuthChange } from "./supabase.js";
 import { createNavStack, createHistorySignal } from "./nav.js";
 
 // Programmatic navigation. Re-renders if the hash is unchanged.
@@ -33,6 +33,15 @@ const nav = createNavStack();
 // what the last two review rounds found.
 const navSignal = createHistorySignal(window.history);
 export function previousRoute() { return nav.previous(); }
+
+// ⚠️ A LOGIN CHANGE RE-DISPATCHES THE CURRENT ROUTE, including one that happened
+// in ANOTHER TAB. Without this, a cross-tab sign-out left this tab sitting on a
+// rendered Keep page — the Help desk still showing the previous person's
+// question, answer and credited record values — because the epoch only guards
+// what is WRITTEN or RESTORED, never what is already on screen. Re-dispatching
+// runs the route guard, which sends an unauthenticated Keep route to the login
+// card and so clears it. Found by Codex, round 19.
+onAuthChange(() => { route(); });
 
 async function route() {
   const fullHash = location.hash || "#/";

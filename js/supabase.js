@@ -90,6 +90,96 @@ export async function getSession() {
 let loginEpoch = 0;
 export function authEpoch() { return loginEpoch; }
 
+// Called when the LOGIN changes — here or in another tab. The router re-dispatches
+// so a cross-tab sign-out leaves the Keep, and views drop anything they cached.
+const authListeners = new Set();
+export function onAuthChange(fn) { authListeners.add(fn); return () => authListeners.delete(fn); }
+
+// The identity of a LOGIN, not of an account: the user plus WHEN they signed in.
+//
+// ⚠️ `SIGNED_IN` IS NOT A NEW LOGIN. The vendored client re-establishes the
+// session on tab refocus (`_onVisibilityChanged` → `_recoverAndRefresh`) and
+// emits `SIGNED_IN` for the SAME session. Bumping on every such event — which is
+// what the first version of this listener did — meant that switching tabs while
+// an ask was running failed the epoch check and DISCARDED a paid answer, and a
+// completed answer stopped restoring after navigation. Found by Codex, round 19,
+// against the round-18 fix.
+//
+// `last_sign_in_at` is what distinguishes two logins to the same account:
+// measured against the live project, two sign-ins 1.5s apart on the shared demo
+// credential returned `2026-10-09T23:04:48.840374353Z` and
+// `...:50.40940621Z`. It does not move on a refresh.
+//
+// ⚠️ THE FALLBACK IS A VALUE THAT NEVER COMPARES EQUAL, not the user id. If the
+// field is ever absent, "cannot tell these logins apart" must resolve as
+// CHANGED: the cost is a discarded answer, where the other direction is showing
+// one person's records to the next. Deliberately the conservative side.
+function loginKeyOf(session) {
+  const id = session?.user?.id;
+  if (!id) return null;
+  const at = session.user.last_sign_in_at;
+  //
+  // ⚠️ THE `last_sign_in_at` COMPONENT IS BELT TODAY — measured. Reducing the key
+  // to the bare user id passes every scenario, because a same-account re-login
+  // can only be reached through a sign-out, and the sign-out already clears
+  // everything. It is kept because the case it covers is a re-authentication with
+  // NO intervening sign-out (a password change, a `USER_UPDATED`, a programmatic
+  // re-sign-in), where the id alone compares equal and the stale state would be
+  // retained silently. That is precisely the class of miss that got through three
+  // rounds running here — owner, then session, then session-across-tabs — so the
+  // stricter key stays even though no test can currently tell the difference.
+  return at ? `${id}:${at}` : `${id}:unknown:${Date.now()}:${Math.random()}`;
+}
+let loginKey = null;
+let seenLogin = false;
+
+function announceLogin(key) {
+  loginKey = key;
+  if (key) seenLogin = true;
+  loginEpoch += 1;
+  invalidate();
+  for (const fn of authListeners) {
+    // One listener throwing must not stop the others, or a view's cleanup is
+    // skipped by whatever ran before it.
+    try { fn(key); } catch (e) { console.warn("auth listener threw —", e && e.message); }
+  }
+}
+
+// ⚠️ CROSS-TAB. The explicit calls in `signIn`/`signOut` only run in the tab that
+// called them; the client broadcasts auth changes to the others over a
+// BroadcastChannel. Without this, signing out and back into the shared account in
+// a second tab left the first tab holding a stale epoch AND still displaying the
+// previous person's answer. `TOKEN_REFRESHED` and `INITIAL_SESSION` are excluded
+// outright; everything else is compared, so a refocus announcing the same login
+// is a no-op.
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === "TOKEN_REFRESHED") return;
+  const next = loginKeyOf(session);
+  if (next === loginKey) return;
+
+  // ⚠️ GAINING A LOGIN FROM NONE IS NOT A CHANGE TO ANNOUNCE, and the invariant
+  // is what makes that safe rather than convenient: the clear fires on LOSING or
+  // SWITCHING a login, so by the time this tab has no key, anything cached under
+  // the previous one has already been dropped. Gaining one therefore cannot
+  // expose a previous person's data — there is no previous person in this tab.
+  //
+  // It is also the only way to be correct on load. `INITIAL_SESSION` arrives with
+  // a NULL session, before the client has recovered storage — measured, after a
+  // first attempt that tried to baseline from it and did not work — and the
+  // `SIGNED_IN` that follows carries the real one. Treating that pair as a change
+  // bumped the epoch on every load and re-dispatched the route, which S18 caught
+  // as a SECOND corpus fetch on a first Help visit: the very stale-render race
+  // that scenario exists for, caused by the fix for a different one.
+  // The distinction is "has this tab EVER had a login", not "does it have one
+  // now". A first gain is the load baseline and stays silent; a gain AFTER a loss
+  // is a real switch, and announcing it lets this tab follow the new session
+  // rather than sitting on a stale card — safe, because the loss already cleared
+  // everything held under the old one.
+  if (loginKey === null && !seenLogin) { loginKey = next; seenLogin = true; return; }
+
+  announceLogin(next);
+});
+
 // ⚠️ CROSS-TAB. The bumps in `signIn`/`signOut` below only run in the tab that
 // called them, and the Supabase client BROADCASTS auth changes to the others
 // over a BroadcastChannel. So: sign out and sign back into the shared demo
@@ -116,8 +206,9 @@ supabase.auth.onAuthStateChange((event) => {
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };
-  loginEpoch += 1;
-  invalidate();
+  // Announced here rather than left to the event, so `authEpoch()` is already
+  // correct when this returns. The event then finds the same key and is a no-op.
+  announceLogin(loginKeyOf(data.session));
   return { ok: true, session: data.session };
 }
 
@@ -129,8 +220,7 @@ export async function signOut() {
   // out real visitors and any concurrently running test worker.
   // A dedicated test identity is the proper end state; this removes the hazard.
   await supabase.auth.signOut({ scope: "local" });
-  loginEpoch += 1;
-  invalidate();
+  announceLogin(null);
 }
 
 // ── Keep data: load once, assemble the nested shape the views expect ─────────

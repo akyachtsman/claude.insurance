@@ -2604,7 +2604,19 @@ const keepRows = (u) => ({
   entity_relationships: [],
 });
 
-const userObj = (u) => ({ id: u.uid, email: u.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {} });
+// ⚠️ `last_sign_in_at` IS NOT DECORATION — it is what `loginKeyOf` in
+// supabase.js uses to tell two logins to the SAME account apart, and the real
+// server sends it (measured against the live project: two sign-ins 1.5s apart on
+// the shared demo credential returned distinct nanosecond timestamps). Without
+// it here, the fixture would drive `loginKeyOf`'s conservative fallback — a key
+// that never compares equal — and every scenario would pass for the wrong
+// reason, including the refocus case that must NOT bump.
+// A fresh value per call, so a sign-out/sign-in round trip is a NEW login.
+const userObj = (u) => ({
+  id: u.uid, email: u.email, aud: 'authenticated', role: 'authenticated',
+  last_sign_in_at: new Date().toISOString(),
+  app_metadata: {}, user_metadata: {},
+});
 const sessionFor = (u) => ({
   access_token: fakeJwt(u.uid),
   token_type: 'bearer',
@@ -3586,18 +3598,78 @@ test('S20: an auth change in another tab ends this tab\'s Help session too', asy
   fn.release(0);
   await tab1.waitForTimeout(1_500);
 
-  await expect(tab1.locator('.k-help__out'),
-    "a sign-out in another tab did not end this tab's session — the previous person's answer rendered")
+  // ⚠️ ASSERTED ON THE WHOLE DOCUMENT, not on `.k-help__out`. The fix
+  // re-dispatches the route on an auth change, so tab 1 may legitimately no
+  // longer be showing a Help page at all — the first version of this assertion
+  // targeted `.k-help__out` and failed with "element(s) not found" once the fix
+  // worked, which is an assertion that could only pass while the bug was there.
+  // What must be true either way is that the text is nowhere on the page.
+  await expect(tab1.locator('body'),
+    "a sign-out in another tab did not end this tab's session — the previous person's answer is still on the page")
     .not.toContainText(/THE FIRST PERSON'S ANSWER/);
   await expect(tab1.locator('.k-help__a')).toHaveCount(0);
 
-  // Nor cached: the cache is read on render.
-  await tab1.goto('./#/keep/list');
-  await expect(tab1.locator('.k-h1')).toHaveText(/entities/i, { timeout: 15_000 });
+  // Nor cached: the cache is read on render, so go to Help explicitly and look
+  // again. (`#/keep/help` is reachable either way — the shared account is signed
+  // in again by now, in the other tab.)
+  await tab1.goto('./#/keep/help');
+  await tab1.waitForTimeout(1_000);
+  await expect(tab1.locator('body'),
+    "the previous session's answer was cached across a cross-tab sign-out")
+    .not.toContainText(/THE FIRST PERSON'S ANSWER/);
+  await expect(tab1.locator('.k-help__a')).toHaveCount(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S21 — AN ANSWER ALREADY ON SCREEN must go when the session does.
+// Distinct from S20, which holds the response: there, the epoch stops it being
+// WRITTEN. Here it has already been written and RENDERED, and the epoch guards
+// neither — it only gates future completions and restores. So tab 1 sat there
+// displaying the previous person's question, answer and credited record values
+// after the browser session had stopped being theirs. Found by Codex, round 19,
+// against the round-18 fix: each round fixed the layer it was shown and left the
+// next one out.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S21: an answer already rendered is cleared when another tab signs out', async ({ context, renderWitness }) => {
+  renderWitness();
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "THE FIRST PERSON'S ANSWER, about their own dwelling limit." };
+
+  const tab1 = await context.newPage();
+  const pageErrors = [];
+  tab1.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(tab1, 'a');
+  const fn = await routeHelpAskSequence(tab1, [A_ANS]);
+
+  // TAB 1 asks AND RECEIVES. The answer and its credits are on screen.
   await tab1.goto('./#/keep/help');
   await expect(tab1.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(tab1.locator('.k-help__ai')).toHaveCount(1, { timeout: 10_000 });
+  await tab1.locator('.k-help__input').fill('What is my dwelling limit?');
+  await tab1.locator('.k-help__ask').click();
+  fn.release(0);
+  await expect(tab1.locator('.k-help__a')).toContainText(/THE FIRST PERSON'S ANSWER/, { timeout: 10_000 });
+  await expect(tab1.locator('.k-help__src'), 'the credits did not render, so there is nothing to clear')
+    .toHaveCount(1);
+
+  // TAB 2 signs out of the shared account. Nothing happens in tab 1 at all —
+  // no navigation, no interaction. The broadcast is the only input.
+  const tab2 = await context.newPage();
+  await seedKeepSession(tab2, 'a');
+  await tab2.goto('./#/keep/account');
+  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await tab2.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+
+  // TAB 1 must no longer be showing it — without being touched.
+  await expect(tab1.locator('body'),
+    "the previous person's answer stayed on screen after their session ended in another tab")
+    .not.toContainText(/THE FIRST PERSON'S ANSWER/, { timeout: 10_000 });
   await expect(tab1.locator('.k-help__a'),
-    "the previous session's answer was cached across a cross-tab sign-out").toHaveCount(0);
+    'the answer element survived the sign-out').toHaveCount(0);
+  await expect(tab1.locator('.k-help__src'),
+    'the credited record values survived the sign-out').toHaveCount(0);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
