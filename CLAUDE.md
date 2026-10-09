@@ -180,8 +180,23 @@ This is the one to follow; the others defer to it.
    The moment a key exists, `qa-live`'s S10 asks **4 real questions per Pages
    deploy** without anyone touching the UI. The code's caps are the first line;
    the Console limit is the backstop if they have a bug.
-6. Deploy `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
+6. ⏸️ **DELIBERATELY WAITS FOR STEP 5 — one MCP call, not started.** Deploy
+   `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
    entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
+   ⚠️ **A session CAN do this** (`mcp__Supabase__deploy_edge_function`, `files`
+   = the three modules' contents, `entrypoint_path: "index.ts"`,
+   `verify_jwt: true`), and one was started on 2026-10-09 and then **stopped on
+   purpose**. The reasoning, because "I could, so I did" is the wrong default
+   here: the tool takes file CONTENT inline, so deploying from a session means
+   re-emitting ~75KB verbatim, `prompt.ts` among it — the one module that defines
+   what data crosses the Anthropic boundary. A single-character corruption there
+   is a safety defect, and **FR-17 renders every failure as the same quiet
+   notice**, so a corrupted deploy is indistinguishable from an undeployed one
+   until somebody reads the function logs. Against that: with no
+   `ANTHROPIC_API_KEY` the deployed function answers nothing, so an early deploy
+   buys **zero** working behaviour. Non-zero risk, zero present benefit — so it
+   goes with step 5, in one sitting, where the result can be checked against a
+   real answer rather than against a notice that means nothing.
    ⚠️ **It is THREE modules — `index.ts`, `handler.ts`, `prompt.ts` — and they
    deploy together.** `index.ts` imports the other two, so pasting it alone into
    the Dashboard editor fails at import, which FR-17 then renders as the same
