@@ -3,7 +3,48 @@
 -- Take INSERT on public.profiles away from `authenticated`, and drop the
 -- "profiles insert own" policy that goes with it.
 --
--- NOT APPLIED. CLAUDE.md requires explicit owner approval for migrations.
+-- ⚠️ PARTIALLY SUPERSEDED, 2026-10-09 — READ THIS BEFORE ACTING ON THE FILE.
+--
+-- THE SECURITY EFFECT OF THIS FILE IS LIVE. `revoke insert on public.profiles
+-- from authenticated` was applied as step 2 of
+-- `supabase/migrations/20261005120100_profiles_role_not_self_assignable.sql`,
+-- which carries the identical statement. Measured afterwards as a real client
+-- session (password grant, then PostgREST with that bearer):
+--
+--   insert into public.profiles (id) values (<own uid>)
+--     -> HTTP 403, SQLSTATE 42501 "permission denied for table profiles"
+--
+-- So `help-ask`'s invite check is a real gate now, not a decorative one, and
+-- feature 003's owner-gate step 2 is satisfied. Nothing is waiting on this file
+-- for that.
+--
+-- WHAT IS STILL OUTSTANDING is the second statement only — `drop policy if
+-- exists "profiles insert own"` — and it is now BOTH redundant and unrunnable
+-- from here:
+--   * Redundant, because 20261005120100 narrowed that policy to
+--     `with check (id = auth.uid() and role = 'client')`. It is strictly tighter
+--     than the policy this file wanted to delete, and dormant regardless:
+--     Postgres checks privileges before policies, and INSERT is revoked.
+--   * Unrunnable, because the Supabase MCP hangs for 60s on any statement
+--     containing a DROP and applies nothing — CREATE and ALTER return instantly,
+--     and Postgres is not the bottleneck (`set local lock_timeout` never fires,
+--     nothing waits on a lock). That is why 20261005120100 used ALTER POLICY
+--     where it was written as DROP + CREATE.
+--
+-- So this file remains here as a ONE-STATEMENT TIDY-UP for whoever next has the
+-- Dashboard SQL editor open, not as a security gate:
+--     drop policy "profiles insert own" on public.profiles;
+-- Running it changes no privilege and no access decision. NOT running it leaves
+-- a policy in `pg_policies` that looks live and is not — which is the only cost,
+-- and the reason this is written down rather than dropped from the README.
+--
+-- ⚠️ THE ORDERING WARNING FURTHER DOWN THIS FILE IS NOW MOOT and is kept only so
+-- a reader meeting it is not misled: 20261005120100 no longer contains a DROP or
+-- a CREATE of this policy, so there is no order in which applying it re-creates
+-- anything.
+--
+-- (Original header: NOT APPLIED. CLAUDE.md requires explicit owner approval for
+-- migrations.)
 --
 -- ─── WHY ──────────────────────────────────────────────────────────────────────
 --

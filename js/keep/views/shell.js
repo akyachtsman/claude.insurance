@@ -454,27 +454,45 @@ const KEEP_LABELS = {
   "#/keep/security": "security",
 };
 
+// ⚠️ ROUTES THAT ARE NEVER A BACK DESTINATION, however the user reached them.
+// Two kinds, and each is here because it was MEASURED doing harm, not reasoned
+// about:
+//
+//   `login` — `renderKeepLogin`'s success path is `go("#/keep")`, and
+//   `nav.track` runs on every route including login, so the nav stack records
+//   `#/keep/login` as the origin of the landing page of EVERY signed-in session.
+//   It starts with `#/keep`, so the prefix test in `originRoute` admitted it:
+//   the first screen after every sign-in offered a bare "Back" to the login
+//   card, and `dispatchKeep` renders that card for `sub === "login"` with no
+//   session check, so following it showed a signed-in client the login form.
+//
+//   `add-asset` / `add-entity` / `request/:id` — SINGLE-USE FORMS the app
+//   navigates away from on success (`assets.js` → `#/keep/asset/:id`,
+//   `keep.js` → `#/keep/entity/:id`, `policies-view.js` → `#/keep/requests`).
+//   Offering the submitted form as the place you came from invites a second
+//   submission: on the request form that is a DUPLICATE enhancement request.
+//   `KEEP_LABELS` already declines to name these routes, so before this they
+//   were both unnamed and offered — a bare "Back" to a blank form.
+//
+// Both found by independent review of this branch (rounds 7 and 8, 2026-10-09),
+// each by driving a real sign-in / a real submit rather than reading the code:
+// the deep-link and credited-destination checks that came first could not reach
+// either stack. The pattern is anchored and allows a trailing `/` or a query
+// string, because `#/keep/login/` and `#/keep/login?x=1` both route to the login
+// card and an exact-string exclusion missed both. `#/keep/requests` (the list)
+// deliberately does NOT match — only `#/keep/request/<id>`, the form.
+const NOT_A_BACK_DESTINATION =
+  /^#\/keep\/(?:login|add-asset|add-entity)(?:[/?]|$)|^#\/keep\/request\//;
+
 // The in-app Keep route the user actually came from, or null when there is none
 // to offer. ONE predicate, shared by every back control — `originHref` below
 // (nine `backLink` call sites plus `kProgress`'s cancel) and `originBackRow`
-// further down — so a route that must never be a back destination is excluded
-// in one place rather than per call site.
-//
-// ⚠️ `#/keep/login` IS EXCLUDED, and it is not hypothetical. `renderKeepLogin`'s
-// success path is `go("#/keep")`, and `nav.track` runs on every route including
-// login, so the nav stack records `#/keep/login` as the origin of the landing
-// page of EVERY signed-in session. `#/keep/login` starts with `#/keep`, so the
-// prefix test admits it — which put a bare "Back" link to the login card on the
-// first screen after every sign-in, and `dispatchKeep` renders that card for
-// `sub === "login"` with no session check, so following it showed a signed-in
-// client the login form. Found by review round 7 (2026-10-09) by MEASURING a
-// real form login, which is also why the commit that added `originBackRow()` to
-// the landing page missed it: its own verification covered deep links and
-// credited destinations, never the post-login transition. S13 asserts it now.
+// further down — so the exclusions above are decided in one place rather than
+// per call site, and a new back control inherits them by construction.
 function originRoute() {
   const prev = previousRoute();
   if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
-  if (prev === "#/keep/login") return null;
+  if (NOT_A_BACK_DESTINATION.test(prev)) return null;
   return prev;
 }
 

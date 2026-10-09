@@ -13,12 +13,18 @@ same change that applies it.
 
 | file | why it is waiting |
 |---|---|
-| `20261005_enhancement_request_stage_guard.sql` | Closes a real authorization hole (below). Needs owner approval + `apply_migration`. |
-| `20261005_profiles_role_not_self_assignable.sql` | Closes a **live privilege escalation**: any signed-in client can set its own `profiles.role` to `broker`. Needs owner approval + `apply_migration`. |
-| `20261006_profiles_no_client_insert.sql` | **Security.** Revokes the client INSERT on `profiles`, without which `help-ask`'s invite check is bypassable in one PostgREST call. Needs owner approval + `apply_migration`. |
-| `20261006_help_queries.sql` | **Not a fix — a new table.** The state feature 003's help-desk throttle counts (FR-16). Nothing is insecure for want of it; the help desk simply cannot ship until it is applied. Needs owner approval + `apply_migration`. |
+| `20261006_profiles_no_client_insert.sql` | **Its security effect is already LIVE** — the `revoke insert` was applied 2026-10-09 as step 2 of `migrations/20261005120100_profiles_role_not_self_assignable.sql`, and verified as a client session (42501). What is left is its `drop policy` line alone: redundant (the policy is now narrower *and* dormant) and unrunnable through the Supabase MCP, which hangs on any DROP. A one-statement tidy-up for the Dashboard SQL editor, not a gate. |
 
-## 20261005_enhancement_request_stage_guard.sql
+## ~~20261005_enhancement_request_stage_guard.sql~~ — APPLIED 2026-10-09
+
+**Now `migrations/20261005120000_enhancement_request_stage_guard.sql`.** The
+background below is kept because it is the only write-up of the hole; what the
+file now contains differs from what is described here in one way — it uses
+`ALTER POLICY` rather than `DROP` + `CREATE`, because the Supabase MCP hangs on
+any DROP. Same end state, verified in `pg_policies`. The BEFORE UPDATE trigger
+this section calls the stricter follow-up is still outstanding, and so is the
+missing `with check` on `owner`/`subject`/`body`.
+
 
 Found by `/audit-repo` on 2026-10-05.
 
@@ -61,7 +67,14 @@ which is the one the UI actually uses — only this migration does.
 **To apply:** review, then move to `supabase/migrations/` in the same change that
 runs it, and drop its row from the table above.
 
-## 20261005_profiles_role_not_self_assignable.sql
+## ~~20261005_profiles_role_not_self_assignable.sql~~ — APPLIED 2026-10-09
+
+**Now `migrations/20261005120100_profiles_role_not_self_assignable.sql`.** The
+live privilege escalation described below is CLOSED: `authenticated` now holds
+`UPDATE` on `reminder_email, reminder_schedule` only, and no `INSERT` at all.
+Verified as a real client session (not service-role): `role='broker'` returns
+42501, the Account page's own write still returns 204.
+
 
 Found while reviewing the feature-002 plan on 2026-10-05, and **verified against
 the live database** rather than inferred from these files.
@@ -134,7 +147,12 @@ Distinct from `20261005_profiles_role_not_self_assignable.sql`: that one is
 privilege escalation on an existing row, this one is account creation. Either
 can be applied without the other.
 
-## 20261006_help_queries.sql
+## ~~20261006_help_queries.sql~~ — APPLIED 2026-10-09
+
+**Now `migrations/20261006120000_help_queries.sql`** — feature 003 owner-gate
+step 1. Applied verbatim; it contains no DROP, so unlike the two above it
+needed no rewrite. Client probes 1-5 all return 42501.
+
 
 Written 2026-10-06 as task **T4** of the approved feature-003 plan
 (`specs/003-help-desk/plan.md`). Unlike the two files above, this one closes no

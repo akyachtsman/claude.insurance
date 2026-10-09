@@ -2936,6 +2936,30 @@ test('S13: following a credit and coming back restores the answer — but only f
   await expect(page.locator('.k-backrow'),
     'the page a sign-in lands on offers a back control — it points at the login card').toHaveCount(0);
 
+  // THE OTHER TWO SHAPES OF THE SAME BUG, both measured rather than reasoned
+  // about (review round 8). A hash change does NOT reload the document, so the
+  // nav stack survives these gotos — which is exactly what makes them a test of
+  // `originRoute()`'s exclusions rather than of a fresh load.
+  //
+  // (a) `#/keep/login/` routes to the login card too (`main.js` filters empty
+  //     path parts), so an exact-string exclusion missed it.
+  await page.goto('./#/keep/login/');
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await page.goto('./#/keep');
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-backrow'),
+    'a trailing-slash login route is still offered as a back destination').toHaveCount(0);
+
+  // (b) A SINGLE-USE FORM the app navigates away from on success. Pointing a back
+  //     control at a submitted form invites a second submission — on
+  //     `#/keep/request/:id` that is a duplicate enhancement request.
+  await page.goto('./#/keep/add-asset');
+  await expect(page.locator('.k-progress')).toBeVisible({ timeout: 10_000 });
+  await page.goto('./#/keep/assets');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-backrow'),
+    'a completed single-use form is still offered as a back destination').toHaveCount(0);
+
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
   await expect(page.locator('.k-help__a'),

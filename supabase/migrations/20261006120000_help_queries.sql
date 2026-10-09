@@ -69,10 +69,25 @@
 -- it is kept because dropping NOT NULL or the default would weaken the row shape
 -- for no gain.
 --
--- NOT APPLIED. CLAUDE.md requires explicit owner approval for migrations; this
--- file is the plan's T13 gate. Move it to supabase/migrations/ in the same
--- change that applies it, run the probe in this footer as a CLIENT session, and
--- drop its row from the README beside this file.
+-- APPLIED 2026-10-09, version 20261006120000 — feature 003 owner-gate step 1.
+-- Every statement below ran exactly as written: this file needed no rewrite to
+-- be applicable, because it contains no DROP (unlike the two migrations applied
+-- beside it — the Supabase MCP hangs 60s on any statement containing one, so
+-- those were re-expressed as ALTER POLICY; see
+-- 20261005120000_enhancement_request_stage_guard.sql).
+--
+-- The footer probe was run AS A REAL CLIENT SESSION (password grant against
+-- /auth/v1/token as user@example.com, then PostgREST with that bearer — never
+-- service-role, which would report a false pass). Steps 1, 2, 3, 4 and 5 all
+-- PASS: every client call returns HTTP 403 / SQLSTATE 42501, including the
+-- forged-owner insert. `authenticated` holds nothing on this table, as intended.
+--
+-- Step 0 (seed a row to probe against) was deliberately NOT run: steps 1-5 all
+-- fail on the PRIVILEGE, before any row is consulted, so there is nothing for a
+-- seeded row to change about their outcome. The service-role read-back in steps
+-- 4 and 5 — "assert the step-0 row survives" — is therefore the one part of this
+-- probe still unexercised, and it only becomes meaningful if a DELETE or UPDATE
+-- grant is ever restored. Re-run it then, which is exactly when it matters.
 
 create table if not exists public.help_queries (
   id uuid primary key default gen_random_uuid(),

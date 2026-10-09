@@ -76,7 +76,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   `pages-retry.yml`. `.github/actions/` holds the shared composite actions
   (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
   `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed). RLS on every table, default-deny. Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
   and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
   `notify-renewal` functions are still to come.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
@@ -120,19 +120,49 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 Three places gave different versions of this (5 steps, 2 prerequisites, 6 steps).
 This is the one to follow; the others defer to it.
 
-1. Apply `supabase/proposed/20261006_help_queries.sql` — the throttle table. Its
-   explicit `grant ... to service_role` is load-bearing, not tidiness.
-2. Apply `supabase/proposed/20261006_profiles_no_client_insert.sql`. Without it
-   the invite check is bypassable with one PostgREST insert, so the per-client
-   spend cap is per *creatable* account.
-3. **Turn public sign-up off** in Supabase Auth. Measured ON (`disable_signup:
-   false`), which makes the Security page's "Invite-only access" card untrue.
-4. **Provision a `profiles` row for every invited client**, as `postgres` (the
-   dashboard SQL editor). Nothing else creates one: no trigger, no client insert
-   after step 2, and `service_role` has no INSERT on that table. Without it the
-   Keep works and the Help desk refuses every question, showing the same notice
-   as an outage. This belongs in the invite runbook.
-5. Set `ANTHROPIC_API_KEY` as an Edge Function secret.
+1. ✅ **DONE 2026-10-09** — `help_queries` is live, as
+   `supabase/migrations/20261006120000_help_queries.sql`. Its explicit
+   `grant ... to service_role` is load-bearing, not tidiness. Client probes 1-5
+   from its footer all return 42501, run as a real client session.
+2. ✅ **DONE 2026-10-09 in substance** — `revoke insert on public.profiles from
+   authenticated` is live (applied as step 2 of
+   `migrations/20261005120100_profiles_role_not_self_assignable.sql`, which
+   carries the identical statement), so the invite check is a real gate: a client
+   `insert into profiles` now returns 42501, measured as a client session. The
+   only part of `supabase/proposed/20261006_profiles_no_client_insert.sql` still
+   unrun is its `drop policy` line, which is redundant (the policy is now
+   narrower *and* dormant) and cannot be issued through the Supabase MCP — see
+   the DROP note at the end of this list.
+3. ⏳ **OWNER ACTION — not doable from a session.** Turn public sign-up off in
+   Supabase Auth. Measured ON (`disable_signup: false`), which makes the Security
+   page's "Invite-only access" card untrue. There is no Supabase MCP tool for
+   auth config and the Management API needs a PAT no session holds. ⚠️ Step 2
+   *has* closed the spend half of this (a self-signed-up account can no longer
+   obtain a `profiles` row, so it can never reach a paid ask); what is still
+   untrue is the product's own claim.
+4. ✅ **DONE — already true, verified 2026-10-09, nothing to do for the demo.**
+   All three seeded accounts hold a `profiles` row with the right role
+   (`user@example.com` → `client`, `broker@` → `broker`, `underwriter@` →
+   `underwriter`), and those are the only three rows in `auth.users`. This step
+   remains in the **invite runbook** for every future client, because nothing
+   creates a row automatically: no trigger, no client insert after step 2, and
+   `service_role` has no INSERT on that table — so it must be done as `postgres`
+   (the dashboard SQL editor). Without it the Keep works and the Help desk
+   refuses every question, showing the same notice as an outage.
+5. ⛔ **OWNER ACTION — THE ONE HARD BLOCKER.** Set `ANTHROPIC_API_KEY` as an Edge
+   Function secret. No session can do this: the key is the owner's and is not in
+   this environment. `mcp__Supabase__create_edge_function_secret` exists, so once
+   the value is in hand a session can set it — the missing thing is the value,
+   not the tool. Until it is set, `hasKeys` is false and every ask renders FR-17's
+   notice, which is the same thing a client sees today, so nothing regresses by
+   waiting.
+   ⚠️ **SET THE ANTHROPIC CONSOLE WORKSPACE SPEND LIMIT IN THE SAME SITTING.**
+   This warning used to live in step 6 (the deploy) — wrong place, and the reason
+   matters: **spend becomes possible when the KEY is set, not when the function is
+   deployed.** The function is deployed and keyless today, and it bills nothing.
+   The moment a key exists, `qa-live`'s S10 asks **4 real questions per Pages
+   deploy** without anyone touching the UI. The code's caps are the first line;
+   the Console limit is the backstop if they have a bug.
 6. Deploy `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
    entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
    ⚠️ **It is THREE modules — `index.ts`, `handler.ts`, `prompt.ts` — and they
@@ -149,6 +179,47 @@ This is the one to follow; the others defer to it.
    makes every failure look identical, so this is the only step that proves the
    deploy worked. If it still shows the notice, read the function logs: the
    `where` field names the stage (`guide`, `records`, `reserve`, `provider`).
+
+### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
+
+Found while applying steps 1-2, and it is a constraint on *how migrations are
+written here*, not a one-off.
+
+| statement | result |
+|---|---|
+| `create table if not exists …` | returns instantly, applied |
+| `alter table … add column if not exists …` | returns instantly, applied |
+| `alter policy … with check (…)` | returns instantly, applied |
+| `grant …` / `revoke …` | returns instantly, applied |
+| `drop policy if exists …` | **hangs 60s, applies nothing** |
+| `drop table if exists …` | **hangs 60s, applies nothing** |
+
+True of **both** `apply_migration` and `execute_sql`. **Postgres is not the
+bottleneck**: `set local lock_timeout = '5s'` and `set local statement_timeout =
+'15s'` never fire, and `pg_stat_activity` shows nothing waiting on a lock — so
+the 60s is the MCP layer, not a blocked statement. Four timeouts, zero effect,
+confirmed by reading `pg_policies` and `supabase_migrations.schema_migrations`
+after each.
+
+**What to do about it, and what NOT to do.** Write the statement as `ALTER
+POLICY` where that reaches the same end state — it does for every `DROP POLICY` +
+`CREATE POLICY` pair in this repo, and it is the better statement anyway, since
+there is no window in which the table has no policy for that role. **Do not route
+a DROP through a `DO $$ … execute '…' $$` block to get past the classifier**:
+whatever that gate is for, evading it is not a session's call.
+
+Consequence for `apply_migration` specifically: it was unusable for all three of
+these, so they were applied with `execute_sql` and the
+`supabase_migrations.schema_migrations` row was written by hand (version, name,
+statements), which is what `apply_migration` does. Versions match the filenames
+in `supabase/migrations/`, so `list_migrations` still agrees with the directory.
+
+⚠️ **One piece of litter, and it needs one line from the owner.** A table
+`public._mcp_write_probe` exists in `public` — it was the single-statement probe
+that established the above (CREATE worked, so writes were possible at all), and
+`drop table` then hung, which is exactly the finding. It has no grants, no RLS, no
+rows and nothing references it. It carries a `COMMENT` saying all of this. Remove
+it in the Dashboard SQL editor: `drop table public._mcp_write_probe;`
 
 ⚠️ **Verification comes AFTER the merge, and that ordering is forced, not a
 preference.** This list had them the other way round — verify at 7, merge at 8 —
@@ -374,27 +445,35 @@ profile**, never by listing a directory.
   (`er_broker_select/update`, `er_underwriter_select/update`) that let staff read
   and write **every** client's requests from the browser. That is a privileged
   read path in the static app, and the next constraint is why it matters.
-- **⚠️ OPEN — `profiles.role` is self-assignable (live, verified 2026-10-05).**
-  Not an accepted trade-off; an unfixed hole, recorded here so it is not
-  rediscovered. `authenticated` holds table-level `UPDATE` on `public.profiles`
-  (every column, `role` included) and the only policy on it is
-  `using (id = auth.uid()) with check (id = auth.uid())` — no column
-  restriction, no trigger. So one PostgREST call from the browser,
-  `supabase.from("profiles").update({ role: "broker" }).eq("id", uid)`,
-  promotes any signed-in client to staff. Reachable with the demo credential
-  this file publishes and the login screen prefills.
-  **Blast radius (verified, and narrower than it looks):** the only role-keyed
-  policies in the schema are the four on `enhancement_requests`. `entities`,
-  `assets`, `policies` and `entity_relationships` key on `owner = auth.uid()`
-  with no role escape, so a self-promoted broker gains **no** access to another
-  client's cover — it gains read/write on every client's enhancement requests
-  (and `er_broker_update` has no `with check`, so `owner`/`subject`/`body` are
-  rewritable too, not just `status`).
-  **Fix written, not applied:** `supabase/proposed/20261005_profiles_role_not_self_assignable.sql`
-  (a column-level `REVOKE` — RLS evaluates whole rows, so `with check` cannot
-  express "this column may not change"). Needs owner approval. Verify by
-  re-running the probe in that file's footer **as a client session**;
-  service-role bypasses RLS and reports a false pass.
+- **✅ CLOSED 2026-10-09 — `profiles.role` was self-assignable.** Kept here rather
+  than deleted, because the shape of the hole is the reason the fix is a column
+  `REVOKE` and not a policy.
+  **What it was:** `authenticated` held table-level `UPDATE` on `public.profiles`
+  (every column, `role` included) and the only policy on it was
+  `using (id = auth.uid()) with check (id = auth.uid())` — no column restriction,
+  no trigger. So one PostgREST call from the browser,
+  `supabase.from("profiles").update({ role: "broker" }).eq("id", uid)`, promoted
+  any signed-in client to staff, reachable with the demo credential this file
+  publishes and the login screen prefills.
+  **Why a column grant and not a policy:** RLS evaluates whole rows, and `with
+  check` sees only the NEW row, so it cannot express "this column may not
+  change". Column-level privileges are the only mechanism in Postgres that says
+  it without a trigger.
+  **Applied as** `supabase/migrations/20261005120100_profiles_role_not_self_assignable.sql`
+  (via `ALTER POLICY` rather than the written `DROP`+`CREATE` — see the DROP note
+  in the owner-gate section). `authenticated` now holds `UPDATE` on
+  `reminder_email, reminder_schedule` **only**, and no `INSERT` at all.
+  **Verified as a real client session**, not service-role — a password grant
+  against `/auth/v1/token`, then PostgREST with that bearer:
+  `role='broker'` → **HTTP 403 / 42501**; `reminder_email=true` → **204** (the
+  Account page's own write still works, which is the half a probe checking only
+  the denial would miss); `insert into profiles` → **403 / 42501**;
+  `select id, role` → **200, one row**.
+  **What the fix did NOT close, and is still live:** `er_broker_update` has no
+  `with check` on `owner`/`subject`/`body`, so a *genuine* broker or underwriter
+  can still rewrite those columns on any client's enhancement request, not just
+  the status. Narrower than before (no client can become one), and recorded in
+  `supabase/migrations/20261005120000_enhancement_request_stage_guard.sql`.
 - **⚠️ `service_role` HAS NO TABLE PRIVILEGES IN THIS PROJECT (live, measured
   2026-10-06).** Not a trade-off — a fact that invalidates the obvious way to
   write a server-side reader, and it nearly shipped feature 003 dead.
@@ -433,19 +512,23 @@ profile**, never by listing a directory.
   client's data. What it costs is spend: `HOURLY_CAP` is per ACCOUNT, so 20 paid
   asks per account an hour, and about twenty accounts exhaust the shared
   `DAILY_TOTAL_CAP` and refuse the desk to every real client for a day.
-  **Half-fixed in code, and that half needs a migration to actually bite:**
-  `help-ask` requires a `profiles` row before it will reserve a slot or spend
-  anything. ⚠️ But `authenticated` holds INSERT on `profiles` with
-  `with check (id = auth.uid())`, so a self-signed-up caller can create that row
-  in one PostgREST call — gating on a row the client can write is not a gate.
-  `supabase/proposed/20261006_profiles_no_client_insert.sql` revokes it; safe
-  because nothing in `js/` inserts a profile and no trigger creates one (both
-  verified against the live project). Until it is applied the check is defence in
-  depth, not a boundary.
-  **The other half is an owner action:** turn off "Allow new users to sign up"
-  in Supabase Auth, or the Security card stays untrue. Deliberately NOT reworded
-  to match the current setting — the wording describes the intended state, and
-  the config is what is wrong.
+  **✅ THE SPEND HALF IS NOW CLOSED (2026-10-09).** `help-ask` requires a
+  `profiles` row before it will reserve a slot or spend anything, and that row is
+  no longer client-writable: `revoke insert on public.profiles from authenticated`
+  is live (`migrations/20261005120100_profiles_role_not_self_assignable.sql`,
+  which carries the same statement as the proposed `..._no_client_insert.sql`).
+  Measured as a client session: `insert into profiles` → **HTTP 403 / 42501**.
+  Nothing creates such a row otherwise — no trigger, and `service_role` has no
+  INSERT on the table either — so a self-signed-up account can authenticate, see
+  an empty Keep, and **never reach a paid ask**. The check is a boundary now, not
+  defence in depth.
+  ⚠️ **What is still open is the PRODUCT CLAIM, and only an owner can close it:**
+  turn off "Allow new users to sign up" in Supabase Auth, or the Security card
+  stays untrue. There is no Supabase MCP tool for auth config and the Management
+  API needs a PAT no session holds — so this cannot be done from here, and
+  re-measuring `GET /auth/v1/settings` is the way to confirm it when it is.
+  Deliberately NOT reworded to match the current setting — the wording describes
+  the intended state, and the config is what is wrong.
 - **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
@@ -614,6 +697,18 @@ login** rather than a deep link:
    after the second sign-in. The earlier verification could not have caught it:
    it covered deep links and credited destinations, and only a real sign-in builds
    that stack.
+   ⚠️ **`#/keep/login/` and `#/keep/login?x=1` route to the login card too** —
+   `main.js` filters empty path parts — so the first version of the exclusion, an
+   exact string compare, missed both. The pattern is anchored and admits a
+   trailing `/` or a query string. Measured, not reasoned about.
+1b. **Single-use forms were offered as back destinations as well**, found by the
+   next review round against the same predicate: `#/keep/add-asset`,
+   `#/keep/add-entity` and `#/keep/request/:id` are all routes the app navigates
+   *away from* on success, so pointing a back control at one invites a second
+   submission — on the request form that is a **duplicate enhancement request**.
+   `KEEP_LABELS` already declined to name these routes, so before this they were
+   both unnamed and offered: a bare "Back" to a blank form. Now excluded in the
+   same predicate. `#/keep/requests` (the list) deliberately does not match.
 2. **A lateral app-bar tab switch counts as "somewhere".** Click Policies while on
    Entities and Policies shows "Back to entities". That is **pre-existing** —
    `#/keep/list` and `#/keep/grid` have always behaved this way — and it is what

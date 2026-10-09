@@ -171,8 +171,10 @@ export async function renderKeepLanding() {
     // so "back" here is not a step up a hierarchy. It is in because `home` is a
     // CREDITED HELP TOPIC — a client who asks "what's on my home screen?", follows
     // the credit and wants to return to the answer had no in-app route back.
-    // `originBackRow()` renders nothing on a fresh load or a deep link, so the
-    // root looks untouched unless you actually arrived from somewhere.
+    // `originBackRow()` renders nothing on a fresh load or a deep link. It DOES
+    // render after a lateral app-bar tab switch, which is what the origin-aware
+    // standard asks for and is how `#/keep/list` has always behaved — see
+    // `originRoute()` in shell.js for the routes it refuses to point at.
     originBackRow(),
     el("section", { class: "k-welcome" }, [
       el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
