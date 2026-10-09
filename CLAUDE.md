@@ -149,6 +149,23 @@ This is the one to follow; the others defer to it.
    `service_role` has no INSERT on that table — so it must be done as `postgres`
    (the dashboard SQL editor). Without it the Keep works and the Help desk
    refuses every question, showing the same notice as an outage.
+   ⚠️ **AND THE RUNBOOK HAS A SECOND ITEM NOW, BEFORE THE FIRST REAL CLIENT:
+   rotate the broker and underwriter passwords out of this repo, or move the demo
+   accounts to a separate project.** Those two staff logins were repaired on
+   2026-10-09 (they had never worked — see the Backend section), and this file
+   publishes their passwords. A staff role is not the same exposure as the
+   published *client* credential: that one reaches its own rows only, because
+   every other table keys on `owner = auth.uid()` with no role escape, whereas
+   `er_broker_select` / `er_underwriter_select` read **every** client's
+   enhancement requests and the update policies write them (status-constrained
+   since `20261009210000`, still unconstrained on `owner`/`subject`/`body`).
+   Accepted today on a **measured** precondition — `auth.users` holds exactly
+   three rows, all `@example.com`, and `enhancement_requests` holds one row owned
+   by the demo client, so there is no real client data to expose — and that
+   precondition expires with the first invite. Raised by an automated security
+   review of the repairing commit; recorded rather than acted on because it is a
+   credential decision on the owner's project, and rotating silently would break
+   both the logins this file documents and the ui-tester that consumes them.
 5. ⛔ **OWNER ACTION — THE ONE HARD BLOCKER.** Set `ANTHROPIC_API_KEY` as an Edge
    Function secret. No session can do this: the key is the owner's and is not in
    this environment. `mcp__Supabase__create_edge_function_secret` exists, so once
