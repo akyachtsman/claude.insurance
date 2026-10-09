@@ -98,6 +98,21 @@ jobs:
         # Deliberately conservative: it under-reports rather than cry wolf.
         run: node .github/scripts/check-undefined-calls.js
 
+      - name: Keep back-destination routes are all classified
+        # `originRoute()` decides where a back control may point. It held a
+        # DENY-list of routes that must not be offered, and that list was found
+        # incomplete TWICE on one PR — `#/keep/login` (so every sign-in offered a
+        # "Back" to the login card) and the bare `#/keep/request` (so My requests
+        # pointed at the form it had just submitted, inviting a duplicate
+        # request). A deny-list is incomplete by construction: a route added
+        # later is a candidate omission and nothing fails when one is missed.
+        # The table is now an allow-list, and this asserts its keys are EXACTLY
+        # dispatchKeep's cases — so a new Keep route cannot ship unclassified,
+        # and a stale entry cannot outlive its route. Set equality, not
+        # containment, and it exits non-zero rather than certify a comparison it
+        # could not make. Mutation-tested on all four cases.
+        run: node .github/scripts/check-keep-back-routes.js
+
       - name: Tracked Python compiles without warnings
         # A `\` in a plain (non-raw) docstring is invisible on 3.11, a
         # SyntaxWarning on 3.12, and a SyntaxError on 3.15 — at which point the

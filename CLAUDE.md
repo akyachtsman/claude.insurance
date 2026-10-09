@@ -291,6 +291,7 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
+| Keep back-route classification | `node .github/scripts/check-keep-back-routes.js` |
 | Python compiles clean | `python3 .github/scripts/check-py-warnings.py` |
 | ui-suite env parity | `python3 .github/scripts/check-ui-suite-env.py --kit-dir .github/scripts/ui-tests` |
 
@@ -776,12 +777,31 @@ login** rather than a deep link:
    search, and it submits to `#/keep/requests`, whose `backLink("#/keep","home")`
    then pointed straight back at the form it had just submitted. So the one route
    the exclusion was added for was the one it missed.
-   ⚠️ **The `(?:[/?]|$)` tail does two jobs** — it admits the `request/`,
-   `request?` and `login/` variants *and* it is the only thing keeping
-   `#/keep/requests` out (after `request` it finds `s`). S13 asserts both
-   directions, because a mutation that deleted the tail **survived** the first
-   version of those assertions: the suite proved the exclusions it added and
-   nothing proved what they must not swallow.
+   ⚠️ **AND THEN THE DENY-LIST WAS REPLACED, because it had now failed twice.**
+   `#/keep/login` and the bare `#/keep/request` were the same violated invariant —
+   "a back control points somewhere harmful" — two rounds apart, and `global.md` →
+   *Review Rounds Have to Terminate* says that when the same mechanism fails again
+   across rounds the mechanism is in the wrong place: **redesign rather than patch
+   it a third time.** A deny-list is incomplete by construction — a route added
+   later is a candidate omission and nothing fails when one is missed.
+   So `originRoute()` now reads an **allow-list**, `BACK_ELIGIBLE` in `shell.js`,
+   keyed on the Keep sub-route (18 routes: 14 eligible, 4 not — `login` and the
+   three single-use forms). Inverted, forgetting a route costs a **missing** back
+   control, which is cosmetic, instead of one pointing at a login card or a
+   submitted form. `keepSubRoute()` mirrors `main.js`'s own parse (strip query,
+   split, drop empties), so the trailing-slash and query-string variants cannot
+   diverge from what the router thinks a hash names.
+   The other half is **`node .github/scripts/check-keep-back-routes.js`** (now in
+   Required Commands and `qa.yml`): it asserts the table's keys are **exactly**
+   `dispatchKeep`'s cases — set equality, not containment, so a stale entry cannot
+   outlive its route either — and **fails closed**, reporting that it could not
+   run rather than comparing two empty sets. Mutation-tested on four cases:
+   dropped classification, stale entry, renamed table, router case removed.
+   ⚠️ One mutation **survived** the pre-redesign assertions and is worth keeping in
+   mind: deleting the regex's `(?:[/?]|$)` tail passed, because the suite proved
+   the exclusions it had added and nothing proved what they must **not** swallow.
+   S13 now asserts both directions (`#/keep/requests`, the list, must stay a valid
+   origin), and all three behavioural mutations against the allow-list fail it.
 2. **A lateral app-bar tab switch counts as "somewhere".** Click Policies while on
    Entities and Policies shows "Back to entities". That is **pre-existing** —
    `#/keep/list` and `#/keep/grid` have always behaved this way — and it is what

@@ -473,7 +473,7 @@ const KEEP_LABELS = {
 //   request form that is a DUPLICATE enhancement request. `KEEP_LABELS` already
 //   declines to name these routes, so before this they were both unnamed and
 //   offered — a bare "Back" to a blank form.
-//   ⚠️ `request` IS MATCHED BARE, not only as `request/<id>`, and the first
+//   ⚠️ `request` IS LISTED BARE, not only as `request/<id>`, and the first
 //   version of this got that wrong. `#/keep/request` with no id is the GENERAL
 //   enhancement form — reached from the "New request" button on My requests
 //   (`policies-view.js`) and from global search (`logic/search.js`), both of
@@ -489,14 +489,54 @@ const KEEP_LABELS = {
 // string, because `#/keep/login/` and `#/keep/login?x=1` both route to the login
 // card and an exact-string exclusion missed both.
 //
-// ⚠️ `#/keep/requests` (the LIST) deliberately does NOT match, and the `[/?]|$`
-// tail is what keeps it out: after `request` it finds `s`, which is none of
-// those. That single tail is doing two jobs — admitting the trailing-slash and
-// query-string variants, and refusing the list route — so it is the part to
-// re-check if this pattern is ever edited. `#/keep/request`, `#/keep/request/`,
-// `#/keep/request?x=1` and `#/keep/request/<policy-id>` all match.
-const NOT_A_BACK_DESTINATION =
-  /^#\/keep\/(?:login|add-asset|add-entity|request)(?:[/?]|$)/;
+// ⚠️ THIS IS AN ALLOW-LIST, AND IT USED TO BE A DENY-LIST. The direction is the
+// whole point, and it changed because the deny-list failed TWICE on this one
+// branch — `#/keep/login` (Codex round 1) and the bare `#/keep/request` (Codex
+// round 2), each a real defect, each "a route nobody remembered to exclude".
+// `global.md` → *Review Rounds Have to Terminate* says that when the same
+// mechanism fails again across rounds the mechanism is in the wrong place:
+// redesign rather than patch it a third time. A deny-list is incomplete by
+// construction — every route added later is a candidate omission and NOTHING
+// fails when one is missed.
+//
+// Inverted, the failure mode of forgetting a route is a MISSING back control,
+// which is cosmetic, instead of one pointing at a login card or a submitted
+// form, which is not. And `.github/scripts/check-keep-back-routes.js` makes
+// forgetting one fail the build: it asserts this table's keys are exactly the
+// `case` labels in `dispatchKeep`, so a new Keep route cannot ship without a
+// decision recorded here.
+//
+// `""` is `#/keep` itself (the router's `case undefined`).
+const BACK_ELIGIBLE = {
+  "": true,              // home — a credited Help topic, so it needs a way back
+  login: false,          // ⚠️ auth. Every sign-in lands with this as its origin.
+  insurance: true,
+  list: true,
+  grid: true,
+  entities: true,
+  entity: true,
+  assets: true,
+  asset: true,
+  policy: true,
+  request: false,        // ⚠️ single-use form; returning duplicates a request
+  requests: true,        // the LIST is an ordinary page — not the form
+  "add-asset": false,    // ⚠️ single-use form
+  "add-entity": false,   // ⚠️ single-use form
+  documents: true,
+  account: true,
+  security: true,
+  help: true,
+};
+
+// The Keep sub-route of a hash: "#/keep/entity/22?x=1" -> "entity", "#/keep" ->
+// "". Mirrors how `js/main.js` routes — strip the query, split on "/", drop
+// empties — so the two cannot disagree about what route a hash names, which is
+// what the trailing-slash and query-string variants (`#/keep/login/`,
+// `#/keep/login?x=1`) both exploited.
+function keepSubRoute(hash) {
+  const parts = hash.replace(/^#/, "").split("?")[0].split("/").filter(Boolean);
+  return parts[0] === "keep" ? (parts[1] || "") : null;
+}
 
 // The in-app Keep route the user actually came from, or null when there is none
 // to offer. ONE predicate, shared by every back control — `originHref` below
@@ -505,8 +545,12 @@ const NOT_A_BACK_DESTINATION =
 // per call site, and a new back control inherits them by construction.
 function originRoute() {
   const prev = previousRoute();
-  if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
-  if (NOT_A_BACK_DESTINATION.test(prev)) return null;
+  if (!prev || prev === location.hash) return null;
+  const sub = keepSubRoute(prev);
+  // `null` is a non-Keep route (the public site); an unlisted one is a Keep route
+  // nobody has classified. Neither is offered — the guard script turns the second
+  // into a build failure rather than leaving it to be noticed in review.
+  if (sub === null || BACK_ELIGIBLE[sub] !== true) return null;
   return prev;
 }
 
