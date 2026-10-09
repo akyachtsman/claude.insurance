@@ -886,6 +886,45 @@ Still true and deliberately unchanged: the add-asset cancel reads a static
 while its destination is computed. Cosmetic, and it belongs to the form widget
 rather than to this flow.
 
+### ⚠️ OPEN (owner decision) — the route guard is a net, not a proof
+
+`check-keep-back-routes.js` asserts `BACK_ELIGIBLE`'s keys are exactly
+`dispatchKeep`'s routes. Its **scan has now been fixed twice**, both times on a
+Codex finding, both times because a route can be selected in a shape the scan
+did not read:
+
+| version | hole | found by |
+|---|---|---|
+| 1 | only the `case` labels, plus a **hardcoded** `login` early return | Codex |
+| 2 | `sub === "lit"` inside a returning statement — defeated by **aliasing the boolean** (`const r = sub === "x";` has no `return`, and `if (r) return …` no longer mentions `sub`) | Codex, mutation in hand |
+
+Version 3 stops enumerating shapes and asks instead *"is there anything here I
+cannot account for?"* — any `sub` comparison outside a returning statement, or
+any `sub` mention inside one without a readable literal, **fails the guard by
+name**. Mutation-tested 5/5: the alias case, a non-literal comparison, a plain
+second route, a route-independent early return (correctly ignored) and the real
+`const [sub, id] = rest;` (clean).
+
+⚠️ **It is still not a proof.** It is sound against every construct that mentions
+`sub`; it is **not** sound against a route selected without mentioning `sub` at
+all — `const r = rest[0]; if (r === "x") return …` is invisible to it, and no
+text scan sees that without becoming a parser.
+**What bounds the harm is the allow-list, not the guard:** a route
+`BACK_ELIGIBLE` has never heard of is simply not offered, so an unseen route
+costs a *missing* back control. Cosmetic, not a leak. That is why the inversion
+came first.
+
+⛔ **THE SOUND FIX NEEDS AN OWNER RULING, because it rewrites core routing.**
+Make the dispatch **table-driven**: one route table that both `js/main.js` and
+`BACK_ELIGIBLE` derive from, so there is nothing to keep in sync and nothing to
+scan. `dispatchKeep` is an 18-case switch calling 18 different render functions,
+so this is a change to the app's router, not to the Help desk — well beyond the
+feature the guard arrived with. Deliberately not smuggled in.
+`global.md` → *Review Rounds Have to Terminate* is the reason this is written
+down now rather than after a third failure: a mechanism that fails a third time
+gets reverted or redesigned, not patched again. **The next failure of this scan
+is not another patch.**
+
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
@@ -1051,6 +1090,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S11 | Help desk — the ANSWER branch (offline harness, **runs locally**) | Seeded session + `page.route`: the AI label is present before the ask, **while the request is held open**, and in the answer; the question is echoed; `.k-help__src` credits the topic by its **corpus title** (not the wire id) and carries the record line; `.k-help__broker` renders on a payload whose `reason` is `answered`, with a link to `#/keep/insurance`; exactly one `.k-help__ai` | The label is dropped in any of the three states, the broker channel is gated on the wire's `reason`, a credit renders as its id, or the record line is missing |
 | S12 | Help desk — the NOTICE branch (offline harness, **runs locally**) | A 404 from the function yields exactly one `.k-help__notice`, the label present, **no** `.k-help__a` and **no** `.k-help__broker`. A blank question shows `.k-error` and reaches the endpoint zero times | The notice state has no label, an answer renders beside a failure, the broker channel appears under an outage, or a blank question is sent |
 | S13 | Help desk — back flow and two-identity isolation (offline harness, **runs locally**) | Arriving from `#/keep/list`, Help's back row points at that page (origin-aware). Following a credit, the **destination's own** back control points at `#/keep/help` and returning restores the answer and the question; a reload then shows **no** back row (no in-app origin). Then a real sign-out and sign-in as a second client: no `.k-help__a`, no `.k-help__src`, an empty ask box — and the page still works for them | A back control is hardcoded or missing on a credited destination, one renders on a freshly loaded page, returning from a credit loses the answer, or any part of the previous client's ask survives a sign-out |
+| S14 | Help desk — the SIGN-OUT RACE (offline harness, **runs locally**) | Client A asks with the response **held open**; A signs out via `#/keep/account`; client B signs in; only then is the response released. B's Help page must show **no** `.k-help__a`, **no** `.k-help__src`, **no** `.k-help__q` and an empty ask box — while still rendering as a working page (`.k-help__ai` present). ⚠️ The settle goes **before** navigating B to Help, not after: `renderKeepHelp()` reads the cache once, at render time, so releasing and navigating straight away renders B's page before the cache is written and the scenario passes against the bug (measured — both mutations survived the first version). | The previous client's answer, credited record values or question appear for the next client to sign in |
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 

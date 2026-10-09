@@ -3002,3 +3002,74 @@ test('S13: following a credit and coming back restores the answer — but only f
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S14 — THE SIGN-OUT RACE. The cache must belong to the client who ASKED.
+// The whole scenario exists because the owner stamp was read one tick too late:
+// `getUser()?.id` beside the cache write runs AFTER the provider call, and
+// nothing aborts that call when a client signs out (only a newer ask does). So A
+// asks, A leaves, B arrives, A's answer returns — and it was stamped with B's
+// id, after which the restore check matched for B.
+// Asserting the stamp EXISTS could never catch that; only driving the race can,
+// which is what the harness's held response is for. Needs no backend and no
+// paid call.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S14: an answer that arrives after its asker signed out is never shown to the next client', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+  const release = await routeHelpAsk(page, ANSWER_PAYLOAD, { gate: true });
+
+  // CLIENT A ASKS, and the response is held open.
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await page.locator('.k-help__input').fill('What is my dwelling limit?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i), 'the request is not in flight, so there is no race to test')
+    .toBeVisible({ timeout: 3_000 });
+
+  // A SIGNS OUT WHILE IT IS STILL IN FLIGHT. Via #/keep/account, which renders a
+  // sign-out directly — the app-bar one is inside a header menu, and this
+  // scenario is about identity, not menus.
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard'), 'sign-out did not reach the login card').toBeVisible({ timeout: 10_000 });
+
+  // CLIENT B SIGNS IN, still before the response lands.
+  await page.locator('.k-authcard input[type=text]').fill('other');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h'), 'the second identity did not reach the dashboard')
+    .toBeVisible({ timeout: 15_000 });
+
+  // ONLY NOW does A's answer come back. This ordering is the test.
+  release();
+
+  // ⚠️ SETTLE BEFORE NAVIGATING, NOT AFTER — and this ordering is the whole
+  // test, not a timing nicety. `renderKeepHelp()` reads the cache ONCE, at
+  // render time. The first version of this scenario released the response and
+  // navigated straight to Help, so B's page rendered BEFORE A's response had
+  // landed and written the cache: nothing was there to leak yet, and the
+  // scenario passed against the unfixed code. Both mutations survived it.
+  // A's response has to land, write, and only then can B's render read it.
+  await page.waitForTimeout(1_500);
+
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+
+  await expect(page.locator('.k-help__a'),
+    "the previous client's ANSWER was shown to the next client to sign in").toHaveCount(0);
+  await expect(page.locator('.k-help__src'),
+    "the previous client's CREDITED RECORD VALUES were shown to the next client").toHaveCount(0);
+  await expect(page.locator('.k-help__q'),
+    "the previous client's QUESTION was shown to the next client").toHaveCount(0);
+  await expect(page.locator('.k-help__input'),
+    "the previous client's question was left in the ask box").toHaveValue('');
+  // Still a working Help page for B, not a blank region.
+  await expect(page.locator('.k-help__ai')).toHaveCount(1);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

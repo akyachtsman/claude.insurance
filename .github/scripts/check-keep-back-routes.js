@@ -43,14 +43,32 @@
 // quietly exempts a whole syntactic form is worse than no guard. Found by Codex
 // on the PR that introduced it, with the mutation already run.
 //
-// So the pre-switch region is now scanned on its own terms, and the distinction
-// it has to draw is real: `if (sub === "login") return …` IS a route, while
-// `if (!session) return renderKeepLogin()` is auth logic that applies to all of
-// them. The rule is per statement — a returning statement that compares `sub` to
-// string literals contributes those routes; one that mentions `sub` without a
-// literal this scan can read is UNRECOGNISED and fails the guard by name. That
-// is the "or fail when an unrecognized one exists" half, and it is what keeps
-// the next novel shape from being silently exempt too.
+// So the pre-switch region is scanned on its own terms, and the distinction it
+// has to draw is real: `if (sub === "login") return …` IS a route, while
+// `if (!session) return renderKeepLogin()` is auth logic applying to all of
+// them. The rule is CONSERVATIVE rather than enumerative — see the loop below.
+//
+// ⚠️⚠️ WHAT THIS GUARD IS NOT. It is a strong net, **not a proof**, and the
+// difference matters because its green is easy to over-read — which is exactly
+// how both of its earlier versions failed. It is sound against every construct
+// that mentions `sub`. It is NOT sound against a route selected without
+// mentioning `sub` at all: `const r = rest[0]; if (r === "x") return …` is
+// invisible to it, and no text scan sees that without becoming a parser.
+//
+// What actually bounds the harm is not this file — it is that `BACK_ELIGIBLE` is
+// an ALLOW-list, so a route it has never heard of is simply not offered as a
+// back destination. An unseen route therefore costs a MISSING back control,
+// which is cosmetic. That is why the inversion came first and this guard second,
+// and why a hole here is not a security hole.
+//
+// ⚠️ THE SOUND FIX IS A DESIGN DECISION, DELIBERATELY NOT TAKEN HERE: make the
+// dispatch table-driven, so `main.js` and `BACK_ELIGIBLE` derive from ONE route
+// table — nothing to keep in sync and nothing to scan. That rewrites the app's
+// core routing, far beyond the feature this guard arrived with, so it is
+// recorded in CLAUDE.md as an owner decision rather than smuggled in. This scan
+// has now been fixed TWICE; `global.md` → *Review Rounds Have to Terminate* says
+// a mechanism that fails a third time gets reverted or redesigned, not patched
+// again.
 
 import { readFileSync } from "node:fs";
 
@@ -88,22 +106,39 @@ if (dispatch) {
     }
     // Early returns, per STATEMENT so a condition split over several lines is
     // still read with its own `return`.
+    //
+    // ⚠️ THE RULE IS CONSERVATIVE, NOT ENUMERATIVE, and that is the SECOND fix to
+    // this scan rather than a widening of the first. Enumerating the shapes a
+    // route test can take does not terminate: version one read only a hardcoded
+    // `login`; version two read `sub === "lit"` inside a returning statement —
+    // and that was defeated by ALIASING THE BOOLEAN, since
+    // `const r = sub === "reset-password";` has no `return` (skipped) and
+    // `if (r) return …` no longer mentions `sub` (read as route-independent).
+    // Codex found both, mutation in hand.
+    // So the scan no longer asks "is this a route test?" but "is there anything
+    // here I cannot account for?" — any `sub` COMPARISON outside a returning
+    // statement, and any `sub` mention inside one without a readable literal,
+    // fails the guard by name. `const [sub, id] = rest;` is unaffected: it
+    // compares nothing.
+    const unreadable = (stmt, why) => fail.push(
+      `${ROUTER}: dispatchKeep's pre-switch region has a \`sub\` test this guard cannot ` +
+      `account for, so it may select a route that never gets classified (${why}):\n` +
+      `      ${stmt.trim().replace(/\s+/g, " ").slice(0, 140)}\n` +
+      `  Write it as \`if (sub === "<route>") return …\`, or teach this guard the new ` +
+      `shape. It will not certify set equality while a route-shaped branch is unreadable.`
+    );
     for (const stmt of body.slice(0, switchAt).split(";")) {
-      if (!/\breturn\b/.test(stmt)) continue;
       const lits = [...stmt.matchAll(/\bsub\s*={2,3}\s*"([^"]*)"/g)].map((m) => m[1]);
-      if (lits.length) { for (const l of lits) routerRoutes.add(l); continue; }
-      // Mentions `sub` but in a shape this scan cannot read -> fail by name.
-      // A returning statement that does NOT mention `sub` is route-independent
-      // (`if (!session) return renderKeepLogin()`) and is correctly ignored.
-      if (/\bsub\b/.test(stmt)) {
-        fail.push(
-          `${ROUTER}: an early return in dispatchKeep tests \`sub\` in a form this guard ` +
-          `cannot read, so it may be a route that never gets classified:\n` +
-          `      ${stmt.trim().replace(/\s+/g, " ").slice(0, 120)}\n` +
-          `  Either write it as \`sub === "<route>"\`, or teach this guard the new shape. ` +
-          `It will not certify set equality while a route-shaped branch is unreadable.`
-        );
-      }
+      const compares = /\bsub\s*={2,3}/.test(stmt);
+      const returns = /\breturn\b/.test(stmt);
+      if (lits.length && returns) { for (const l of lits) routerRoutes.add(l); continue; }
+      // A comparison whose result is not returned here: the alias case.
+      if (compares && !returns) { unreadable(stmt, "a `sub` comparison outside a returning statement"); continue; }
+      // A comparison against something this scan cannot read as a literal.
+      if (compares) { unreadable(stmt, "a `sub` comparison against a non-literal"); continue; }
+      // A returning statement mentioning `sub` with no readable literal. One that
+      // does NOT mention `sub` is route-independent and correctly ignored.
+      if (returns && /\bsub\b/.test(stmt)) unreadable(stmt, "a returning statement using `sub` with no literal");
     }
   }
 }

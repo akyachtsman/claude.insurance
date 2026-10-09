@@ -40,6 +40,11 @@ export interface PromptInput {
 export interface BuiltPrompt {
   system: string;
   messages: { role: "user"; content: string }[];
+  /** The record tags actually rendered into the prompt, after FACT_LIMITS drops
+   *  lines. The caller MUST intersect the model's credited tags with this —
+   *  resolving them against the full `facts` array credits records the model
+   *  never received. See renderFacts. */
+  sentRecordIds: string[];
 }
 
 // Wrapped so the model is told, in the system prompt, that everything between
@@ -236,12 +241,25 @@ function renderTopics(topics: HelpTopic[]): string {
 // is the fact/advice boundary for the attacker's own session, i.e. a written
 // "you are covered" from the broker's own app, which is the liability this
 // feature exists to avoid.
-function renderFacts(facts: RecordFact[]): string {
+// Returns the rendered block AND the record tags it actually put in it.
+//
+// ⚠️ THE SECOND RETURN VALUE IS LOAD-BEARING, and its absence was a defect. The
+// limits below DROP lines; `handler.ts` resolved the model's credited tags
+// against the whole `facts` array, so a tag naming a dropped record — or one the
+// model simply invented in range, like `r401` — produced a client-visible "Based
+// on" line for a record the model NEVER RECEIVED. FR-11's promise is that the
+// client can check what the answer drew on, so crediting a fact that was never
+// sent is a false provenance claim, not a cosmetic slip.
+// The topic half already did this correctly (`sent` in handler.ts), which is
+// what makes it an asymmetry rather than an oversight about how trailers work.
+// Reported from HERE rather than recomputed by the caller, because a second copy
+// of the limit arithmetic is a copy that drifts. Found by Codex.
+function renderFacts(facts: RecordFact[]): { text: string; sentTags: string[] } {
   // The empty case is stated explicitly rather than omitted. An absent section
   // reads to a model as "not provided"; "nothing on file" is the fact FR-12
   // wants said back, and this repo's standing rule is that absent data is never
   // rendered as a confident statement in either direction.
-  if (!facts.length) return "THEIR RECORDS\n(this client has nothing on file yet)";
+  if (!facts.length) return { text: "THEIR RECORDS\n(this client has nothing on file yet)", sentTags: [] };
   // Each line carries a tag so the model can name WHICH records it used, the
   // same way topic ids let it name which screens. Without one the only thing the
   // function could send back was all of them — see index.ts's usedRecords.
@@ -251,6 +269,7 @@ function renderFacts(facts: RecordFact[]): string {
   // a credited tag still resolves to the right fact — renumbering here would
   // silently re-point every credit past the cut.
   const lines: string[] = [];
+  const sentTags: string[] = [];
   let budget = FACT_LIMITS.totalChars;
   let dropped = 0;
   facts.forEach((f, i) => {
@@ -276,9 +295,10 @@ function renderFacts(facts: RecordFact[]): string {
     if (line.length > budget) { dropped += 1; return; }
     budget -= line.length + 1;
     lines.push(line);
+    sentTags.push(recordTag(i));
   });
   if (dropped) lines.push(`(${dropped} further record lines on file, not shown here)`);
-  return "THEIR RECORDS\n" + lines.join("\n");
+  return { text: "THEIR RECORDS\n" + lines.join("\n"), sentTags };
 }
 
 export function buildPrompt(input: PromptInput): BuiltPrompt {
@@ -293,19 +313,23 @@ export function buildPrompt(input: PromptInput): BuiltPrompt {
   // display something that reads like the old delimiter. The nonce is what makes
   // the block unclosable; this is the belt.
   const question = deFence(input?.question);
+  const records = renderFacts(facts);
 
   const content = [
     typeof input?.today === "string" && input.today ? `TODAY IS ${input.today}. Renewal and expiry dates below are absolute; work out "soon", "still active" and "overdue" from this date, never from your own.` : "",
     "",
     renderTopics(topics),
     "",
-    renderFacts(facts),
+    records.text,
     "",
     `THE CLIENT'S QUESTION is between ${open} and ${close}, and nothing else ends it.`,
     `${open}\n${question}\n${close}`,
   ].join("\n");
 
-  return { system: SYSTEM, messages: [{ role: "user", content }] };
+  // `sentRecordIds` is additive on this contract: every caller and test
+  // destructures the fields it needs. handler.ts MUST intersect the model's
+  // credited tags with it — see renderFacts above for why.
+  return { system: SYSTEM, messages: [{ role: "user", content }], sentRecordIds: records.sentTags };
 }
 
 /** The delimiter shape, with a caller-supplied nonce. Exported so a test asserts

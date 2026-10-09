@@ -298,6 +298,38 @@ test("the answer carries only the topics and records the model named", async () 
   assert.equal(body.usedRecords.length, 1, "every record was credited, not the one named");
 });
 
+test("a credited record that FACT_LIMITS dropped is not credited to the client", async () => {
+  // ⚠️ THIS IS NOT THE out-of-range CASE BELOW, and that distinction is the bug.
+  // `r999` fails because facts[998] is undefined — it would fail even against
+  // the broken code. This tag is IN RANGE of the facts array and was dropped
+  // from the PROMPT by FACT_LIMITS.count (400), so resolving credits against
+  // `facts` rather than against what was sent produced a client-visible "Based
+  // on" line for a record the model never received. Found by Codex.
+  //
+  // 420 assets: one fact per asset (name/type/value gives several, so the digest
+  // runs well past 400 lines) — enough that the tail is dropped.
+  const many = Array.from({ length: 420 }, (_, i) => (
+    { id: `x${i}`, entity_id: "e1", name: `Asset ${i}`, type: "home", value: 1000 + i }));
+  const tables = seed({ assets: many, policies: [] });
+  const { d } = deps({
+    tables,
+    anthropic: { messages: { create: async () => ({ stop_reason: "end_turn",
+      // COMMA-separated: splitTrailer treats "r1 r419" as ONE tag, so a
+      // space-separated list credits nothing and this test would have passed
+      // against the broken code for the wrong reason. It did, first time.
+      content: [{ type: "text", text: "ok\n[[SOURCES]] insurance\n[[RECORDS]] r1, r419" }] }) } },
+  });
+  const body = await (await ask(d)).json();
+  assert.equal(body.reason, "answered");
+  // r1 was sent, so it is credited; r419 was dropped from the prompt, so it is not.
+  assert.equal(body.usedRecords.length, 1,
+    `a record dropped by FACT_LIMITS was credited anyway: ${JSON.stringify(body.usedRecords)}`);
+  // r1 is the ENTITY fact — entities lead the digest, before assets. Asserted on
+  // the actual shape rather than on what I assumed it was.
+  assert.match(body.usedRecords[0], /^Me — /,
+    `the credited line is not the record that was actually sent: ${body.usedRecords[0]}`);
+});
+
 test("a hallucinated topic id or record tag credits nothing", async () => {
   const { d } = deps({ anthropic: { messages: { create: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "ok\n[[SOURCES]] not-a-topic\n[[RECORDS]] r999" }] }) } } });
   const body = await (await ask(d)).json();

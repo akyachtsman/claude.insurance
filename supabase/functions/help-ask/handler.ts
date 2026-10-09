@@ -513,7 +513,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // my policy still active?" and "what renews soon?" from its own guess at the
   // date, against renewal dates it had been given in full. Passed separately so
   // it does not take a record tag or make a record-less client look stocked.
-  const { system, messages } = buildPrompt({ question, topics, facts, today: new Date().toISOString().slice(0, 10) });
+  const { system, messages, sentRecordIds } = buildPrompt({ question, topics, facts, today: new Date().toISOString().slice(0, 10) });
 
   // ─── THE BILLING LINE. Past here the reservation STAYS, whatever comes back,
   // because the call has been paid for. No `releaseAnd` below this point. ───
@@ -590,7 +590,16 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // client was told their renewal dates and premiums were the basis for an answer
   // about a button, on the refusal path too. Resolved through the same trailer,
   // and an unresolvable tag credits nothing rather than crediting record 0.
+  // ⚠️ INTERSECT WITH WHAT WAS ACTUALLY SENT, exactly as usedTopics does one
+  // line above. Resolving against the whole `facts` array credited records the
+  // model never received: FACT_LIMITS drops lines past 400 or past the 16k char
+  // budget, so a credited `r401` — hallucinated, or induced by a client who put
+  // it in a name — produced a client-visible "Based on" line for a fact that was
+  // never in the prompt. FR-11's promise is that the client can CHECK what the
+  // answer drew on, so a false provenance line is worse than no line.
+  const sentRecords = new Set(sentRecordIds);
   const usedRecords = split.recordIds
+    .filter((tag) => sentRecords.has(tag))
     .map((tag) => facts[recordIndex(tag)])
     .filter((f): f is RecordFact => Boolean(f))
     // Clipped, like the prompt copy: these are the same client-written names,

@@ -149,6 +149,21 @@ export async function renderKeepHelp() {
     error.textContent = v.ok ? "" : v.error;
     if (!v.ok) { input.focus(); return; }
 
+    // ⚠️ THE OWNER IS CAPTURED HERE, BEFORE THE AWAIT — not read after it. This
+    // line used to be `owner: getUser()?.id` down beside the cache write, and
+    // that is a cross-client disclosure, not a tidiness point: the provider call
+    // runs for up to 60s and nothing aborts it when the client signs out (only a
+    // NEWER ask aborts, via the controller below). So client A asks, signs out,
+    // client B signs in on the same tab before the call returns — and the cache
+    // stamped A's question, answer and credited RECORD VALUES with B's id, after
+    // which the restore check below matched for B and showed them to B.
+    // Found by Codex. It is the same hole a security review caught once already
+    // (the cache originally carried no owner at all, which is why the stamp
+    // exists); reading the stamp a tick too late reopened it, which is why S14
+    // now drives the whole race with a held response rather than asserting on
+    // the field's presence.
+    const asker = getUser()?.id ?? null;
+
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
     inFlight = controller;
@@ -167,8 +182,24 @@ export async function renderKeepHelp() {
     inFlight = null;
     setBusy(false);
 
+    // The client who asked is no longer the client who is here: do not cache
+    // this answer and do not render it. `lastAsk` is deliberately left alone
+    // rather than cleared — whatever the CURRENT client has is theirs, and
+    // wiping it would let a departed client's in-flight request delete it.
+    //
+    // ⚠️ THIS LINE IS BELT, NOT THE FIX, and saying so is the point: a mutation
+    // that removed it while KEEPING the capture above still passed S14. The
+    // capture is what closes the hole — `lastAsk.owner` is then A's id, so the
+    // restore check below cannot match for B. This line is kept because it stops
+    // a departed client's answer being cached at all, which narrows the window if
+    // the restore check is ever loosened — and that check has already been the
+    // site of one defect (it originally carried no owner at all). A surviving
+    // mutation means defence in depth, so it is labelled as such rather than
+    // left looking load-bearing.
+    if ((getUser()?.id ?? null) !== asker) return;
+
     const shaped = answerShape(payload);
-    lastAsk = { shaped, question, owner: getUser()?.id ?? null };
+    lastAsk = { shaped, question, owner: asker };
     if (shaped.ok) renderAnswer(shaped, question); else renderNotice(shaped);
 
     // Disabling the focused control drops focus to <body>, and nothing put it
