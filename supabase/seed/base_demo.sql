@@ -6,7 +6,19 @@
 -- PREREQUISITE: the demo auth user must exist first. profiles.id and
 -- entities.owner both FK to auth.users(id), so create the Supabase Auth user
 -- with id 11111111-1111-4111-8111-111111111111 (broker invite + password) before
--- running this. Asset/policy demo rows are seeded separately (see
+-- running this.
+--
+-- ⚠️ CREATE THAT USER THROUGH THE DASHBOARD OR THE ADMIN API — NEVER WITH A
+-- HAND-WRITTEN `insert into auth.users`. GoTrue scans several of that table's
+-- token columns (confirmation_token, recovery_token, email_change_token_new,
+-- email_change) into non-nullable Go strings, so a row that leaves them NULL
+-- cannot sign in: /auth/v1/token returns HTTP 500 "Database error querying
+-- schema", a message that names the schema and says nothing about the row.
+-- This is not hypothetical here — broker@example.com and underwriter@example.com
+-- were created that way and could not sign in AT ALL until 2026-10-09, while
+-- CLAUDE.md advertised both as working demo credentials. Repaired by
+-- supabase/migrations/20261009210100_auth_users_null_token_columns.sql; the
+-- repair is `coalesce(col, '')`, so it is idempotent if it happens again. Asset/policy demo rows are seeded separately (see
 -- js/keep/fixtures/sample.mjs
 -- for the sample shapes); this file covers only the profile + base entities.
 

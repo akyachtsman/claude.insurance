@@ -245,6 +245,22 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 - **Write model:** clients have full CRUD on their **own** entities/assets; `policies` are **read-only to clients** (broker-written via service-role, the system of record).
 - **Keys:** publishable/anon key → client (safe in browser, RLS is the guard); `service_role` key → `DB_SERVICE_KEY` GitHub secret, server-side only. `DB_URL` = the project URL.
 - **Migrations** live in `supabase/migrations/` and were applied via the Supabase MCP (versions match `list_migrations`). Front-end is wired to the live project; the Keep reads/writes real data under RLS. Three demo logins are seeded (a bare username is expanded to `<name>@example.com` by `signIn`): `user` / `keep-demo-2026` (client view, owns the seeded data; prefilled on the login screen), `broker` / `keep-demo-2026` (broker view; reviews and sends to underwriting), and `underwriter` / `keep-demo-2026` (underwriter view; owns the underwriting → approved/declined decision). Request lifecycle: requested → broker_review → underwriting → approved (+ declined).
+  ⚠️ **TWO OF THOSE THREE LOGINS DID NOT WORK UNTIL 2026-10-09, and this line said
+  they did.** `broker@` and `underwriter@` returned **HTTP 500 "Database error
+  querying schema"** from `/auth/v1/token` — for as long as they had existed.
+  Cause: they were created with a hand-written `insert into auth.users` that left
+  `confirmation_token`, `recovery_token`, `email_change_token_new` and
+  `email_change` **NULL**, where `user@` has `''`. GoTrue scans those into
+  non-nullable Go strings, so a NULL fails the scan and surfaces as an error that
+  names the *schema* and says nothing about the row — which is why the symptom
+  never led anyone to the cause. Repaired by
+  `migrations/20261009210100_auth_users_null_token_columns.sql`; all three now
+  return 200 with a token, measured. **Nothing covered it:** S9 signs in as the
+  CLIENT, and S11–S13 fake their own sessions — so the broker and underwriter
+  views, and the whole request lifecycle above, had never been exercised by
+  anybody. Found only because a *security* fix needed a real broker session to
+  verify. Create future auth users through the dashboard or the Admin API; the
+  seed's prerequisite note now says so.
 
 ## Required Commands
 | Purpose | Command |
@@ -445,6 +461,34 @@ profile**, never by listing a directory.
   (`er_broker_select/update`, `er_underwriter_select/update`) that let staff read
   and write **every** client's requests from the browser. That is a privileged
   read path in the static app, and the next constraint is why it matters.
+- **⚠️ PERMISSIVE RLS POLICIES `OR` THEIR `using` AND THEIR `with check`
+  *INDEPENDENTLY* — a lesson, not a one-off, and it cost a HIGH finding on
+  2026-10-09.** It is not "some one policy must satisfy both clauses": for an
+  UPDATE, Postgres needs *some* applicable policy's `using` to admit the OLD row
+  and *some* applicable policy's `with check` to admit the NEW one, and those can
+  be **different policies**. Both `enhancement_requests` UPDATE policies are
+  PERMISSIVE and `to public`, so both apply to every authenticated caller.
+  `20261005120000_enhancement_request_stage_guard.sql` put the role in `using`
+  and the allowed statuses in `with check`, which reads as "a broker may write
+  the broker statuses" and **means nothing of the kind**: a broker passed `using`
+  via its own policy and `with check` via the *underwriter's*, whose check named
+  statuses and no role — so a broker could still set `approved`, the single
+  transition the migration existed to prevent.
+  **Reproduced in a throwaway PostgreSQL 16.13** before fixing: as written, the
+  broker's `approved` update SUCCEEDED; with the role predicate repeated inside
+  each `with check`, it raises *"new row violates row-level security policy"*
+  while broker→underwriting and underwriter→approved both still pass. Then
+  **verified on the live project as a real broker session**: HTTP 403 / 42501,
+  row unmoved. Fix: `20261009210000_er_stage_guard_role_in_with_check.sql`.
+  **The duplicated predicate is load-bearing**, not redundancy — deleting it from
+  either clause reopens the hole. RESTRICTIVE policies are *not* the alternative
+  here: they AND together, so these two as restrictive would require a caller to
+  be both roles at once and no staff account could update anything.
+  ⚠️ **And note what nearly let it ship:** the migration's own post-apply probe
+  asserted `pg_policies.with_check IS NOT NULL`, which passes against the broken
+  version. A probe must assert the DENIAL, not the presence of a clause. Caught
+  by an automated security review of the applying commit — not by the probe, not
+  by CI, and not by the review rounds on the PR.
 - **✅ CLOSED 2026-10-09 — `profiles.role` was self-assignable.** Kept here rather
   than deleted, because the shape of the hole is the reason the fix is a column
   `REVOKE` and not a policy.
@@ -859,7 +903,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 |---|---|
 | App URL | `https://akyachtsman.github.io/claude.insurance/` |
 | Public path | Anonymous — no login (the marketing site + questionnaire) |
-| Keep credential (valid) | `user` / `keep-demo-2026` (client view, prefilled) · `broker` / `keep-demo-2026` (broker view). Bare username → `<name>@example.com`. |
+| Keep credential (valid) | `user` / `keep-demo-2026` (client view, prefilled) · `broker` / `keep-demo-2026` (broker view) · `underwriter` / `keep-demo-2026`. Bare username → `<name>@example.com`. ⚠️ **The broker and underwriter logins returned HTTP 500 until 2026-10-09** (NULL GoTrue token columns — see the Backend section). All three verified 200 on that date. This row is **agent input**, so a credential listed here that cannot sign in becomes a test that can never pass. |
 | Keep credential (invalid) | any other password → `.k-error` on the login form |
 | Primary nav button | `Find what coverage I need` |
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
