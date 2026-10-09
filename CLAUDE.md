@@ -993,7 +993,7 @@ client's internals and proves the stub.
 | owner comparison (both places) | **survives** | a third auth entry point that forgot to bump would leave the epoch equal across two clients; that one case, and nothing else |
 | the bump in `signOut` | **survives** | the route guard means nobody reaches a cached view while signed out, and the next `signIn` bumps first — kept so the primitive's stated contract holds for its next consumer |
 | `help-view.js`'s own `onAuthChange` clear | **survives** | the re-dispatch replaces the DOM and the epoch blocks the restore, so nothing is *observable* without it — kept on data-hygiene grounds no UI test can express: the previous person's answer would otherwise stay in module memory |
-| the `last_sign_in_at` half of the login key | **survives** | a same-account re-login is only reachable through a sign-out, which already clears — kept for re-authentication with no sign-out (a password change, `USER_UPDATED`), where the bare id compares equal and the staleness is silent |
+| the `last_sign_in_at` half of the login key | **survives** | a same-account re-login is only reachable through a sign-out, which already clears — kept for re-authentication with no sign-out, namely a **programmatic re-sign-in** (a fresh token grant, which does move the column), where the bare id compares equal and the staleness is silent. ⚠️ This cell used to add "a password change, `USER_UPDATED`" and **neither is covered**: GoTrue writes `last_sign_in_at` on a sign-in, `updateUser` touches `updated_at`, so the key compares equal and the subscriber is a no-op for them. Nothing in `js/` calls `updateUser`, so nothing is lost today |
 
 The two survivors are labelled as survivors **in the code**, up front. Twice in
 this PR a guard's comment kept calling it load-bearing after it had stopped
@@ -1014,16 +1014,33 @@ passing and the view mounting. A sign-out landing in either of them re-dispatche
 | half | what happened | fix |
 |---|---|---|
 | the RENDER | the original dispatch resumed and mounted the signed-out client's private page **over the login card** | `dispatchGen`, bumped at the top of every `route()`, checked after every await on the way to a mount, in `route()`'s `catch`, and before `setActiveNav`/`focusMain` |
-| the CACHE FILL | `ensureData` assigned that client's whole tree into `cache` a moment **after** `invalidate()` had cleared it, so the next person to sign in found a non-null cache and every sync accessor served them the previous client's entities, assets and policies | `ensureData` stamps the fill with `loginEpoch` and refuses to store one whose epoch moved; it still RETURNS the tree, because the only caller awaiting that promise is the dispatch that started it, and that dispatch checks its generation before mounting |
+| the CACHE FILL | `ensureData` assigned that client's whole tree into `cache` a moment **after** `invalidate()` had cleared it, so the next person to sign in found a non-null cache and every sync accessor served them the previous client's entities, assets and policies | `ensureData` stamps the fill with a **`cacheGen` that every `invalidate()` moves** and refuses to store one whose stamp changed; it still RETURNS the tree, and all three callers discard that value — `dispatchKeep` checks its generation before mounting, and the two write paths `go(...)` straight afterwards, which re-dispatches through the route guard |
 
 ⚠️ **The second half outlives the first, and the first fix does not cover it.**
 `invalidate()` runs on every login change but can only clear what is already
 there. Codex's finding named cache fills explicitly; a reader who fixes only the
 router has fixed the visible half and left a cross-client disclosure.
 
-⚠️ **ONE COUNTER, NOT TWO.** An auth change calls `route()`, so it supersedes by
-the same mechanism as a `hashchange` and there is no second thing to keep in step.
-A separate "auth generation" would be a fifth thing to forget to bump.
+⚠️ **ONE COUNTER PER LAYER, AND NOT ONE MORE.** In the router, an auth change
+calls `route()`, so it supersedes by the same mechanism as a `hashchange` — a
+separate "auth generation" would be a fifth thing to forget to bump. In the data
+layer the counter is `cacheGen`, moved by **every** `invalidate()`, not
+`loginEpoch`: that covers the login case for free (`announceLogin` invalidates)
+*and* the case the login epoch alone missed — a data WRITE invalidating while an
+earlier fill is in flight, where the pre-write snapshot would be cached over the
+top. Pre-existing, found by an independent review of the round-20 commit, and
+closed by widening the stamp rather than adding a second one.
+
+⚠️ **TWO CLAIMS IN THE FIRST VERSION OF THIS SECTION WERE WRONG, both about
+*why* rather than *what*.** The cache-fill comment said "the only caller awaiting
+this call is the dispatch that started it" — there are **three** (`dispatchKeep`,
+`renderKeepAddEntity`, the add-asset submit), and the conclusion survives for a
+different reason, now recorded in the table above. And `route()` bumped the
+counter *before* `nav.track` and the hash parse, which sit **outside** the `try`:
+a throw in either superseded whatever was in flight and then rendered nothing
+itself. The bump now happens immediately before the `try`. Both found by an
+independent review of the commit, which called the second the only route to a
+blank page it could find.
 
 **Measured, not asserted** (S22 and S23, four viewport projects, offline harness):
 
@@ -1050,6 +1067,45 @@ cache guard correctly refuses the stale fill, so the superseded dispatch reaches
 way. What differs is whether the superseded dispatch **runs at all**, and it logs
 `route error:` when it does — so that is what S22 keys on. Layered fixes mask each
 other's tests; the only way to find that out is to mutate each one separately.
+
+### ⚠️ OPEN (pre-existing) — a failed Keep read renders an EMPTY Keep, and caches it
+
+Found by an independent silent-failure review of the round-20 commit, which
+correctly separates it from that commit: **this is not new and was not touched.**
+Recorded because it is the one path in the Keep that really does produce a silent
+empty portal, and it is a better bug than anything round 20 fixed.
+
+`loadTree` (`js/supabase.js`) runs five queries in parallel and, on an error,
+only `console.warn`s — then builds the tree from `data || []` and lets
+`ensureData` **cache** it. So an RLS denial, an expired JWT or a network blip
+gives a client a Keep that renders as "Welcome back, Member" with no entities, no
+assets and no policies, shows them no error at all, and keeps doing so until the
+next `invalidate()`. The comment above the loop says *"Surface query failures
+(e.g. an RLS denial) instead of rendering silently empty"*, and `console.warn` is
+not surfacing anything to the person looking at the screen.
+
+Deliberately not fixed here: the right behaviour is a product decision (an error
+state for the whole portal? per-section? a retry?), it touches every Keep view,
+and this PR is a Help-desk feature. ⚠️ Note it interacts with the round-20 fill
+guard in the useful direction — a failed fill is now at least not cached across a
+login change — but a failed fill under an *unchanged* login still is.
+
+### ⚠️ Recorded — deleting the duplicate subscriber also dropped a refetch-on-refocus
+
+A consequence of round 20's P2 that nobody asked for and nothing else covers, so
+it is written down rather than discovered later. The deleted unconditional
+listener called `invalidate()` on every `SIGNED_IN`, including the same-session
+one the vendored client emits when restoring a session on tab refocus. That meant
+the Keep's data was refetched on the next navigation after a refocus. It no longer
+is: the cache now lives for the length of the login (or until a write). So a
+broker-written policy change shows up after a reload or a local write, not after
+switching tabs and back.
+
+That is the **intended** direction — discarding a paid Help answer on a refocus
+is exactly what Codex asked to stop, and the refetch was riding along on the same
+event. A deliberate refresh-on-refocus would be a new feature with its own
+decision to make (what it costs on a metered connection, what it does to an
+answer mid-render), not a side effect of an auth listener.
 
 ### ⚠️ `setBusy` after an ask has been WRONG TWICE, in opposite directions
 

@@ -792,3 +792,68 @@ test("coverages are capped per policy — the column is unbounded and re-sent ev
   assert.ok(seenLabels > 0, "no coverage lines reached the prompt at all — the test is vacuous");
   assert.ok(seenLabels <= 20, `${seenLabels} coverage lines crossed the boundary; CLAUDE.md documents a cap of 20`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE RETRY-TIME ERROR PATHS. Added after an independent silent-failure review
+// of the round-20 commit found that `retryAfterFor` returned a bare `null` on a
+// query error with nothing logged — and that for the CLIENT scope a missing
+// number renders as "Please try again in a few minutes" (rateLimitNotice), i.e.
+// a transient PostgREST failure told a caller 5 minutes into a 60-minute block
+// to come back shortly. The flat 3600 it replaced overstated, which is the safe
+// direction. No test reached these paths, which is why the refactor could make
+// that trade without anything going red.
+//
+// Select order on help_queries for an hourly refusal: #1 the reservation's
+// `.select("id")`, #2 the hourly count, #3 survivors, #4 the oldest row.
+// ─────────────────────────────────────────────────────────────────────────────
+function capturingConsoleError(fn) {
+  const real = console.error;
+  const lines = [];
+  console.error = (...a) => { lines.push(a.join(" ")); };
+  return fn().finally(() => { console.error = real; }).then((v) => [v, lines]);
+}
+
+// ⚠️ THE TWO CASES NEED DIFFERENT SEEDS, and the first version used one for
+// both. With every row inside the 5s grace, survivors is 0, the offset is
+// negative and the helper returns the grace without ever reading the oldest row
+// — so select #4 never happened and the "oldest-row read" case tested nothing.
+// Settled rows are what make that query reachable.
+for (const [label, failAt, stage, ageMins] of [
+  ["the survivors count", 3, "survivors", 0],
+  ["the oldest-row read", 4, "oldest", 50],
+]) {
+  test(`when ${label} fails, the hourly refusal falls back to the WINDOW and says so in the log`, async () => {
+    const hour = new Date(Date.now() - ageMins * 60_000).toISOString();
+    const rows = Array.from({ length: 20 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: hour }));
+    const { d, rows: rowsOf } = deps({ tables: seed({ help_queries: rows }), dbOpts: { failSelect: { help_queries: failAt } } });
+    const [res, logged] = await capturingConsoleError(() => ask(d));
+    const body = await res.json();
+    assert.equal(body.reason, "rate_limited");
+    assert.equal(body.scope, "client");
+    // 3600, NOT absent. Absent is the one answer that is wrong here: it renders
+    // as "in a few minutes" for a block that can have most of an hour to run.
+    assert.equal(body.retryAfter, 3600,
+      "a failed retry-time query omitted the number, which the consumer renders as a few minutes");
+    const line = logged.find((l) => l.includes("retry_after"));
+    assert.ok(line, `nothing was logged; an operator reading the \`where\` field sees no cause. Got: ${JSON.stringify(logged)}`);
+    assert.ok(line.includes(`"stage":"${stage}"`), `the log does not name the stage: ${line}`);
+    // And the reservation still goes back — this is the reserved side of the line.
+    assert.equal(rowsOf("help_queries").length, 20, "the refused ask kept its reservation");
+  });
+}
+
+test("when the SHARED-cap retry time fails, the number is omitted — 'tomorrow' overstates, which is the safe direction", async () => {
+  // Selects here: #1 reserve, #2 hourly count (the caller is under it), #3 the
+  // daily total, #4 survivors. So 4 fails the shared branch's own first query.
+  const hoursAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString();
+  const theirs = Array.from({ length: 400 }, (_, i) => ({ id: `s${i}`, owner: OTHER, asked_at: hoursAgo(6) }));
+  const { d, rows: rowsOf } = deps({ tables: seed({ help_queries: theirs }), dbOpts: { failSelect: { help_queries: 4 } } });
+  const [res, logged] = await capturingConsoleError(() => ask(d));
+  const body = await res.json();
+  assert.equal(body.reason, "rate_limited");
+  assert.equal(body.scope, "shared");
+  assert.equal(body.retryAfter, undefined,
+    "a shared-cap failure sent a number it could not know; omitting lands on 'tomorrow', which overstates a rolling window");
+  assert.ok(logged.some((l) => l.includes("retry_after")), "the shared-cap failure was silent");
+  assert.equal(rowsOf("help_queries").length, 400, "the refused ask kept its reservation");
+});

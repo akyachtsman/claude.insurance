@@ -123,11 +123,21 @@ function loginKeyOf(session) {
   // to the bare user id passes every scenario, because a same-account re-login
   // can only be reached through a sign-out, and the sign-out already clears
   // everything. It is kept because the case it covers is a re-authentication with
-  // NO intervening sign-out (a password change, a `USER_UPDATED`, a programmatic
-  // re-sign-in), where the id alone compares equal and the stale state would be
-  // retained silently. That is precisely the class of miss that got through three
-  // rounds running here — owner, then session, then session-across-tabs — so the
-  // stricter key stays even though no test can currently tell the difference.
+  // NO intervening sign-out — a **programmatic re-sign-in**, which is a fresh
+  // token grant and does move this column — where the id alone compares equal
+  // and the stale state would be retained silently. That is precisely the class
+  // of miss that got through three rounds running here — owner, then session,
+  // then session-across-tabs — so the stricter key stays even though no test can
+  // currently tell the difference.
+  //
+  // ⚠️ THIS LIST USED TO SAY "a password change, a `USER_UPDATED`" AND THOSE ARE
+  // NOT COVERED. Neither moves `last_sign_in_at` (GoTrue writes it on a sign-in;
+  // `updateUser` touches `updated_at`), so the key compares EQUAL and the
+  // subscriber below is a no-op for them. Nothing in `js/` calls `updateUser` or
+  // a password reset, so nothing is lost today — but a future one would leave the
+  // cached profile stale, and it would do so silently. Found by an independent
+  // review of the round-20 commit, which also noted that the listener deleted in
+  // that commit was the only thing invalidating on `USER_UPDATED`.
   return at ? `${id}:${at}` : `${id}:unknown:${Date.now()}:${Math.random()}`;
 }
 let loginKey = null;
@@ -213,13 +223,22 @@ export async function signOut() {
 
 // ── Keep data: load once, assemble the nested shape the views expect ─────────
 let cache = null;
-export function invalidate() { cache = null; }
+// Moves on EVERY invalidation, which is what the fill guard in `ensureData`
+// compares — not `loginEpoch`. It covers the login case for free, because
+// `announceLogin` invalidates; and it covers the case the login epoch alone
+// missed: a data WRITE (addEntity / addRelationship / addAsset below) that
+// invalidates while an earlier fill is still in flight, where the pre-write
+// snapshot would otherwise be cached straight over the top. One counter rather
+// than two, because two invites the "which of these is load-bearing" question
+// this PR has now answered wrongly twice.
+let cacheGen = 0;
+export function invalidate() { cache = null; cacheGen += 1; }
 
 // Optionally pass the already-known signed-in user (the route guard has it) to
 // skip a redundant getUser() round-trip.
 export async function ensureData(user) {
   if (cache) return cache;
-  const epoch = loginEpoch;
+  const gen = cacheGen;
   const tree = await loadTree(user);
   // ⚠️ A FILL THAT OUTLIVED ITS LOGIN IS NEVER CACHED. `invalidate()` runs on
   // every login change, but it can only clear what is ALREADY there — a load
@@ -232,11 +251,18 @@ export async function ensureData(user) {
   // which outlives it. Found by Codex, round 20 — the finding named cache fills
   // explicitly and the first fix only covered the render.
   //
-  // The tree is still RETURNED, because the only caller awaiting this call is the
-  // dispatch that started it, and that dispatch checks its own generation before
-  // mounting anything. Nothing else can be holding this promise: each call runs
-  // its own `loadTree`.
-  if (loginEpoch !== epoch) return tree;
+  // The tree is still RETURNED, and the reason given here was WRONG: it said
+  // "the only caller awaiting this call is the dispatch that started it".
+  // There are three callers — `dispatchKeep` plus `renderKeepAddEntity`
+  // (keep/views/keep.js) and the add-asset submit (keep/views/assets.js), both of
+  // which invalidate and re-await after a write. The conclusion survives for a
+  // different reason: those two DISCARD the return value and then `go(...)`,
+  // which re-dispatches through the route guard — so a stale return reaches
+  // nobody, and a sign-out mid-write lands on the login card. `dispatchKeep`
+  // discards it too and checks its own generation before mounting. Found by an
+  // independent review of the round-20 commit; a comment that is right about the
+  // conclusion and wrong about the reason is the kind this PR keeps producing.
+  if (cacheGen !== gen) return tree;
   cache = tree;
   return cache;
 }

@@ -510,26 +510,68 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // helper to a supabase-js version.
   // deno-lint-ignore no-explicit-any
   type Builder = any;
+  // ⚠️ `failed` IS NOT COSMETIC, and conflating it with `seconds: null` was a
+  // real regression. Both outcomes used to be a bare `null`, and the two mean
+  // opposite things to the consumer: "nothing has to expire, I just cannot name
+  // a number" versus "a query failed and I know nothing". `rateLimitNotice`
+  // renders a CLIENT-scope refusal with no number as **"Please try again in a
+  // few minutes"** (js/keep/logic/help.js), so a transient PostgREST error on a
+  // caller who is 5 minutes into a 60-minute window told them to come back in a
+  // few minutes — for a block with 55 minutes left, over and over, with nothing
+  // logged. The flat 3600 this replaced OVERSTATED, which is the safe direction;
+  // the refactor swapped it for an understatement. Found by an independent
+  // silent-failure review of the round-20 commit.
+  // So the two are distinguished, each failure is LOGGED with the `where` field
+  // owner-gate step 8 tells an operator to read, and the hourly caller falls back
+  // to the window itself — the old upper bound — when `failed`.
   const retryAfterFor = async (
     windowStart: string, windowMs: number, cap: number, scoped: (q: Builder) => Builder,
-  ): Promise<number | null> => {
-    const settled = new Date(Date.now() - GRACE_MS).toISOString();
-    const { count: survivors, error: survErr } = await scoped(
-      admin.from("help_queries").select("id", { count: "exact", head: true }),
-    ).gte("asked_at", windowStart).lt("asked_at", settled);
-    if (survErr) return null;
-    // An ask fits when the retained count is at most cap-1, so `survivors - cap`
-    // is the 0-based index of the last row that has to expire.
-    const offset = (survivors ?? 0) - cap;
-    // GRACE_MS is how long a peer's row stays excluded, so that is the honest
-    // wait; seconds, rounded up, never zero.
-    if (offset < 0) return Math.ceil(GRACE_MS / 1000);
-    const { data: oldest } = await scoped(
-      admin.from("help_queries").select("asked_at"),
-    ).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
-    const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
-    const secs = Number.isFinite(at) ? Math.ceil((at + windowMs - Date.now()) / 1000) : NaN;
-    return Number.isFinite(secs) && secs > 0 ? secs : null;
+  ): Promise<{ seconds: number | null; failed: boolean }> => {
+    const fail = (stage: string, err: unknown) => {
+      console.error(JSON.stringify({
+        where: "retry_after", stage,
+        code: (err as { code?: string })?.code ?? null,
+        message: (err as { message?: string })?.message ?? "unknown",
+      }));
+      return { seconds: null, failed: true };
+    };
+    // ⚠️ THE WHOLE BODY IS WRAPPED, because everything past here is on the
+    // reserved side of the line and `releaseAnd` has not run yet. postgrest-js
+    // returns errors rather than throwing, so a rejection needs a rejecting
+    // fetch underneath it — but if one happens, the throw escapes `handle()`,
+    // `index.ts` wraps it in no try/catch, and the caller gets a bare 500 with
+    // no CORS headers **and the reservation is never deleted**: a refused ask
+    // would eat one of the caller's 20 hourly slots and one of the 400 daily
+    // ones having billed nothing. That is the exact failure `releaseAnd` exists
+    // to prevent. Same review.
+    try {
+      const settled = new Date(Date.now() - GRACE_MS).toISOString();
+      const { count: survivors, error: survErr } = await scoped(
+        admin.from("help_queries").select("id", { count: "exact", head: true }),
+      ).gte("asked_at", windowStart).lt("asked_at", settled);
+      if (survErr) return fail("survivors", survErr);
+      // An ask fits when the retained count is at most cap-1, so `survivors - cap`
+      // is the 0-based index of the last row that has to expire.
+      const offset = (survivors ?? 0) - cap;
+      // GRACE_MS is how long a peer's row stays excluded, so that is the honest
+      // wait; seconds, rounded up, never zero.
+      if (offset < 0) return { seconds: Math.ceil(GRACE_MS / 1000), failed: false };
+      const { data: oldest, error: oldErr } = await scoped(
+        admin.from("help_queries").select("asked_at"),
+      ).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
+      // ⚠️ THIS ERROR WAS DESTRUCTURED AWAY. `{ data: oldest }` alone turned a
+      // failed select into `at = NaN` → `secs = NaN` → a silent `null`, which is
+      // the understatement above with no trace of a cause.
+      if (oldErr) return fail("oldest", oldErr);
+      const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
+      const secs = Number.isFinite(at) ? Math.ceil((at + windowMs - Date.now()) / 1000) : NaN;
+      // A legitimate `null`: the rows aged out or were released between the two
+      // queries, so nothing has to expire after all. NOT a failure — the caller
+      // must not promise the whole window for it.
+      return { seconds: Number.isFinite(secs) && secs > 0 ? secs : null, failed: false };
+    } catch (e) {
+      return fail("threw", e);
+    }
   };
 
   const { count, error: countErr } = await admin.from("help_queries")
@@ -553,7 +595,12 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // to age out actually does. Found by Codex, round 20, pointing at the fix the
   // shared cap had already had.
   if ((count ?? 0) > HOURLY_CAP) {
-    const retryAfter = await retryAfterFor(since, 3600_000, HOURLY_CAP, (q) => q.eq("owner", owner));
+    const wait = await retryAfterFor(since, 3600_000, HOURLY_CAP, (q) => q.eq("owner", owner));
+    // ⚠️ ON FAILURE, FALL BACK TO THE WINDOW — one hour, the bound the flat 3600
+    // always was. Omitting the number here is the one direction that is not safe:
+    // see `retryAfterFor`'s note. A legitimate `null` (nothing left to expire)
+    // still omits, and "in a few minutes" is then true.
+    const retryAfter = wait.seconds ?? (wait.failed ? Math.ceil(3600_000 / 1000) : null);
     // `scope` so the consumer can word this correctly. Without it the view
     // guessed from the WAIT LENGTH, which told a client who had asked nothing all
     // day "You've asked a few questions in a short time" whenever the SHARED cap
@@ -583,7 +630,10 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // clears when enough rows age out, and `retryAfterFor` works out which row
     // that is — see its note for why the count comes from survivors rather than
     // from `total`, and why a negative offset still sends a short number.
-    const retryAfter = await retryAfterFor(dayAgo, 86_400_000, DAILY_TOTAL_CAP, (q) => q);
+    // No failure fallback on this side, deliberately: a shared-cap refusal with no
+    // number renders as "try again tomorrow", which OVERSTATES a rolling 24-hour
+    // window rather than understating it. The log now says why it had none.
+    const retryAfter = (await retryAfterFor(dayAgo, 86_400_000, DAILY_TOTAL_CAP, (q) => q)).seconds;
     return await releaseAnd("rate_limited", { scope: "shared", ...(retryAfter ? { retryAfter } : {}) });
   }
 

@@ -61,7 +61,6 @@ onAuthChange(() => { route(); });
 let dispatchGen = 0;
 
 async function route() {
-  const gen = ++dispatchGen;
   const fullHash = location.hash || "#/";
   nav.track(fullHash, navSignal());
 
@@ -70,9 +69,18 @@ async function route() {
   const parts = pathPart.split("/").filter(Boolean); // ["coverage","home"]
   const params = new URLSearchParams(query || "");
 
+  // ⚠️ BUMPED HERE, NOT AT THE TOP OF THE FUNCTION. The first version claimed
+  // the counter and then ran `nav.track` and the hash parse above it, outside
+  // the `try` — so a throw in either one superseded whatever was in flight and
+  // then rendered nothing itself, leaving the page blank or stale with only an
+  // unhandled rejection to show for it. Claiming the counter is a promise to
+  // render; make it after the code that could break that promise. Found by an
+  // independent review of the round-20 commit, which called it the only route to
+  // a blank page it could find. Everything from here down is inside the `try`.
   // The Keep portal swaps the public site chrome for its own (CSS via body class).
   document.body.classList.toggle("in-keep", parts[0] === "keep");
 
+  const gen = ++dispatchGen;
   try {
     await dispatch(parts, params, gen);
   } catch (err) {
