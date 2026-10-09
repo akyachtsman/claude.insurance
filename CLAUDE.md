@@ -482,7 +482,7 @@ that would have turned `qa-live` red on the first run after the variable was
 set.** `.k-h1` appears on Entities, Policies, Documents, Account, Assets and the
 add/request forms, and on **neither** the login card (its title is `.k-atitle`)
 nor the signed-in home view, which is where a successful login lands —
-`go("#/keep")` → `el("h1", { class: "k-welcome__h", … })` (`js/keep/views/keep.js:165`).
+`go("#/keep")` → `el("h1", { class: "k-welcome__h", … })` (`js/keep/views/keep.js:178`).
 S9 already asserts `.k-welcome__h` for exactly this reason, with its own comment
 saying why not the bare text.
 
@@ -595,8 +595,33 @@ gap was **three views of fifteen**: `#/keep` (home), `#/keep/assets` and
 Fixed by adding `originBackRow()` to those three, plus `#/keep/assets` to
 `KEEP_LABELS` so a control pointing AT the assets table names it instead of
 reading a bare "Back". Home is the debatable one and is in deliberately: `home` is
-a credited topic, and `originBackRow()` renders nothing without an in-app prior,
-so the root looks untouched unless you actually arrived from somewhere.
+a credited topic, and `originBackRow()` renders nothing without an in-app prior.
+
+⚠️ **"Unless you actually arrived from somewhere" read narrower than it is, and
+that wording hid a real defect for a day.** Two corrections, both from an
+independent review of `7ed36e1` (round 7, 2026-10-09) that measured a **real form
+login** rather than a deep link:
+
+1. **The post-login landing page had a "Back" to the login card.**
+   `renderKeepLogin` succeeds with `go("#/keep")` and `nav.track` runs on the
+   login route too, so `#/keep/login` is the previous entry on the first screen of
+   **every** signed-in session — and it starts with `#/keep`, so the prefix test
+   admitted it. `dispatchKeep` renders that card for `sub === "login"` with no
+   session check, so following the link showed a signed-in client the login form.
+   Fixed in **one shared predicate**, `originRoute()` in `shell.js`, which
+   `originHref` (nine `backLink` call sites + `kProgress`'s cancel) and
+   `originBackRow` both now go through; S13 asserts `.k-backrow` count 0 right
+   after the second sign-in. The earlier verification could not have caught it:
+   it covered deep links and credited destinations, and only a real sign-in builds
+   that stack.
+2. **A lateral app-bar tab switch counts as "somewhere".** Click Policies while on
+   Entities and Policies shows "Back to entities". That is **pre-existing** —
+   `#/keep/list` and `#/keep/grid` have always behaved this way — and it is what
+   the origin-aware standard asks for, so it stays; but the three new call sites
+   are app-bar destinations, so it is now visible on every tab switch rather than
+   only after a credit. Recorded, not changed: scoping the row to
+   `prev === "#/keep/help"` would make the control *not* origin-aware, which is
+   the standard it was added to satisfy.
 
 **Verified by measurement, not inspection**: all 15 Keep routes now return to
 `#/keep/help` after a credit; and in a FRESH browser context a deep link to
@@ -753,7 +778,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 the same heading without being rendered, because the Keep needs a live backend the
 sandbox browser cannot reach — and `.k-h1` was listed as the dashboard heading when
 the dashboard uses `.k-welcome__h`. Corrected 2026-10-06 from the source
-(`js/keep/views/keep.js:165`) and from S9, which already asserted the right one.
+(`js/keep/views/keep.js:178`) and from S9, which already asserted the right one.
 A claim of verification that covers only part of a row is the same defect as the
 dead selector it was written to fix. `home` was `.app-header h1`, which matches **nothing**: there is no
 `.app-header` anywhere in `js/`, `css/` or `index.html`, and the home `h1` is

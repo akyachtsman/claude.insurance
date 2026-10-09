@@ -454,11 +454,35 @@ const KEEP_LABELS = {
   "#/keep/security": "security",
 };
 
-// The route to return to: where the user actually came from (when it's a Keep
-// route), else the hierarchical fallback the caller passes (deep-links/reloads).
-function originHref(fallbackHref) {
+// The in-app Keep route the user actually came from, or null when there is none
+// to offer. ONE predicate, shared by every back control — `originHref` below
+// (nine `backLink` call sites plus `kProgress`'s cancel) and `originBackRow`
+// further down — so a route that must never be a back destination is excluded
+// in one place rather than per call site.
+//
+// ⚠️ `#/keep/login` IS EXCLUDED, and it is not hypothetical. `renderKeepLogin`'s
+// success path is `go("#/keep")`, and `nav.track` runs on every route including
+// login, so the nav stack records `#/keep/login` as the origin of the landing
+// page of EVERY signed-in session. `#/keep/login` starts with `#/keep`, so the
+// prefix test admits it — which put a bare "Back" link to the login card on the
+// first screen after every sign-in, and `dispatchKeep` renders that card for
+// `sub === "login"` with no session check, so following it showed a signed-in
+// client the login form. Found by review round 7 (2026-10-09) by MEASURING a
+// real form login, which is also why the commit that added `originBackRow()` to
+// the landing page missed it: its own verification covered deep links and
+// credited destinations, never the post-login transition. S13 asserts it now.
+function originRoute() {
   const prev = previousRoute();
-  return (prev && prev.startsWith("#/keep") && prev !== location.hash) ? prev : fallbackHref;
+  if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
+  if (prev === "#/keep/login") return null;
+  return prev;
+}
+
+// The route to return to: where the user actually came from (when it's an
+// offerable Keep route), else the hierarchical fallback the caller passes
+// (deep-links/reloads).
+function originHref(fallbackHref) {
+  return originRoute() || fallbackHref;
 }
 
 // Origin-aware back affordance (CLAUDE.md coding standard).
@@ -487,11 +511,20 @@ function routeLabel(hash) {
   return null;
 }
 // Back row shown only when you arrived from another in-app Keep page (e.g. an
-// entity detail via its Relationships / All entities control) — so a top-level
-// nav visit to a list/map page doesn't get a spurious back control.
+// entity detail via its Relationships / All entities control, or a Help-desk
+// credit) — so a deep link or a fresh load doesn't get a spurious back control.
+//
+// ⚠️ "Another in-app Keep page" includes a LATERAL app-bar tab switch, not only
+// a drill-down: click Policies while on Entities and Policies renders "Back to
+// entities". That is pre-existing behaviour — `#/keep/list` and `#/keep/grid`
+// have always worked this way — and it is deliberate, since the coding standard
+// is that a back control points where the user came from, not at a fixed
+// parent. It is written down here because the change that extended this helper
+// to home / assets / insurance described it as invisible "unless you actually
+// arrived from somewhere", which reads narrower than it is.
 function originBackRow() {
-  const prev = previousRoute();
-  if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
+  const prev = originRoute();
+  if (!prev) return null;
   const label = routeLabel(prev);
   return el("div", { class: "k-backrow" }, [
     el("a", { class: "k-back", attrs: { href: prev } }, [

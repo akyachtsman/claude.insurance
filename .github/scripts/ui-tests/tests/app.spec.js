@@ -2923,6 +2923,19 @@ test('S13: following a credit and coming back restores the answer — but only f
   await expect(page.locator('.k-welcome__h'), 'the second identity did not reach the dashboard')
     .toBeVisible({ timeout: 15_000 });
 
+  // ⚠️ AND THE LANDING PAGE MUST NOT OFFER A WAY BACK TO THE LOGIN CARD. This is
+  // the one arrival the earlier version of this scenario never checked, and it is
+  // the commonest one there is: `renderKeepLogin` succeeds with `go("#/keep")`,
+  // so the nav stack's previous entry is `#/keep/login` on the first screen of
+  // every signed-in session. `#/keep/login` starts with `#/keep`, so the prefix
+  // test in `originRoute()` admitted it until round 7, and `dispatchKeep` renders
+  // the login card for `sub === "login"` with no session check — so following that
+  // link showed a signed-in client the login form. Asserted here rather than in a
+  // deep-link check because only a REAL sign-in produces the stack that triggers
+  // it; S9's login assertions stop at the heading.
+  await expect(page.locator('.k-backrow'),
+    'the page a sign-in lands on offers a back control — it points at the login card').toHaveCount(0);
+
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
   await expect(page.locator('.k-help__a'),
