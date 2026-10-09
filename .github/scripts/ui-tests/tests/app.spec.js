@@ -2960,6 +2960,35 @@ test('S13: following a credit and coming back restores the answer — but only f
   await expect(page.locator('.k-backrow'),
     'a completed single-use form is still offered as a back destination').toHaveCount(0);
 
+  // (c) THE BARE `#/keep/request` — the general enhancement form, reached from
+  //     "New request" on My requests and from global search, and the route the
+  //     exclusion existed for. It submits to `#/keep/requests`, whose control is
+  //     `backLink("#/keep", "home")` — a FALLBACK, so that page always renders a
+  //     back row and the assertion has to be on the HREF, not the count. Before
+  //     the fix it read a bare "Back" pointing at the form just submitted, which
+  //     is how a duplicate enhancement request gets created.
+  await page.goto('./#/keep/request');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await page.goto('./#/keep/requests');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-backrow a.k-back'),
+    'My requests points its back control at the request form it just submitted')
+    .toHaveAttribute('href', '#/keep');
+
+  // (d) AND THE LIST ROUTE MUST STILL BE A VALID ORIGIN. `#/keep/requests` is
+  //     excluded only by the `(?:[/?]|$)` tail — after `request` it finds `s` —
+  //     so that one tail both admits the `request/` and `request?` variants and
+  //     keeps the list out. This assertion exists because a mutation that DELETED
+  //     the tail passed without it: the suite proved the exclusions it added and
+  //     nothing proved what they must not swallow.
+  await page.goto('./#/keep/requests');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await page.goto('./#/keep/insurance');
+  await expect(page.locator('.k-h1')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.k-backrow a.k-back'),
+    'the My requests LIST was swallowed by the request-form exclusion')
+    .toHaveAttribute('href', '#/keep/requests');
+
   await page.goto('./#/keep/help');
   await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
   await expect(page.locator('.k-help__a'),

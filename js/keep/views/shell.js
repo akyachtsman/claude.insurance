@@ -466,23 +466,37 @@ const KEEP_LABELS = {
 //   card, and `dispatchKeep` renders that card for `sub === "login"` with no
 //   session check, so following it showed a signed-in client the login form.
 //
-//   `add-asset` / `add-entity` / `request/:id` — SINGLE-USE FORMS the app
-//   navigates away from on success (`assets.js` → `#/keep/asset/:id`,
-//   `keep.js` → `#/keep/entity/:id`, `policies-view.js` → `#/keep/requests`).
-//   Offering the submitted form as the place you came from invites a second
-//   submission: on the request form that is a DUPLICATE enhancement request.
-//   `KEEP_LABELS` already declines to name these routes, so before this they
-//   were both unnamed and offered — a bare "Back" to a blank form.
+//   `add-asset` / `add-entity` / `request` — SINGLE-USE FORMS the app navigates
+//   away from on success (`assets.js` → `#/keep/asset/:id`, `keep.js` →
+//   `#/keep/entity/:id`, `policies-view.js` → `#/keep/requests`). Offering the
+//   submitted form as the place you came from invites a second submission: on the
+//   request form that is a DUPLICATE enhancement request. `KEEP_LABELS` already
+//   declines to name these routes, so before this they were both unnamed and
+//   offered — a bare "Back" to a blank form.
+//   ⚠️ `request` IS MATCHED BARE, not only as `request/<id>`, and the first
+//   version of this got that wrong. `#/keep/request` with no id is the GENERAL
+//   enhancement form — reached from the "New request" button on My requests
+//   (`policies-view.js`) and from global search (`logic/search.js`), both of
+//   which link the bare route — and it submits to `#/keep/requests`, whose
+//   `backLink("#/keep", "home")` then pointed straight back at the form it had
+//   just submitted. So the one route the exclusion was added for was the one it
+//   missed. Caught by Codex on the PR.
 //
 // Both found by independent review of this branch (rounds 7 and 8, 2026-10-09),
 // each by driving a real sign-in / a real submit rather than reading the code:
 // the deep-link and credited-destination checks that came first could not reach
 // either stack. The pattern is anchored and allows a trailing `/` or a query
 // string, because `#/keep/login/` and `#/keep/login?x=1` both route to the login
-// card and an exact-string exclusion missed both. `#/keep/requests` (the list)
-// deliberately does NOT match — only `#/keep/request/<id>`, the form.
+// card and an exact-string exclusion missed both.
+//
+// ⚠️ `#/keep/requests` (the LIST) deliberately does NOT match, and the `[/?]|$`
+// tail is what keeps it out: after `request` it finds `s`, which is none of
+// those. That single tail is doing two jobs — admitting the trailing-slash and
+// query-string variants, and refusing the list route — so it is the part to
+// re-check if this pattern is ever edited. `#/keep/request`, `#/keep/request/`,
+// `#/keep/request?x=1` and `#/keep/request/<policy-id>` all match.
 const NOT_A_BACK_DESTINATION =
-  /^#\/keep\/(?:login|add-asset|add-entity)(?:[/?]|$)|^#\/keep\/request\//;
+  /^#\/keep\/(?:login|add-asset|add-entity|request)(?:[/?]|$)/;
 
 // The in-app Keep route the user actually came from, or null when there is none
 // to offer. ONE predicate, shared by every back control — `originHref` below

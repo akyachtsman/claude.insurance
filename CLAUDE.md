@@ -770,6 +770,18 @@ login** rather than a deep link:
    `KEEP_LABELS` already declined to name these routes, so before this they were
    both unnamed and offered: a bare "Back" to a blank form. Now excluded in the
    same predicate. `#/keep/requests` (the list) deliberately does not match.
+   ⚠️ **`request` is matched BARE, and the first version of this got that wrong** —
+   caught by Codex on the PR. `#/keep/request` with no id is the *general*
+   enhancement form, linked from "New request" on My requests and from global
+   search, and it submits to `#/keep/requests`, whose `backLink("#/keep","home")`
+   then pointed straight back at the form it had just submitted. So the one route
+   the exclusion was added for was the one it missed.
+   ⚠️ **The `(?:[/?]|$)` tail does two jobs** — it admits the `request/`,
+   `request?` and `login/` variants *and* it is the only thing keeping
+   `#/keep/requests` out (after `request` it finds `s`). S13 asserts both
+   directions, because a mutation that deleted the tail **survived** the first
+   version of those assertions: the suite proved the exclusions it added and
+   nothing proved what they must not swallow.
 2. **A lateral app-bar tab switch counts as "somewhere".** Click Policies while on
    Entities and Policies shows "Back to entities". That is **pre-existing** —
    `#/keep/list` and `#/keep/grid` have always behaved this way — and it is what
