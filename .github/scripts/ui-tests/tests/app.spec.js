@@ -2730,6 +2730,27 @@ function routeHelpAskSequence(page, bodies) {
   return armed.then(() => ({ release: (i) => gates[i].r(), requests: () => n }));
 }
 
+// Hold the FIRST matching request on ONE page until the test releases it, then
+// let it and every later one through to the handler registered before this.
+//
+// It parks a cold Keep navigation inside `ensureData()` — the window between the
+// route guard passing and the view mounting, which is where S22 and S23 both
+// live and which nothing else here could reach. `page.route` is per-page, so a
+// second tab in the same context still loads normally and can drive a real
+// sign-out while the first tab is parked. `route.fallback()` hands off to the
+// fixture registered by `seedKeepSession`, so the response is the real one.
+async function gateFirst(page, re) {
+  let release = () => {};
+  const held = new Promise((r) => { release = r; });
+  let n = 0;
+  await page.route(re, async (route) => {
+    n += 1;
+    if (n === 1) await held;
+    await route.fallback();
+  });
+  return { release, requests: () => n };
+}
+
 // A payload shaped exactly as handler.ts sends one on the success path:
 // `usedTopics` are corpus IDS (titles are read back from the real corpus by
 // creditedTopics, per CLAUDE.md's "one canonical label" rule — a model's own
@@ -3670,6 +3691,148 @@ test('S21: an answer already rendered is cleared when another tab signs out', as
     'the answer element survived the sign-out').toHaveCount(0);
   await expect(tab1.locator('.k-help__src'),
     'the credited record values survived the sign-out').toHaveCount(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S22 — A DISPATCH IN FLIGHT MUST NOT MOUNT AFTER THE SESSION BEHIND IT ENDS.
+// `dispatchKeep` awaits `getSession()` and then `ensureData()`, so a COLD Keep
+// navigation has two suspension points between the guard passing and the view
+// mounting. A sign-out landing in either of them re-dispatches and renders the
+// login card — and then the ORIGINAL dispatch resumed and mounted the
+// signed-out client's private page over the top of it. S21 covers an answer
+// already on screen; this is the layer under it, a render that had not happened
+// yet when the session ended, which no epoch check reaches. Found by Codex,
+// round 20.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S22: a Keep load that outlives its session mounts nothing', async ({ context, renderWitness }) => {
+  renderWitness();
+  const tab1 = await context.newPage();
+  const pageErrors = [];
+  const routeErrors = [];
+  tab1.on('pageerror', e => pageErrors.push(e.message));
+  tab1.on('console', (m) => { if (m.type() === 'error' && /route error/.test(m.text())) routeErrors.push(m.text()); });
+  await seedKeepSession(tab1, 'a');
+  const gate = await gateFirst(tab1, /\/rest\/v1\/entities/);
+
+  // Parked mid-dispatch: the guard has passed (the session is in storage, read
+  // with no network call), and the data load is held open.
+  await tab1.goto('./#/keep/list');
+  await expect(tab1.locator('.k-h1'), 'the parked navigation rendered anyway').toHaveCount(0);
+  await expect(tab1.locator('.k-authcard')).toHaveCount(0);
+
+  // Tab 2 signs the shared account out. Tab 1 is not touched.
+  const tab2 = await context.newPage();
+  await seedKeepSession(tab2, 'a');
+  await tab2.goto('./#/keep/account');
+  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await tab2.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await expect(tab1.locator('.k-authcard'),
+    'tab 1 did not re-dispatch to the login card on the cross-tab sign-out')
+    .toBeVisible({ timeout: 10_000 });
+
+  // Now let the parked load finish. Its dispatch is superseded; it must mount
+  // nothing at all.
+  gate.release();
+  await tab1.waitForTimeout(1_500);
+  // ⚠️ A NON-RETRYING PAIR, deliberately. `mount()` REPLACES the main region, so
+  // the stale render and the login card cannot both be present: counting one is
+  // counting the other. Asserted together so the failure message names which.
+  await expect(tab1.locator('.k-authcard'),
+    "a load that outlived its session mounted the signed-out client's page over the login card")
+    .toHaveCount(1);
+  await expect(tab1.locator('.k-h1'),
+    'a Keep page heading rendered under no session').toHaveCount(0);
+  // ⚠️ THE ASSERTION THAT ACTUALLY CATCHES THIS, and it took a mutation test to
+  // find that out: with the generation check deleted, the two assertions above
+  // STILL PASSED. The two round-20 fixes are layered, and the other one masks
+  // this one — S23's cache guard correctly refuses to store a fill that outlived
+  // its login, so the superseded dispatch reaches `renderKeepEntityList()` with
+  // an empty cache, throws, and `route()`'s catch (generation-guarded in the same
+  // fix) swallows it. Nothing reaches the DOM either way.
+  // What differs is whether the superseded dispatch RUNS AT ALL, and it logs
+  // when it does. A clean run never enters it, so there is nothing to log.
+  expect(routeErrors, `a superseded dispatch ran and threw: ${routeErrors.join('; ')}`).toHaveLength(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S23 — AND IT MUST NOT REACH THE CACHE EITHER, which outlives the render.
+// `invalidate()` runs on every login change, but it can only clear what is
+// already there: a load still in flight lands AFTER it and used to assign
+// straight over the top. So the signed-out client's whole tree arrived in the
+// cache a moment after someone ELSE had signed in, and every sync accessor in
+// supabase.js then served them the previous client's entities, assets and
+// policies. Codex's round-20 finding named cache fills explicitly; S22's fix
+// covers only the render.
+// Asserted twice over: on the app's own `getUser()` accessor (bounded poll, so
+// it is decided in both directions rather than waited out) and on what the next
+// render actually shows.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S23: a data load that outlived its login never reaches the cache', async ({ context, renderWitness }) => {
+  renderWitness();
+  const tab1 = await context.newPage();
+  const pageErrors = [];
+  tab1.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(tab1, 'a');
+  const gate = await gateFirst(tab1, /\/rest\/v1\/entities/);
+
+  await tab1.goto('./#/keep');
+  await expect(tab1.locator('.k-welcome__h')).toHaveCount(0);
+
+  const tab2 = await context.newPage();
+  await seedKeepSession(tab2, 'a');
+  await tab2.goto('./#/keep/account');
+  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await tab2.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await expect(tab1.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+
+  // A DIFFERENT client signs in on tab 1. Their own load is not gated — the gate
+  // holds the first request only — so their tree fills the cache normally.
+  await tab1.locator('.k-authcard input[type=text]').fill('other');
+  await tab1.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await tab1.getByRole('button', { name: /log in/i }).click();
+  // "Welcome back, Other" — the view greets by first name, so this is the whole
+  // of the discriminator and `Other` vs `Demo` is what the assertions key on.
+  await expect(tab1.locator('.k-welcome__h')).toContainText(/Welcome back, Other/, { timeout: 15_000 });
+
+  // Release the FIRST client's parked load, which now resolves under the second
+  // client's session.
+  gate.release();
+
+  // ⚠️ READ THROUGH THE APP'S OWN EXPORT, not a stub: the import map keys every
+  // module by its absolute URL, so a dynamic import of the same URL returns the
+  // SAME module record the app is running — same `cache`, same accessors. The
+  // poll is bounded and returns the email it found, so a pass is "A's tree never
+  // arrived" and not "the test gave up first".
+  const landed = await tab1.evaluate(async () => {
+    const m = await import(new URL('js/supabase.js', document.baseURI).href);
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const who = m.getUser() ? m.getUser().email : null;
+      if (who === 'user@example.com') return who;
+      if (Date.now() > deadline) return who;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  });
+  expect(landed, "the signed-out client's tree was written into the cache under the new login")
+    .not.toBe('user@example.com');
+
+  // The user-visible half. A hash `goto` does not reload the document, so this
+  // re-renders from the cache that is actually in memory.
+  await tab1.goto('./#/keep/account');
+  await expect(tab1.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await tab1.goto('./#/keep');
+  await expect(tab1.locator('.k-welcome__h'),
+    "the previous client's name came back out of the cache")
+    .toContainText(/Welcome back, Other/, { timeout: 15_000 });
+  // Scoped to the heading, not the document: the Keep carries a demo ribbon, so
+  // "demo" appears on every page and a body-wide negative would be vacuous.
+  await expect(tab1.locator('.k-welcome__h')).not.toContainText(/Demo/);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

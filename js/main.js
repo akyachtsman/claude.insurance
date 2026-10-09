@@ -43,7 +43,25 @@ export function previousRoute() { return nav.previous(); }
 // card and so clears it. Found by Codex, round 19.
 onAuthChange(() => { route(); });
 
+// ⚠️ A DISPATCH IN FLIGHT MUST NOT MOUNT AFTER THE LOGIN BEHIND IT HAS CHANGED.
+// `dispatchKeep` awaits `getSession()` and then `ensureData()`, so a COLD Keep
+// navigation has two suspension points between the guard passing and the view
+// mounting. A sign-out landing in either of them re-dispatches (above), renders
+// the login card — and then the original dispatch resumed and mounted the
+// signed-out client's private page OVER it, with their entities, policies and
+// values on screen under no session at all. The epoch guards what Help WRITES
+// and RESTORES, and round 19 guarded what is ALREADY RENDERED; neither reaches a
+// render that has not happened yet. Found by Codex, round 20.
+//
+// One counter, bumped at the top of every `route()`: an auth change calls
+// `route()`, so it supersedes by the same mechanism as a hashchange, and there is
+// no second thing to keep in step. Checked after EVERY await on the way to a
+// mount, and in `route()` itself so a superseded dispatch cannot paint the error
+// placeholder or steal focus.
+let dispatchGen = 0;
+
 async function route() {
+  const gen = ++dispatchGen;
   const fullHash = location.hash || "#/";
   nav.track(fullHash, navSignal());
 
@@ -56,19 +74,21 @@ async function route() {
   document.body.classList.toggle("in-keep", parts[0] === "keep");
 
   try {
-    await dispatch(parts, params);
+    await dispatch(parts, params, gen);
   } catch (err) {
     console.error("route error:", err);
+    if (gen !== dispatchGen) return;
     mount(el("div", { class: "placeholder" }, [
       el("h1", { class: "placeholder__title", text: "Something went wrong" }),
       el("p", { text: "We couldn't load this view. Please reload the page." }),
     ]));
   }
+  if (gen !== dispatchGen) return;
   setActiveNav(parts[0] ? `/${parts[0]}` : "/");
   focusMain();
 }
 
-async function dispatch(parts, params) {
+async function dispatch(parts, params, gen) {
   const [top, sub] = parts;
   switch (top) {
     case undefined:
@@ -83,7 +103,7 @@ async function dispatch(parts, params) {
     case "summary":
       return renderSummary(params);
     case "keep":
-      return dispatchKeep(parts.slice(1));
+      return dispatchKeep(parts.slice(1), gen);
     case "hub": // back-compat with the old default route
       location.replace("#/residential");
       return;
@@ -99,13 +119,18 @@ async function dispatch(parts, params) {
 // (This header previously listed five of them.)
 // Guards every route except login behind a Supabase Auth session, and loads the
 // user's data once before rendering so the views can read it synchronously.
-async function dispatchKeep(rest) {
+async function dispatchKeep(rest, gen) {
   const [sub, id] = rest;
   if (sub === "login") return renderKeepLogin();
 
   const session = await getSession();
+  if (gen !== dispatchGen) return;
   if (!session) return renderKeepLogin();
   await ensureData(session.user);
+  // The last gate before a signed-in view mounts. See the note on `dispatchGen`:
+  // without this the page below renders under whatever session arrives next,
+  // including none.
+  if (gen !== dispatchGen) return;
 
   switch (sub) {
     case undefined:

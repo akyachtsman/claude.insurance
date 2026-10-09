@@ -145,6 +145,17 @@ function announceLogin(key) {
   }
 }
 
+// ⚠️ THERE IS EXACTLY ONE `onAuthStateChange` SUBSCRIBER, AND THAT IS THE POINT.
+// Round 19 added this keyed one to stop a refocus being read as a login change,
+// and LEFT THE ROUND-18 UNCONDITIONAL ONE IN PLACE below it — so every
+// `SIGNED_IN`, refocus included, still bumped `loginEpoch` and called
+// `invalidate()`, and the fix reported as made was inert. It survived this
+// session's own mutation test because the duplicate bumped the epoch WITHOUT
+// notifying `authListeners`: no `route()` re-dispatch, so no scenario saw a
+// second render, while a held Help answer was still discarded on tab refocus.
+// Found by Codex, round 20; duplicate deleted. If a second subscriber is ever
+// added here, this invariant is what breaks first.
+//
 // ⚠️ CROSS-TAB. The explicit calls in `signIn`/`signOut` only run in the tab that
 // called them; the client broadcasts auth changes to the others over a
 // BroadcastChannel. Without this, signing out and back into the shared account in
@@ -180,29 +191,6 @@ supabase.auth.onAuthStateChange((event, session) => {
   announceLogin(next);
 });
 
-// ⚠️ CROSS-TAB. The bumps in `signIn`/`signOut` below only run in the tab that
-// called them, and the Supabase client BROADCASTS auth changes to the others
-// over a BroadcastChannel. So: sign out and sign back into the shared demo
-// account in a SECOND tab, and the first tab's Help view kept its old epoch —
-// after which a held completion passed both the epoch and the owner check and
-// rendered the previous person's question, answer and credited values for the
-// new one. The same defect round 17 fixed, one tab across. Found by Codex,
-// round 18, against that fix.
-//
-// TOKEN_REFRESHED and INITIAL_SESSION are deliberately NOT identity changes: a
-// refresh happens on a timer and would throw away a client's own answer mid-use,
-// and INITIAL_SESSION fires on every load before anything has been cached.
-//
-// The same-tab bumps are KEPT as well, so a double bump is normal. Harmless —
-// only inequality is ever read — and it means `authEpoch()` is already correct
-// when `signIn` returns, rather than depending on when the event lands.
-supabase.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") {
-    loginEpoch += 1;
-    invalidate();
-  }
-});
-
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };
@@ -230,7 +218,26 @@ export function invalidate() { cache = null; }
 // Optionally pass the already-known signed-in user (the route guard has it) to
 // skip a redundant getUser() round-trip.
 export async function ensureData(user) {
-  if (!cache) cache = await loadTree(user);
+  if (cache) return cache;
+  const epoch = loginEpoch;
+  const tree = await loadTree(user);
+  // ⚠️ A FILL THAT OUTLIVED ITS LOGIN IS NEVER CACHED. `invalidate()` runs on
+  // every login change, but it can only clear what is ALREADY there — a load
+  // still in flight lands AFTER it and used to assign straight over the top. So:
+  // sign out while a cold Keep navigation is fetching, and this wrote the
+  // signed-out client's whole tree into the cache a moment later; the next person
+  // to sign in found a non-null cache and every sync accessor below served them
+  // the previous client's entities, assets and policies. The router's dispatch
+  // generation stops the stale RENDER (js/main.js); this stops the stale FILL,
+  // which outlives it. Found by Codex, round 20 — the finding named cache fills
+  // explicitly and the first fix only covered the render.
+  //
+  // The tree is still RETURNED, because the only caller awaiting this call is the
+  // dispatch that started it, and that dispatch checks its own generation before
+  // mounting anything. Nothing else can be holding this promise: each call runs
+  // its own `loadTree`.
+  if (loginEpoch !== epoch) return tree;
+  cache = tree;
   return cache;
 }
 

@@ -212,7 +212,53 @@ test("the hourly cap admits the 20th ask and refuses the 21st", async () => {
   const over = deps({ tables: seed({ help_queries: rows(20) }) });
   const body = await (await ask(over.d)).json();
   assert.equal(body.reason, "rate_limited", "the 21st ask was allowed");
-  assert.equal(body.retryAfter, 3600);
+  assert.equal(body.scope, "client");
+  // ⚠️ NOT 3600 — and the inequality is the assertion, because a flat 3600 is
+  // exactly what this branch sent for five rounds. The twenty rows above are all
+  // seeded "now", so every one of them is inside the 5s grace window and is
+  // excluded as a possible concurrent peer: nothing has to expire for an ask to
+  // fit, and the honest answer is the grace itself. One extra cheap refusal, not
+  // an hour's lockout, which is the designed direction of the approximation.
+  assert.notEqual(body.retryAfter, 3600, "the hourly cap is back to a flat hour");
+  assert.equal(body.retryAfter, 5);
+});
+
+test("the hourly retry time is when the oldest SETTLED ask actually ages out", async () => {
+  // The case the grace window does not cover, and the one a real client hits: a
+  // person who asked twenty questions earlier in the hour. Those rows are
+  // settled, so they count — the cap holds until the oldest leaves the rolling
+  // window, which is 10 minutes away here, NOT the 60 the old code promised.
+  const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+  const rows = Array.from({ length: 20 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: minsAgo(50) }));
+  const { d } = deps({ tables: seed({ help_queries: rows }) });
+  const body = await (await ask(d)).json();
+  assert.equal(body.reason, "rate_limited");
+  assert.equal(body.scope, "client");
+  assert.ok(body.retryAfter > 560 && body.retryAfter <= 610,
+    `expected ~600s until the oldest ask ages out, got ${body.retryAfter}`);
+});
+
+test("the hourly retry time counts only the CALLER's rows", async () => {
+  // `retryAfterFor` takes the branch's filter as an argument, so the hourly call
+  // could pass `(q) => q` and read the whole table. The wait would then come off
+  // a row belonging to someone else.
+  //
+  // ⚠️ THE SEED IS THE TEST, and the first version of it caught nothing. With
+  // the other client's rows seeded OLDER than the caller's, the offset landed on
+  // the caller's oldest row either way and both answers were 1800 — a passing
+  // test against the unscoped code. Mutation-tested after the rewrite: 300 rows
+  // 5 minutes old, NEWER than the caller's, so the unscoped offset (320-20=300)
+  // lands on one of THOSE and quotes 3300s instead of the caller's own 600s.
+  const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+  const { d } = deps({ tables: seed({ help_queries: [
+    ...Array.from({ length: 20 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: minsAgo(50) })),
+    ...Array.from({ length: 300 }, (_, i) => ({ id: `o${i}`, owner: OTHER, asked_at: minsAgo(5) })),
+  ] }) });
+  const body = await (await ask(d)).json();
+  assert.equal(body.reason, "rate_limited");
+  assert.equal(body.scope, "client");
+  assert.ok(body.retryAfter > 560 && body.retryAfter <= 610,
+    `expected ~600s from the caller's own oldest row, got ${body.retryAfter}`);
 });
 
 test("the hourly count is scoped to the caller — another client's asks do not count", async () => {

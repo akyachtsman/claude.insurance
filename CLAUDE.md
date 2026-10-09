@@ -933,6 +933,7 @@ fix was right about the layer it addressed and silent about the next:
 | 17 | the account | a second *session* on the shared account |
 | 18 | the session, same tab | the session **across tabs** (BroadcastChannel) |
 | 19 | what is WRITTEN and RESTORED | what is **already rendered** |
+| 20 | what is already rendered | a render and a cache fill **that had not happened yet** |
 
 So the signal now does three things, not one: bump the epoch, **re-dispatch the
 route** (`main.js`, so an unauthenticated Keep route goes to the login card and
@@ -955,13 +956,34 @@ tab that called them, and the vendored client broadcasts auth changes to the
 others over a **BroadcastChannel** — so signing out and back into the shared
 account in a second tab left the first tab's Help view holding a stale
 generation, and the round-17 fix did not hold one tab across. An
-`onAuthStateChange` listener now bumps on `SIGNED_IN` / `SIGNED_OUT` /
-`USER_UPDATED`; `TOKEN_REFRESHED` and `INITIAL_SESSION` are deliberately excluded
-(a refresh runs on a timer and would discard a client's own answer mid-use). The
-same-tab bumps are kept, so a double bump is normal — only inequality is read,
-and it means `authEpoch()` is correct the moment `signIn` returns rather than
-whenever the event lands. S20 uses two real tabs in one context; nothing
-simulates the broadcast. Found by Codex, round 18.
+`onAuthStateChange` listener now announces, and it **compares the login key**
+rather than keying on the event name; `TOKEN_REFRESHED` and `INITIAL_SESSION` are
+excluded outright (a refresh runs on a timer and would discard a client's own
+answer mid-use). The same-tab bumps are kept, so a double bump is normal — only
+inequality is read, and it means `authEpoch()` is correct the moment `signIn`
+returns rather than whenever the event lands. S20 uses two real tabs in one
+context; nothing simulates the broadcast. Found by Codex, round 18.
+
+⚠️ **CORRECTION — ROUND 19'S FIX TO THIS WAS REPORTED AS MADE AND WAS INERT FOR
+A ROUND.** The paragraph above used to describe an `onAuthStateChange` listener
+that bumped on the event NAME (`SIGNED_IN` / `SIGNED_OUT` / `USER_UPDATED`).
+Round 19 replaced it with the key-comparing one so a refocus would stop being
+read as a login change — and **left the old listener in place below it**. There
+were two subscribers. Every `SIGNED_IN`, refocus included, still bumped
+`loginEpoch` and called `invalidate()`, so the behaviour round 19 fixed was
+unchanged and this file said otherwise.
+It survived **this session's own mutation test** because the duplicate bumped the
+epoch *without* notifying `authListeners`: no `route()` re-dispatch, so no
+scenario saw a second render, while a held Help answer was still discarded on
+refocus. A mutation test only grades the line you mutate. Found by Codex, round
+20; duplicate deleted.
+**The invariant to hold, stated in the code at the subscriber:** `js/supabase.js`
+has **exactly one** `onAuthStateChange` subscriber. There is no scenario for it —
+with the pinned bundle, `_recoverAndRefresh` emits a same-session `SIGNED_IN`
+only from its user-proxy branch (a `userStorage` session needing a `/auth/v1/user`
+round-trip), which the offline harness never produces — so the guard is the
+comment and a `grep -c`, and saying so is better than a test that drives the
+client's internals and proves the stub.
 
 **What is and is not load-bearing, measured rather than asserted:**
 | guard | mutation result | kept because |
@@ -976,6 +998,58 @@ simulates the broadcast. Found by Codex, round 18.
 The two survivors are labelled as survivors **in the code**, up front. Twice in
 this PR a guard's comment kept calling it load-bearing after it had stopped
 being so, and both times the correction came a round later.
+
+### ⚠️ A DISPATCH IN FLIGHT IS A FOURTH LAYER — the render and the cache fill that had not happened yet (round 20)
+
+Rounds 17–19 each guarded something that existed: an account, a session, a
+rendered DOM. Round 20 is the one underneath all of them — **work already in
+flight when the login changed**, which no epoch check reaches because there is
+nothing yet to check. Found by Codex, and it has two halves that look like one.
+
+`dispatchKeep` (`js/main.js`) awaits `getSession()` and then `ensureData()`, so a
+**cold** Keep navigation has two suspension points between the route guard
+passing and the view mounting. A sign-out landing in either of them re-dispatches
+(round 19's `onAuthChange` → `route()`), renders the login card — and then:
+
+| half | what happened | fix |
+|---|---|---|
+| the RENDER | the original dispatch resumed and mounted the signed-out client's private page **over the login card** | `dispatchGen`, bumped at the top of every `route()`, checked after every await on the way to a mount, in `route()`'s `catch`, and before `setActiveNav`/`focusMain` |
+| the CACHE FILL | `ensureData` assigned that client's whole tree into `cache` a moment **after** `invalidate()` had cleared it, so the next person to sign in found a non-null cache and every sync accessor served them the previous client's entities, assets and policies | `ensureData` stamps the fill with `loginEpoch` and refuses to store one whose epoch moved; it still RETURNS the tree, because the only caller awaiting that promise is the dispatch that started it, and that dispatch checks its generation before mounting |
+
+⚠️ **The second half outlives the first, and the first fix does not cover it.**
+`invalidate()` runs on every login change but can only clear what is already
+there. Codex's finding named cache fills explicitly; a reader who fixes only the
+router has fixed the visible half and left a cross-client disclosure.
+
+⚠️ **ONE COUNTER, NOT TWO.** An auth change calls `route()`, so it supersedes by
+the same mechanism as a `hashchange` and there is no second thing to keep in step.
+A separate "auth generation" would be a fifth thing to forget to bump.
+
+**Measured, not asserted** (S22 and S23, four viewport projects, offline harness):
+
+| mutation | result |
+|---|---|
+| delete the generation check before the mount | **fails S22** |
+| delete the epoch guard on the cache fill | **fails S23** |
+| delete the generation check after `getSession()` | **SURVIVES** |
+
+⚠️ **The survivor is recorded as a survivor, in the code and here.**
+`getSession()` reads `localStorage` with no network call while the session is
+unexpired — which is the same property that makes the whole offline harness
+possible — so that suspension point is not reachable from any scenario. It is
+kept for the case that *is* real: an expired session, where `getSession()` goes to
+the network for a refresh. Twice in this PR a guard's comment kept calling it
+load-bearing after it had stopped being so; this one says what it is up front.
+
+⚠️ **S22's first two assertions caught nothing, and only a mutation test showed
+it.** With the generation check deleted, "login card still visible" and "no
+`.k-h1`" both still passed — because the *other* round-20 fix masks this one: the
+cache guard correctly refuses the stale fill, so the superseded dispatch reaches
+`renderKeepEntityList()` with an empty cache, throws, and `route()`'s catch
+(generation-guarded in the same fix) swallows it. Nothing reaches the DOM either
+way. What differs is whether the superseded dispatch **runs at all**, and it logs
+`route error:` when it does — so that is what S22 keys on. Layered fixes mask each
+other's tests; the only way to find that out is to mutate each one separately.
 
 ### ⚠️ `setBusy` after an ask has been WRONG TWICE, in opposite directions
 
@@ -996,7 +1070,7 @@ free (a newer ask holds the gate, so the state stays).
 version checked enablement only after navigating away and back, which is exactly
 what masked round 18's half.
 
-### ⚠️ Recorded — the shared-cap retry time is approximate by construction
+### ⚠️ Recorded — BOTH caps' retry times are approximate by construction
 
 `help-ask` refuses on the aggregate daily cap and tells the client how long to
 wait. That number is derived from the oldest row that has to expire, and the
@@ -1037,6 +1111,38 @@ Both mutation-tested, on both sides of the wire.
 STATEMENT** — a Postgres function, so a migration and an owner decision. Until
 then a burst of 400 genuine asks inside the grace window reports the same short
 wait, which is the understating direction. Not approximated further on purpose.
+
+⚠️ **AND THE HOURLY CAP HAD NONE OF THIS FOR FIVE ROUNDS — it sent a flat
+`retryAfter: 3600`.** Found by Codex, round 20, pointing at the fix the branch
+beside it had already had twice. It read as safe because an hour IS a true upper
+bound for a one-hour rolling window; what it is not is honest. A client whose
+oldest ask is 59 minutes old waits 60 seconds in reality and is told to wait an
+hour — and in the concurrent case Codex named (19 retained rows, two simultaneous
+reservations, both seeing 21, both deleting their own row) they could retry
+immediately.
+Both caps now go through **one** `retryAfterFor(windowStart, windowMs, cap,
+scoped)` in `handler.ts`, differing only in the window, the cap and the filter
+(`(q) => q.eq("owner", owner)` for hourly, `(q) => q` for shared). Two copies of a
+wait calculation is how one of them stays wrong for five rounds; that is the
+reason for the helper, not tidiness.
+⚠️ **The seed is the test, in the hourly owner-scoping case.** Its first version
+seeded the other client's rows OLDER than the caller's, so the unfiltered offset
+landed on the caller's own oldest row and both answers were 1800 — a test that
+passed against unscoped code. Mutation-tested after a rewrite that puts the other
+client's 300 rows NEWER, where unscoped quotes 3300s instead of 600s. Five
+mutations, five caught: flat 3600, lost owner filter, no grace short-circuit, no
+grace exclusion, wrong window.
+
+⚠️ **`contract.test.mjs`'s `retryAfter` assertion is now INVERTED, and the
+inversion is itself the finding.** It used to *require* a literal
+(`fnSrc.match(/retryAfter:\s*(\d+)/)`, failing with "no numeric retryAfter
+found") and read the digits to check the unit. Removing the last literal — the
+correct change — made it unsatisfiable: it could only pass while the
+overstatement it was written beside was still there. Same class as the
+`.k-help__out` assertion recorded below. It now asserts there is **no** literal,
+because a constant cannot be right for a rolling window, and the UNIT is pinned
+where it can be: `handler.test.mjs` executes the function and asserts the actual
+seconds (5 for the grace case, ~600 and ~1800 for settled ones).
 
 ### ⚠️ Recorded — `check-undefined-calls.js` cries wolf on regex literals
 
@@ -1290,6 +1396,8 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S19b | Help desk — an in-flight answer after a same-account sign-out (offline harness, **runs locally**) | As S19 but the response is **held** across the sign-out and sign-in, then released: it must not render into the next person's view and must not be cached for them (checked by leaving and returning, since the cache is read on render). The desk must still work for them. | The previous session's answer lands in the next person's page or cache |
 | S20 | Help desk — a CROSS-TAB auth change (offline harness, **runs locally**) | Two real tabs in ONE browser context, so they share storage and the BroadcastChannel. Tab 1 asks with the response held; tab 2 signs out and back into the **same** shared account; tab 1's held response is then released and must not render or cache. ⚠️ `signIn`/`signOut` bump the login generation only in the tab that calls them — the client broadcasts the change to the others, so a same-tab-only epoch left tab 1 holding a stale one and every check passed. | An auth change in another tab does not end this tab's Help session |
 | S21 | Help desk — an answer ALREADY RENDERED is cleared (offline harness, **runs locally**) | Tab 1 asks and **receives**; tab 2 signs out of the shared account; tab 1 is never touched again. The answer, its credits and the question must leave tab 1's page on the broadcast alone. ⚠️ Distinct from S20: there the epoch stops the answer being WRITTEN, here it has already been written and rendered, and the epoch guards neither. | The previous person's answer stays on screen after their session ended elsewhere |
+| S22 | The Keep — a dispatch that outlives its session (offline harness, **runs locally**) | A cold `#/keep/list` navigation parked inside `ensureData()` (the first `/rest/v1/entities` request held open); tab 2 then signs the shared account out. Tab 1 must re-dispatch to the login card, and when the parked load is released the superseded dispatch must **not run at all** — asserted on the absence of a `route error:` console log, because the layered cache fix (S23) masks the DOM assertions. | A Keep page mounts under no session, or a superseded dispatch runs and throws |
+| S23 | The Keep — a data load that outlived its login (offline harness, **runs locally**) | Same park, then a **different** client signs in on tab 1 and their tree fills the cache; the first client's load is then released. Its tree must never reach `cache`: asserted on the app's own `getUser()` through a dynamic import of the same module URL (bounded poll, decided in both directions) **and** on what the next render shows ("Welcome back, Other", never "Demo"). | The previous client's entities, assets and policies are served to the next person to sign in |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

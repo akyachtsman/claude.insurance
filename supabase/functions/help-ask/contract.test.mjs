@@ -81,13 +81,30 @@ test("every success reason the function emits is one the consumer recognises", (
     `the function can emit ${JSON.stringify(unknown)}, which is not in ANSWER_REASONS`);
 });
 
-test("retryAfter is sent in SECONDS, which is the unit the consumer reads", () => {
-  // The bug this pins: `retryAfterMinutes: 60` would have rendered an hour's
-  // wait as "try again in 60 seconds".
+test("retryAfter is sent in SECONDS, and is never a hardcoded literal", () => {
+  // The bug the first half pins: `retryAfterMinutes: 60` would have rendered an
+  // hour's wait as "try again in 60 seconds".
   assert.ok(!/retryAfterMinutes/.test(fnSrc), "retryAfterMinutes is the wrong key AND the wrong unit");
-  const m = fnSrc.match(/retryAfter:\s*(\d+)/);
-  assert.ok(m, "no numeric retryAfter found");
-  assert.ok(Number(m[1]) >= 60, `retryAfter ${m[1]} looks like minutes, not seconds`);
+
+  // ⚠️ THE SECOND HALF IS INVERTED FROM WHAT IT USED TO BE, and the inversion is
+  // the finding. It used to require a literal — `fnSrc.match(/retryAfter:\s*(\d+)/)`
+  // with "no numeric retryAfter found" — and read the digits to check the unit.
+  // Both caps now COMPUTE the wait from the rows that will survive the rejection,
+  // so there is no literal left and that assertion became unsatisfiable: it could
+  // only pass while the overstatement it was written beside was still there. Same
+  // class as the `.k-help__out` assertion CLAUDE.md records — a check that fails
+  // when the code gets better is not a check.
+  // A literal cannot be right here: both windows are ROLLING, so any constant is
+  // a promise the endpoint cannot keep (the hourly branch sent a flat 3600 for
+  // five rounds). The UNIT is pinned where it can be: handler.test.mjs executes
+  // the function and asserts the actual seconds — 5 for the grace case, ~600 and
+  // ~1800 for the settled ones.
+  const literal = fnSrc.match(/retryAfter:\s*(\d+)/);
+  assert.equal(literal, null,
+    `retryAfter is hardcoded as ${literal && literal[1]} — both cap windows roll, so a constant is a wait the endpoint cannot honour`);
+  assert.ok(/retryAfterFor\(/.test(fnSrc), "the wait is no longer computed by retryAfterFor()");
+  assert.ok(/Math\.ceil\(GRACE_MS \/ 1000\)/.test(fnSrc),
+    "the grace-case wait is not converted to seconds");
 });
 
 test("usedRecords is sent as a list of the records actually used, not all of them", () => {

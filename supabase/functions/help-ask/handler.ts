@@ -470,6 +470,68 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     return unavailable(reason, extra);
   };
 
+  // ── HOW LONG UNTIL AN ASK FITS AGAIN, in seconds, or null if it cannot be
+  // worked out. ONE piece of arithmetic for BOTH caps, because the hourly branch
+  // sent a flat 3600 until round 20 while the shared branch had already been
+  // fixed twice — two copies of a wait calculation is how one of them stays
+  // wrong. `scoped` carries the branch's own filter (per-owner, or none), so the
+  // only difference between the callers is the window and the cap.
+  //
+  // COUNTED FROM SURVIVORS, NOT FROM THE REJECTING COUNT. The count that
+  // rejected includes every CONCURRENT reservation, and each rejected one
+  // deletes its own row on the way out. At the hourly cap that means two
+  // simultaneous asks with 19 retained rows both see 21, both refuse, and both
+  // would have said "wait an hour" — when the table drops straight back to 19
+  // and the next ask is admissible immediately.
+  //
+  // A row younger than GRACE_MS might be such a peer, and nothing here can tell
+  // a peer's row from a real one, so they are all excluded: the count is what
+  // will still be present once this rejection has released itself. Deliberately
+  // the conservative direction — it can say "retry sooner than strictly
+  // possible" (another refusal, which is cheap and honest) and will not promise a
+  // wait that is not real. Symmetric in the race, unlike filtering on this
+  // request's own timestamp: a peer that reserved microseconds EARLIER is
+  // excluded too.
+  //
+  // ⚠️ A NEGATIVE OFFSET MEANS NOTHING HAS TO EXPIRE, AND THAT SENDS A SHORT
+  // NUMBER — not nothing. Omitting it was an earlier version of the shared fix,
+  // on the strength of a comment claiming the consumer would then say "in a few
+  // minutes". IT DOES NOT: `rateLimitNotice` reads a capped refusal with no
+  // number as "try again tomorrow" (js/keep/logic/help.js), which reproduces the
+  // ~24-hour overstatement this exists to remove — it just moves it from the
+  // function to the view.
+  //
+  // ⚠️ The exact answer needs the reserve and the count to be ONE atomic
+  // statement — a Postgres function, so a migration and an owner decision.
+  // Recorded in CLAUDE.md rather than approximated further.
+  const GRACE_MS = 5_000;
+  // The PostgREST builder, structurally. `scoped` only ever chains one filter
+  // onto it, so naming the real generic type here would buy nothing and pin this
+  // helper to a supabase-js version.
+  // deno-lint-ignore no-explicit-any
+  type Builder = any;
+  const retryAfterFor = async (
+    windowStart: string, windowMs: number, cap: number, scoped: (q: Builder) => Builder,
+  ): Promise<number | null> => {
+    const settled = new Date(Date.now() - GRACE_MS).toISOString();
+    const { count: survivors, error: survErr } = await scoped(
+      admin.from("help_queries").select("id", { count: "exact", head: true }),
+    ).gte("asked_at", windowStart).lt("asked_at", settled);
+    if (survErr) return null;
+    // An ask fits when the retained count is at most cap-1, so `survivors - cap`
+    // is the 0-based index of the last row that has to expire.
+    const offset = (survivors ?? 0) - cap;
+    // GRACE_MS is how long a peer's row stays excluded, so that is the honest
+    // wait; seconds, rounded up, never zero.
+    if (offset < 0) return Math.ceil(GRACE_MS / 1000);
+    const { data: oldest } = await scoped(
+      admin.from("help_queries").select("asked_at"),
+    ).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
+    const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
+    const secs = Number.isFinite(at) ? Math.ceil((at + windowMs - Date.now()) / 1000) : NaN;
+    return Number.isFinite(secs) && secs > 0 ? secs : null;
+  };
+
   const { count, error: countErr } = await admin.from("help_queries")
     .select("id", { count: "exact", head: true }).eq("owner", owner).gte("asked_at", since);
   // A count that could not run has billed nothing — it must not cost the caller
@@ -483,7 +545,22 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // from the WAIT LENGTH, which told a client who had asked nothing all day
   // "You've asked a few questions in a short time" whenever the SHARED cap
   // happened to clear in under 90 minutes — the common case for a rolling window.
-  if ((count ?? 0) > HOURLY_CAP) return await releaseAnd("rate_limited", { retryAfter: 3600, scope: "client" });
+  // ⚠️ NOT A FLAT 3600 — that is what this sent for five review rounds. An hour
+  // is a true UPPER bound for a one-hour rolling window, which is why it read as
+  // safe; but it is an hour's lockout quoted to a client whose oldest ask is 59
+  // minutes old, and in the concurrent case above to one who could retry now.
+  // The window is rolling, so the honest answer is when the oldest row that has
+  // to age out actually does. Found by Codex, round 20, pointing at the fix the
+  // shared cap had already had.
+  if ((count ?? 0) > HOURLY_CAP) {
+    const retryAfter = await retryAfterFor(since, 3600_000, HOURLY_CAP, (q) => q.eq("owner", owner));
+    // `scope` so the consumer can word this correctly. Without it the view
+    // guessed from the WAIT LENGTH, which told a client who had asked nothing all
+    // day "You've asked a few questions in a short time" whenever the SHARED cap
+    // happened to clear in under 90 minutes — the common case for a rolling
+    // window.
+    return await releaseAnd("rate_limited", { scope: "client", ...(retryAfter ? { retryAfter } : {}) });
+  }
 
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { count: total, error: totalErr } = await admin.from("help_queries")
@@ -500,68 +577,13 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // read as "under the cap".
   if (totalErr) return await releaseAnd("unavailable");
   if ((total ?? 0) > DAILY_TOTAL_CAP) {
-    // NOT 3600. For the HOURLY cap an hour is an upper bound — the window can
-    // only be shorter — so it is conservative and never a false promise. For
-    // this ROLLING 24-HOUR window it is the opposite: 400 calls in the last hour
-    // means the cap holds for nearly another 23, and "try again in an hour"
-    // would be a promise the endpoint cannot keep.
-    //
-    // The cap clears when enough rows age out of the window. We hold `total`
-    // rows including the reservation about to be released, so `total - CAP` of
-    // the oldest must expire before the next ask fits; that row's `asked_at`
-    // plus 24h is the answer. If it cannot be read, send NO retryAfter — the
-    // client then says "in a few minutes" instead of a number that is wrong.
-    // ⚠️ COUNTED FROM SURVIVORS, NOT FROM `total`, and the arithmetic below was
-    // never the bug. `total` includes every CONCURRENT reservation, and each
-    // rejected one deletes its own row on the way out. With 399 retained rows,
-    // two simultaneous asks both see 401, both pick the oldest retained row, and
-    // both tell their client to wait for it to expire — up to 24 hours — when
-    // the table drops straight back to 399 and the next ask is admissible
-    // immediately. Found by Codex.
-    //
-    // A row younger than GRACE_MS might be such a peer, and nothing here can
-    // tell a peer's row from a real one, so they are all excluded: the count is
-    // what will still be present once this rejection has released itself. That
-    // is deliberately the conservative direction — it can tell a client to retry
-    // sooner than strictly possible (they get another refusal, which is cheap
-    // and honest), and it will not promise a 24-hour wait that is not real.
-    // Symmetric in the race, unlike filtering on this request's own timestamp:
-    // a peer that reserved microseconds EARLIER is excluded too.
-    //
-    // ⚠️ The exact answer needs the reserve and the count to be ONE atomic
-    // statement — a Postgres function, so a migration and an owner decision.
-    // Recorded in CLAUDE.md rather than approximated further.
-    const GRACE_MS = 5_000;
-    const settled = new Date(Date.now() - GRACE_MS).toISOString();
-    const { count: survivors, error: survErr } = await admin.from("help_queries")
-      .select("id", { count: "exact", head: true })
-      .gte("asked_at", dayAgo).lt("asked_at", settled);
-    // An ask fits when the retained count is at most CAP-1, so `survivors - CAP`
-    // is the 0-based index of the last row that has to expire.
-    //
-    // ⚠️ NEGATIVE MEANS NOTHING HAS TO EXPIRE, AND THAT SENDS A SHORT NUMBER —
-    // not nothing. Omitting it was this fix's first version, on the strength of a
-    // comment claiming the consumer would then say "in a few minutes". IT DOES
-    // NOT: `rateLimitNotice` reads a shared-cap refusal with no number as
-    // **"Please try again tomorrow"** (js/keep/logic/help.js), so omitting the
-    // number reproduced the ~24-hour overstatement this whole branch exists to
-    // remove — it just moved it from the function to the view. The claim was
-    // inherited from the code before it and was never true for `scope: "shared"`.
-    // Found by Codex, who read the consumer rather than the fix.
-    // GRACE_MS is how long a peer's row stays excluded, so that is the honest
-    // wait; sent as seconds, rounded up, and never zero.
-    const offset = (survivors ?? 0) - DAILY_TOTAL_CAP;
-    let retryAfter: number | null = null;
-    if (!survErr && offset < 0) {
-      retryAfter = Math.ceil(GRACE_MS / 1000);
-    } else if (!survErr) {
-      const { data: oldest } = await admin.from("help_queries")
-        .select("asked_at").gte("asked_at", dayAgo)
-        .order("asked_at", { ascending: true }).range(offset, offset);
-      const at = oldest?.[0]?.asked_at ? Date.parse(oldest[0].asked_at) : NaN;
-      const secs = Number.isFinite(at) ? Math.ceil((at + 86_400_000 - Date.now()) / 1000) : NaN;
-      retryAfter = Number.isFinite(secs) && secs > 0 ? secs : null;
-    }
+    // NOT 3600, and not a flat anything. This is a ROLLING 24-HOUR window: 400
+    // calls in the last hour means the cap holds for nearly another 23, so "try
+    // again in an hour" would be a promise the endpoint cannot keep. The cap
+    // clears when enough rows age out, and `retryAfterFor` works out which row
+    // that is — see its note for why the count comes from survivors rather than
+    // from `total`, and why a negative offset still sends a short number.
+    const retryAfter = await retryAfterFor(dayAgo, 86_400_000, DAILY_TOTAL_CAP, (q) => q);
     return await releaseAnd("rate_limited", { scope: "shared", ...(retryAfter ? { retryAfter } : {}) });
   }
 
