@@ -1,0 +1,35 @@
+# Supabase project config, versioned so a deploy flag is not a sentence in a
+# comment that the next person has to remember.
+#
+# ⚠️ THERE IS NO [functions.help-ask] BLOCK, AND ITS ABSENCE IS DELIBERATE.
+# An earlier version of this file pinned `verify_jwt = false` for help-ask and
+# argued that the gateway flag "adds no protection" and "can reject the CORS
+# preflight". BOTH HALVES WERE WRONG, and both were testable from here all along
+# — the retired `desk-ask` stub is deployed with verify_jwt = true, so it is a
+# live control. Probed 2026-10-07:
+#
+#   OPTIONS, browser preflight headers, no Authorization
+#     -> the STUB'S OWN body {"ok":false,"error":"gone"}, with
+#        x-deno-execution-id and x-served-by: supabase-edge-runtime.
+#        The preflight REACHES the function. verify_jwt does not block it.
+#   POST, no Authorization   -> UNAUTHORIZED_NO_AUTH_HEADER, no execution id
+#   POST, "Bearer not-a-jwt" -> UNAUTHORIZED_INVALID_JWT_FORMAT, no execution id
+#        The function never ran. The gateway absorbed both.
+#
+# So the flag costs nothing and buys the thing this feature most needs: junk
+# traffic dies before it is a billable invocation, instead of being parsed by the
+# handler and (with any bearer present) causing an Auth round trip. help-ask
+# deploys with the DEFAULT, which is verify_jwt = true.
+#
+# Two further corrections to what that block claimed: only the CLI reads this
+# file, and the Supabase MCP deploy tool this project uses takes `verify_jwt` as
+# an explicit parameter defaulting to TRUE — so the file never could have stopped
+# a redeploy flipping anything, and the default it was overriding was the safe one.
+project_id = "bdsegmjcgfmgzuxwiplj"
+
+# notify-enhancement genuinely is verify_jwt = false live (confirmed via
+# list_edge_functions), because it accepts a service-role caller as well as a
+# signed-in one and implements both checks itself. Recorded so a CLI deploy does
+# not flip it.
+[functions.notify-enhancement]
+verify_jwt = false

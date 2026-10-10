@@ -63,10 +63,150 @@ export async function getSession() {
   return data.session;
 }
 
+// ── Login generation ────────────────────────────────────────────────────────
+// Bumped on every signIn and signOut, and on NOTHING else. A view that caches
+// something private across navigations binds it to this, so signing out ends it.
+//
+// ⚠️ NOT FOLDED INTO `invalidate()`, which three data writes also call
+// (addEntity, addRelationship, addAsset) — the Help desk's cached answer would
+// then vanish whenever the client added an asset.
+//
+// ⚠️ AND NOT DERIVABLE FROM THE USER ID, which is the whole reason it exists.
+// The login screen prefills ONE shared demo credential, so two different people
+// signing into the SAME account on a shared machine is the ordinary case here,
+// not a contrived one — CLAUDE.md already records exactly this for
+// `help_queries`' RLS ("every visitor using that demo authenticates as the SAME
+// owner, so `using (owner = auth.uid())` is not a per-person fence there"). An
+// owner-scoped guard cannot tell A's session from B's when both are that
+// account; only a generation can. Found by Codex on PR #254, against a fix that
+// had already been through three rounds on owner-scoping alone.
+// ⚠️ The bump in `signOut` is SUBSUMED today, and is kept deliberately. No
+// scenario can distinguish it, because the Keep's route guard means nobody can
+// reach a cached-answer view while signed out, and the next `signIn` bumps the
+// epoch before they could — mutation testing confirms removing it changes
+// nothing. It stays because the CONTRACT ("bumped on every signIn and signOut")
+// is what makes this primitive safe for the next consumer: one that can render
+// while signed out would be relying on it.
+let loginEpoch = 0;
+export function authEpoch() { return loginEpoch; }
+
+// Called when the LOGIN changes — here or in another tab. The router re-dispatches
+// so a cross-tab sign-out leaves the Keep, and views drop anything they cached.
+const authListeners = new Set();
+export function onAuthChange(fn) { authListeners.add(fn); return () => authListeners.delete(fn); }
+
+// The identity of a LOGIN, not of an account: the user plus WHEN they signed in.
+//
+// ⚠️ `SIGNED_IN` IS NOT A NEW LOGIN. The vendored client re-establishes the
+// session on tab refocus (`_onVisibilityChanged` → `_recoverAndRefresh`) and
+// emits `SIGNED_IN` for the SAME session. Bumping on every such event — which is
+// what the first version of this listener did — meant that switching tabs while
+// an ask was running failed the epoch check and DISCARDED a paid answer, and a
+// completed answer stopped restoring after navigation. Found by Codex, round 19,
+// against the round-18 fix.
+//
+// `last_sign_in_at` is what distinguishes two logins to the same account:
+// measured against the live project, two sign-ins 1.5s apart on the shared demo
+// credential returned `2026-10-09T23:04:48.840374353Z` and
+// `...:50.40940621Z`. It does not move on a refresh.
+//
+// ⚠️ THE FALLBACK IS A VALUE THAT NEVER COMPARES EQUAL, not the user id. If the
+// field is ever absent, "cannot tell these logins apart" must resolve as
+// CHANGED: the cost is a discarded answer, where the other direction is showing
+// one person's records to the next. Deliberately the conservative side.
+function loginKeyOf(session) {
+  const id = session?.user?.id;
+  if (!id) return null;
+  const at = session.user.last_sign_in_at;
+  //
+  // ⚠️ THE `last_sign_in_at` COMPONENT IS BELT TODAY — measured. Reducing the key
+  // to the bare user id passes every scenario, because a same-account re-login
+  // can only be reached through a sign-out, and the sign-out already clears
+  // everything. It is kept because the case it covers is a re-authentication with
+  // NO intervening sign-out — a **programmatic re-sign-in**, which is a fresh
+  // token grant and does move this column — where the id alone compares equal
+  // and the stale state would be retained silently. That is precisely the class
+  // of miss that got through three rounds running here — owner, then session,
+  // then session-across-tabs — so the stricter key stays even though no test can
+  // currently tell the difference.
+  //
+  // ⚠️ THIS LIST USED TO SAY "a password change, a `USER_UPDATED`" AND THOSE ARE
+  // NOT COVERED. Neither moves `last_sign_in_at` (GoTrue writes it on a sign-in;
+  // `updateUser` touches `updated_at`), so the key compares EQUAL and the
+  // subscriber below is a no-op for them. Nothing in `js/` calls `updateUser` or
+  // a password reset, so nothing is lost today — but a future one would leave the
+  // cached profile stale, and it would do so silently. Found by an independent
+  // review of the round-20 commit, which also noted that the listener deleted in
+  // that commit was the only thing invalidating on `USER_UPDATED`.
+  return at ? `${id}:${at}` : `${id}:unknown:${Date.now()}:${Math.random()}`;
+}
+let loginKey = null;
+let seenLogin = false;
+
+function announceLogin(key) {
+  loginKey = key;
+  if (key) seenLogin = true;
+  loginEpoch += 1;
+  invalidate();
+  for (const fn of authListeners) {
+    // One listener throwing must not stop the others, or a view's cleanup is
+    // skipped by whatever ran before it.
+    try { fn(key); } catch (e) { console.warn("auth listener threw —", e && e.message); }
+  }
+}
+
+// ⚠️ THERE IS EXACTLY ONE `onAuthStateChange` SUBSCRIBER, AND THAT IS THE POINT.
+// Round 19 added this keyed one to stop a refocus being read as a login change,
+// and LEFT THE ROUND-18 UNCONDITIONAL ONE IN PLACE below it — so every
+// `SIGNED_IN`, refocus included, still bumped `loginEpoch` and called
+// `invalidate()`, and the fix reported as made was inert. It survived this
+// session's own mutation test because the duplicate bumped the epoch WITHOUT
+// notifying `authListeners`: no `route()` re-dispatch, so no scenario saw a
+// second render, while a held Help answer was still discarded on tab refocus.
+// Found by Codex, round 20; duplicate deleted. If a second subscriber is ever
+// added here, this invariant is what breaks first.
+//
+// ⚠️ CROSS-TAB. The explicit calls in `signIn`/`signOut` only run in the tab that
+// called them; the client broadcasts auth changes to the others over a
+// BroadcastChannel. Without this, signing out and back into the shared account in
+// a second tab left the first tab holding a stale epoch AND still displaying the
+// previous person's answer. `TOKEN_REFRESHED` and `INITIAL_SESSION` are excluded
+// outright; everything else is compared, so a refocus announcing the same login
+// is a no-op.
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === "TOKEN_REFRESHED") return;
+  const next = loginKeyOf(session);
+  if (next === loginKey) return;
+
+  // ⚠️ GAINING A LOGIN FROM NONE IS NOT A CHANGE TO ANNOUNCE, and the invariant
+  // is what makes that safe rather than convenient: the clear fires on LOSING or
+  // SWITCHING a login, so by the time this tab has no key, anything cached under
+  // the previous one has already been dropped. Gaining one therefore cannot
+  // expose a previous person's data — there is no previous person in this tab.
+  //
+  // It is also the only way to be correct on load. `INITIAL_SESSION` arrives with
+  // a NULL session, before the client has recovered storage — measured, after a
+  // first attempt that tried to baseline from it and did not work — and the
+  // `SIGNED_IN` that follows carries the real one. Treating that pair as a change
+  // bumped the epoch on every load and re-dispatched the route, which S18 caught
+  // as a SECOND corpus fetch on a first Help visit: the very stale-render race
+  // that scenario exists for, caused by the fix for a different one.
+  // The distinction is "has this tab EVER had a login", not "does it have one
+  // now". A first gain is the load baseline and stays silent; a gain AFTER a loss
+  // is a real switch, and announcing it lets this tab follow the new session
+  // rather than sitting on a stale card — safe, because the loss already cleared
+  // everything held under the old one.
+  if (loginKey === null && !seenLogin) { loginKey = next; seenLogin = true; return; }
+
+  announceLogin(next);
+});
+
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: normalizeLogin(email), password });
   if (error) return { ok: false, error: error.message };
-  invalidate();
+  // Announced here rather than left to the event, so `authEpoch()` is already
+  // correct when this returns. The event then finds the same key and is a no-op.
+  announceLogin(loginKeyOf(data.session));
   return { ok: true, session: data.session };
 }
 
@@ -78,17 +218,52 @@ export async function signOut() {
   // out real visitors and any concurrently running test worker.
   // A dedicated test identity is the proper end state; this removes the hazard.
   await supabase.auth.signOut({ scope: "local" });
-  invalidate();
+  announceLogin(null);
 }
 
 // ── Keep data: load once, assemble the nested shape the views expect ─────────
 let cache = null;
-export function invalidate() { cache = null; }
+// Moves on EVERY invalidation, which is what the fill guard in `ensureData`
+// compares — not `loginEpoch`. It covers the login case for free, because
+// `announceLogin` invalidates; and it covers the case the login epoch alone
+// missed: a data WRITE (addEntity / addRelationship / addAsset below) that
+// invalidates while an earlier fill is still in flight, where the pre-write
+// snapshot would otherwise be cached straight over the top. One counter rather
+// than two, because two invites the "which of these is load-bearing" question
+// this PR has now answered wrongly twice.
+let cacheGen = 0;
+export function invalidate() { cache = null; cacheGen += 1; }
 
 // Optionally pass the already-known signed-in user (the route guard has it) to
 // skip a redundant getUser() round-trip.
 export async function ensureData(user) {
-  if (!cache) cache = await loadTree(user);
+  if (cache) return cache;
+  const gen = cacheGen;
+  const tree = await loadTree(user);
+  // ⚠️ A FILL THAT OUTLIVED ITS LOGIN IS NEVER CACHED. `invalidate()` runs on
+  // every login change, but it can only clear what is ALREADY there — a load
+  // still in flight lands AFTER it and used to assign straight over the top. So:
+  // sign out while a cold Keep navigation is fetching, and this wrote the
+  // signed-out client's whole tree into the cache a moment later; the next person
+  // to sign in found a non-null cache and every sync accessor below served them
+  // the previous client's entities, assets and policies. The router's dispatch
+  // generation stops the stale RENDER (js/main.js); this stops the stale FILL,
+  // which outlives it. Found by Codex, round 20 — the finding named cache fills
+  // explicitly and the first fix only covered the render.
+  //
+  // The tree is still RETURNED, and the reason given here was WRONG: it said
+  // "the only caller awaiting this call is the dispatch that started it".
+  // There are three callers — `dispatchKeep` plus `renderKeepAddEntity`
+  // (keep/views/keep.js) and the add-asset submit (keep/views/assets.js), both of
+  // which invalidate and re-await after a write. The conclusion survives for a
+  // different reason: those two DISCARD the return value and then `go(...)`,
+  // which re-dispatches through the route guard — so a stale return reaches
+  // nobody, and a sign-out mid-write lands on the login card. `dispatchKeep`
+  // discards it too and checks its own generation before mounting. Found by an
+  // independent review of the round-20 commit; a comment that is right about the
+  // conclusion and wrong about the reason is the kind this PR keeps producing.
+  if (cacheGen !== gen) return tree;
+  cache = tree;
   return cache;
 }
 
@@ -389,6 +564,58 @@ export async function addEnhancementRequest({ subject, message, policyId, assetI
     .select().single();
   if (error) return { ok: false, error: error.message };
   return { ok: true, id: data.id };
+}
+
+// ── Help desk (feature 003) ─────────────────────────────────────────────────
+// Asks the help-ask Edge Function. Sends ONLY the question: the function reads
+// this client's records server-side, scoped to the owner id it resolves from the
+// JWT, because a request body is client-controlled and grounding an answer on
+// body-supplied records is the IDOR feature 002's review found.
+//
+// Returns the RAW payload; js/keep/logic/help.js → answerShape() normalises it.
+// Every failure returns that same shape rather than throwing, so the view has
+// one path (FR-17) and a null answer can never render as text.
+export async function askHelp(question, { signal } = {}) {
+  try {
+    const { data, error } = await supabase.functions.invoke("help-ask", {
+      body: { question },
+      ...(signal ? { signal } : {}),
+    });
+    // An aborted request is the user navigating away or asking again — not a
+    // failure to report, and not an answer either.
+    if (signal?.aborted) return { answer: null, reason: "aborted" };
+    if (error) {
+    // A network failure, a 5xx and a 404 are the same thing to a client: all are
+    // "not available", and the caller does not need to know which (FR-17). (This
+    // said "410 is the retired stub still being deployed" — that was about
+    // `desk-ask`, which nothing calls; this endpoint is `help-ask`.)
+      console.warn("askHelp failed —", error.message);
+      return { answer: null, reason: "unavailable" };
+    }
+    return data || { answer: null, reason: "malformed" };
+  } catch (e) {
+    if (signal?.aborted) return { answer: null, reason: "aborted" };
+    console.warn("askHelp threw —", e && e.message);
+    return { answer: null, reason: "unavailable" };
+  }
+}
+
+// The help corpus. Fetched once and cached: it seeds the suggestion chips and
+// the credited-source titles, and it is the SAME file the Edge Function reads,
+// so chips, prompt and credits cannot drift from one another.
+let helpGuideCache = null;
+export async function loadHelpGuide() {
+  if (helpGuideCache) return helpGuideCache;
+  try {
+    const res = await fetch("content/help-guide.json");
+    if (!res.ok) return { topics: [] };
+    const data = await res.json();
+    helpGuideCache = data && Array.isArray(data.topics) ? data : { topics: [] };
+    return helpGuideCache;
+  } catch {
+    // The page must still render without chips rather than white-screening.
+    return { topics: [] };
+  }
 }
 
 export async function loadEnhancementRequests() {

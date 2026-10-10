@@ -1,0 +1,275 @@
+-- Help-desk query log: one row per answered question, and the state the
+-- help-ask throttle counts.
+--
+-- Feature 003 (specs/003-help-desk/), task T4. Satisfies FR-16 ("the endpoint
+-- is throttled per client") and carries the "Throttle, not trust" half of the
+-- plan's Key decision 4.
+--
+-- WHY THE THROTTLE NEEDS STATE AT ALL. help-ask is a paid endpoint: every
+-- answered question spends provider tokens. This repo is public and CLAUDE.md
+-- publishes the demo credential — the login screen prefills it — so the JWT
+-- gate in front of the function establishes WHO is calling and nothing more. It
+-- is authentication, never spend control. Counting calls per client per hour is
+-- what bounds spend, and counting needs somewhere to count; that is this table,
+-- and it is the honest cost of a paid endpoint on a public app. An Anthropic
+-- Console workspace spend limit is the backstop that holds if the throttle
+-- itself has a bug.
+--
+-- WHY THERE IS NO UPDATE AND NO DELETE — NEITHER GRANT NOR POLICY. The throttle
+-- asks "how many rows does this owner have inside the last hour". A client that
+-- could DELETE its own rows would reset its own quota at will; a client that
+-- could UPDATE asked_at would move its rows out of the window. Either one turns
+-- the throttle into a formality while leaving it looking enforced, which is
+-- worse than not having it. So the client's write surface is append-only by
+-- construction: no UPDATE/DELETE grant, and no UPDATE/DELETE policy either.
+-- Both layers on purpose — a later migration that restates the grant
+-- table-wide must not by itself make history erasable. Only the service-role
+-- key, which bypasses RLS, can prune this table.
+--
+-- ⚠️ WHY THE CLIENT HAS NO INSERT EITHER — CHANGED 2026-10-06, and the reasoning
+-- matters because the first draft of this file granted `insert (question)` to
+-- `authenticated` and argued carefully for the column scoping.
+--
+-- The grant was never needed: NOTHING in js/ writes this table. The only writer
+-- is the help-ask Edge Function under the service-role key, which bypasses
+-- RLS -- but NOT these grants. ⚠️ This line claimed it bypassed "both RLS and
+-- these grants", which is false and sits six lines from the grant that sentence
+-- would justify deleting: BYPASSRLS skips POLICIES, not PRIVILEGES, and
+-- `service_role` in this project holds no default table privileges at all, so
+-- without the explicit grant below every insert here returns 42501. Verified in
+-- a throwaway Postgres with these roles.
+-- The grant existed because the table was designed as
+-- "client-writable, carefully constrained" rather than "server-only".
+--
+-- What made it a defect rather than dead privilege is the function's AGGREGATE
+-- daily cap, added the same day. The per-owner cap made a direct PostgREST
+-- insert bounded self-harm — the rows counted against your own hour, so the
+-- attack was to lock yourself out. The aggregate cap counts EVERYONE's rows, so
+-- the same insert became a cheap global denial of service: one PostgREST call
+-- with 401 rows, no provider cost, and the help desk is off for every client for
+-- 24 hours. Two independent security reviews flagged it within a minute of the
+-- cap being pushed.
+--
+-- Filtering the aggregate count on a server-only column would also work. Taking
+-- the grant away is better: it removes the write surface instead of counting
+-- around it, and leaves nothing for a later migration to re-widen by accident.
+--
+-- WHY GRANTS AT ALL, for the SELECT that remains. Supabase's auto-expose is off
+-- in this project, so a table with flawless RLS and no GRANT returns 42501 on
+-- every call: RLS narrows privileges, it never confers them. (Precedent for the
+-- column form: 20260624171640_public_leads_and_rule_settings.sql grants anon
+-- INSERT on a column list for exactly this reason;
+-- 20260628083000_enhancement_requests_grants.sql is the table-level form.)
+--
+-- NOTE FOR T5 (supabase/functions/help-ask). `default auth.uid()` evaluates to
+-- NULL under the service-role key and `owner` is NOT NULL, so the function's
+-- insert MUST pass `owner` explicitly — the caller id resolved from the JWT, per
+-- FR-14, never a value from the request body. With the client INSERT grant gone
+-- this is the ONLY way a row is ever created, so the default is now decorative;
+-- it is kept because dropping NOT NULL or the default would weaken the row shape
+-- for no gain.
+--
+-- APPLIED 2026-10-09, version 20261006120000 — feature 003 owner-gate step 1.
+-- Every statement below ran exactly as written: this file needed no rewrite to
+-- be applicable, because it contains no DROP (unlike the two migrations applied
+-- beside it — the Supabase MCP hangs 60s on any statement containing one, so
+-- those were re-expressed as ALTER POLICY; see
+-- 20261005120000_enhancement_request_stage_guard.sql).
+--
+-- The footer probe was run AS A REAL CLIENT SESSION (password grant against
+-- /auth/v1/token as user@example.com, then PostgREST with that bearer — never
+-- service-role, which would report a false pass). Steps 1, 2, 3, 4 and 5 all
+-- PASS: every client call returns HTTP 403 / SQLSTATE 42501, including the
+-- forged-owner insert. `authenticated` holds nothing on this table, as intended.
+--
+-- Step 0 (seed a row to probe against) was deliberately NOT run: steps 1-5 all
+-- fail on the PRIVILEGE, before any row is consulted, so there is nothing for a
+-- seeded row to change about their outcome. The service-role read-back in steps
+-- 4 and 5 — "assert the step-0 row survives" — is therefore the one part of this
+-- probe still unexercised, and it only becomes meaningful if a DELETE or UPDATE
+-- grant is ever restored. Re-run it then, which is exactly when it matters.
+
+create table if not exists public.help_queries (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  asked_at timestamptz not null default now()
+  -- ⚠️ NO `question` COLUMN, and that is the point. An earlier draft stored the
+  -- client's free text here with a 1..500 length check. The throttle needs only
+  -- `owner` and `asked_at`. Nothing read the text and nothing was ever going to:
+  -- there is no SELECT grant for `authenticated`, no policy, no UI and no plan
+  -- item for one. So it was client free text (a name, an address, a claim
+  -- detail) retained indefinitely with no reader and no TTL. Follow-up A below
+  -- said as much: "Dropping `question` entirely is the cheaper answer if nobody is
+  -- actually going to read it." Nobody is.
+  --
+  -- If "what are clients asking?" later becomes a product feature, it needs its
+  -- own disclosure and its own retention policy. It must not arrive as a side
+  -- effect of a rate limiter.
+);
+
+alter table public.help_queries enable row level security;
+
+-- ⚠️ `authenticated` HOLDS NOTHING ON THIS TABLE. No select, no insert, no
+-- update, no delete — it is a server-only throttle log, and the browser has
+-- never read it.
+--
+-- The SELECT grant went on 2026-10-06, a round after the INSERT grant, for a
+-- reason neither of the two facts behind it shows on its own:
+--
+--   · This file's own follow-up note says `question` holds whatever the client
+--     typed, which "may well be a name, an address or a claim detail".
+--   · CLAUDE.md publishes ONE demo credential and the login screen prefills it.
+--
+-- Put together: every visitor using that demo authenticates as the SAME `owner`,
+-- so `using (owner = auth.uid())` is not a per-person fence there — it admits
+-- all of them to all of each other's questions. The policy looked like row-level
+-- isolation and provided none on a shared account. Both facts were already
+-- written down in this repo; nothing had joined them.
+--
+-- Keeping it for a possible "you have used N of 20" UI was the argument against
+-- removing it. That is hypothetical and the disclosure is concrete — and if that
+-- UI is ever wanted, the count goes through the Edge Function, which already
+-- computes it.
+--
+-- The only principal with any privilege here is the service role, and the grant
+-- below is LOAD-BEARING, not belt-and-braces.
+--
+-- ⚠️ An earlier version of this comment said Supabase grants service_role the
+-- public schema "by default (every other table here relies on that, and
+-- notify-enhancement writes under the same key)". That is FALSE for this
+-- project, measured 2026-10-06:
+--     has_table_privilege('service_role','public.profiles','SELECT')  -> false
+-- and the same for entities, assets, policies and enhancement_requests, which
+-- hold only REFERENCES/TRIGGER/TRUNCATE for it. service_role is a member of no
+-- other role, and BYPASSRLS skips POLICIES, not PRIVILEGES. Without the grant
+-- below, help-ask's first `help_queries` write would return 42501 and the
+-- feature would refuse every caller, permanently.
+--
+-- (The same measurement says the deployed `notify-enhancement` cannot read
+-- `enhancement_requests` either. Pre-existing, outside this feature, recorded in
+-- CLAUDE.md rather than fixed here.)
+grant select, insert, delete on public.help_queries to service_role;
+-- DELETE is for the function's own release paths — over the cap, or a count that
+-- could not run — where nothing has been billed and the reservation must go back.
+
+-- NO POLICIES AT ALL. RLS is enabled above, so with none defined the table is
+-- closed to every role that does not bypass RLS — which is the service role and
+-- nothing else. The absent grants and the absent policies are the two layers,
+-- the same reasoning this file uses for its append-only surface throughout.
+--
+-- NOTE: a SELECT policy is NOT load-bearing for the function's writes, though an
+-- earlier version of this file said it was. `insert ... returning` needs one only
+-- when the inserter is subject to RLS; the function inserts under the
+-- service-role key, which bypasses RLS for the whole statement, RETURNING
+-- included. What it does NOT bypass is the privilege — which is why the explicit
+-- grant above is the thing that makes this table work at all.
+
+-- The throttle counts one owner's rows inside a time window, so (owner,
+-- asked_at) is the access path and this index is not optional at the scale a
+-- rate limiter runs at — it is read on every answered question. DESC matches
+-- the most-recent-first direction the window scan reads in; for the window
+-- predicate itself either direction serves.
+create index if not exists help_queries_owner_asked_at_idx
+  on public.help_queries (owner, asked_at desc);
+
+-- INVERSE (reversible-by-design, per data.md):
+--   drop table if exists public.help_queries cascade;
+-- The index and the service-role grant are dependent objects and go with it
+-- (there are no policies and no client grants left to drop). Nothing pre-existing needs restoring, because this file creates a table
+-- rather than altering one — which is why the inverse is a drop and not a
+-- counter-grant.
+-- DESTRUCTIVE: that also discards every recorded question, which is the
+-- throttle's entire memory, so every client starts the following hour with a
+-- fresh quota. It does NOT leave the feature half-working: per the plan's
+-- failure-mode table, a missing help_queries makes help-ask fail closed with
+-- {answer:null, reason:"unavailable"} and the help page renders its quiet
+-- notice (FR-17). The inverse disables the help desk; it does not unmeter it.
+
+-- POST-APPLY PROBE (run steps 1-5 as a CLIENT session, not service-role —
+--   service-role bypasses RLS — though NOT privileges, and on the client
+--   tables in this project it holds none — so every check below
+--   would report a false pass. Steps 4 and 5 are DESTRUCTIVE under service-role:
+--   there they SUCCEED and wipe or rewrite the log. Step 0 and the two
+--   after-the-fact reads are the only parts that use the service key, and they
+--   are marked. Assert on SQLSTATE, not on message text.)
+--
+--   0. SEED a row to probe against. The client can no longer write this table,
+--      so do this ONCE as service-role (or by asking a question through the
+--      deployed function) before running steps 1-5 as a client:
+--        insert into public.help_queries (owner)
+--          values ('<the client uuid>');
+--      then confirm the function's own shape held:
+--        select owner is not null, asked_at is not null
+--          from public.help_queries order by asked_at desc limit 1;   -- t, t
+--
+--   1. Client inserts — expect FAILURE, SQLSTATE 42501 insufficient_privilege
+--      (there is no INSERT grant for `authenticated` at all):
+--        insert into public.help_queries (owner) values (auth.uid());
+--      Via PostgREST the equivalent call is
+--        supabase.from("help_queries").insert({ owner: "<the client uuid>" })
+--      ⚠️ THIS STEP IS INVERTED FROM THE FIRST DRAFT, where it expected SUCCESS.
+--      A client insert that succeeds means the INSERT grant came back, and the
+--      function's AGGREGATE daily cap counts every row in the table — so one
+--      PostgREST call with DAILY_TOTAL_CAP+1 rows turns the help desk off for
+--      every client for 24 hours, at no provider cost. Assert the failure.
+--
+--   2. Client forges an owner — expect FAILURE, 42501, for the same reason:
+--        insert into public.help_queries (owner)
+--          values ('00000000-0000-0000-0000-000000000000');
+--      Rejected before any policy is consulted, because the privilege is absent
+--      rather than narrowed.
+--
+--   3. Client READS — expect FAILURE, 42501 (no SELECT grant, and no policy
+--      either). This is the step round 3 added, and it is the one that matters
+--      most on a shared demo account:
+--        select owner, asked_at from public.help_queries;
+--      Via PostgREST: supabase.from("help_queries").select("owner,asked_at")
+--      ⚠️ ALSO INVERTED from an earlier draft, which granted `select` and a
+--      `using (owner = auth.uid())` policy. With ONE published demo credential
+--      that every visitor signs in with, that policy fences nothing: they are all
+--      the same `owner`, so each could read every row the others had written. That
+--      mattered most when the table still held the question TEXT (free text a
+--      client may put a name, an address or a claim detail into); the column is
+--      gone now, but the ask TIMES of everyone sharing a credential are still not
+--      theirs to read. A success here means the grant came back.
+--
+--   4. Client deletes — expect FAILURE, 42501 (no DELETE grant):
+--        delete from public.help_queries;
+--      THEN, AS SERVICE-ROLE (the client can no longer read), assert the step-0
+--      row survives:
+--        select count(*) from public.help_queries;   -- unchanged
+--      That second assertion is the one that matters. If the DELETE grant were
+--      ever restored, the absent DELETE policy would turn this into a 0-row
+--      no-op that returns SUCCESS rather than an error — a probe checking only
+--      "the call failed" would pass while the throttle history became erasable.
+--
+--   5. Client backdates — expect FAILURE, 42501 (no UPDATE grant):
+--        update public.help_queries set asked_at = now() - interval '2 hours';
+--      Same caveat as step 4, and the same service-role read to check it: assert
+--      asked_at is unchanged, not merely that the call errored.
+--
+--   (The old step 5, a cross-owner read from a second client session, is gone:
+--   step 3 is strictly stronger. No client session can read ANY row, so there is
+--   no cross-owner case left to probe.)
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- TWO FOLLOW-UPS this migration deliberately does NOT carry, recorded here so
+-- they are decided rather than forgotten.
+--
+--   A. ~~NO RETENTION~~ — RESOLVED, in this file, before it shipped, by taking
+--      this note's own closing suggestion. It used to say `question` stored the
+--      client's free text indefinitely with no TTL, that a TTL needs pg_cron and
+--      is a separate production change, and that "dropping `question` entirely is
+--      the cheaper answer if nobody is actually going to read it."
+--      Nobody is: there is no SELECT grant, no policy, no UI, and no plan item
+--      for one. So the column is gone and the retention question with it — there
+--      is no client text in this table to retain. What remains is `owner` and
+--      `asked_at`, which is exactly what the throttle counts.
+--      Independently flagged by review round 4, which reached the same answer.
+--
+--   B. ~~THE CLIENT INSERT GRANT~~ — RESOLVED, in this file, before it shipped.
+--      This note used to say the grant was bounded self-harm and could not
+--      simply be revoked. Both halves were wrong: the aggregate daily cap made
+--      it a cheap global DoS, and the grant was never needed, because nothing in
+--      js/ writes this table and the function writes as service_role. Revoked.
+--      Kept here as a record of the reasoning, not as an open item.

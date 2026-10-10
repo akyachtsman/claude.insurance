@@ -21,7 +21,7 @@ import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderK
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
 export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
 export { renderKeepPolicy, renderKeepRequest, renderKeepRequests } from "./policies-view.js";
-import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
+import { BROKER_NAME, buildReminderSettings, money, downloadButton, docDownloadMenu, ribbon, landingCommand, page, backLink, originBackRow, policyTypeIcon, dateShort, expiryBadge, signOutButton, sortableTable, statTile, requestStepper } from "./shell.js";
 
 // ── views ────────────────────────────────────────────────────────────────────
 export function renderKeepLogin() {
@@ -52,7 +52,13 @@ export function renderKeepLogin() {
     error,
     el("p", { class: "k-ameta" }, [el("b", { text: "Demo logins: " }), el("span", { text: "“user” (client) · “broker” (broker) · “underwriter” (underwriter) — same password (prefilled)." })]),
     el("p", { class: "k-ameta", text: `Forgot your password? Contact your broker (${BROKER_NAME}) to reset it.` }),
-    el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only · private to you" })]),
+    // "private to you" dropped: feature 003 sends a digest of the signed-in
+    // client's records to Anthropic when they use the Help desk, so an absolute
+    // privacy claim on the way in is one the product no longer keeps. The Security
+    // page carries the detail; this is pre-auth, so it cannot link there.
+    // "invite-only" is left as-is deliberately — CLAUDE.md records public sign-up
+    // as measured ON and the CONFIG as the thing that is wrong, not this wording.
+    el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only access" })]),
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
 
@@ -161,6 +167,15 @@ export async function renderKeepLanding() {
     : [el("div", { class: "k-report__empty", text: "No renewals in the next 60 days — you're all set." })];
 
   const view = page("home", [
+    // Home carries one too, and it is the debatable one: this is the Keep's root,
+    // so "back" here is not a step up a hierarchy. It is in because `home` is a
+    // CREDITED HELP TOPIC — a client who asks "what's on my home screen?", follows
+    // the credit and wants to return to the answer had no in-app route back.
+    // `originBackRow()` renders nothing on a fresh load or a deep link. It DOES
+    // render after a lateral app-bar tab switch, which is what the origin-aware
+    // standard asks for and is how `#/keep/list` has always behaved — see
+    // `originRoute()` in shell.js for the routes it refuses to point at.
+    originBackRow(),
     el("section", { class: "k-welcome" }, [
       el("h1", { class: "k-welcome__h", text: `Welcome back, ${first}` }),
       el("p", { class: "k-welcome__p", text: "What would you like to accomplish today?" }),
@@ -227,6 +242,10 @@ export function renderKeepInsurance() {
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
 
   const view = page("insurance", [
+    // THE COMMONEST CREDITED DESTINATION — three of the corpus's fifteen topics
+    // route here (`insurance`, `policy`, `request`) and it had no back control at
+    // all, so following a credit to check an answer was one-way.
+    originBackRow(),
     el("h1", { class: "k-h1", text: "Policies" }),
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
     el("div", { class: "k-astats" }, [
@@ -435,7 +454,17 @@ export function renderKeepAccount() {
 const SECURITY_CARDS = [
   { ic: "lock", t: "Encrypted in transit", b: "Everything you view and send travels over an encrypted HTTPS/TLS connection — never in the clear." },
   { ic: "shield", t: "Encrypted at rest", b: "Your records are stored in a database that is encrypted on disk, so the underlying files are unreadable if ever accessed." },
-  { ic: "user", t: "Private to you", b: "Row-level security means only you — and your licensed broker — can ever read your entities, assets and policies. No other client can see your data." },
+  // ⚠️ This card said "only you — and your licensed broker — can ever read your
+  // entities, assets and policies". Feature 003 made that false: the Help desk
+  // sends a digest of the asking client's own records to an AI provider to ground
+  // its answer. Stating it is not optional — the Keep's security page is where a
+  // client goes to find out exactly this, and the help corpus quotes it back.
+  { ic: "user", t: "Private to you", b: "Row-level security means only you and your licensed broker can read your entities, assets and policies. No other client can ever see your data." },
+    // ⚠️ "Nothing else in the Keep sends your records anywhere" was in this card
+  // for one commit and was not true: sending an enhancement request emails its
+  // subject, message and policy/asset context to the broker through an email
+  // provider. A privacy card that overstates is worse than one that says less.
+  { ic: "spark", t: "The Help desk uses AI", b: "When you ask the Help desk a question, your question and a summary of your own records are sent to our AI provider (Anthropic) to answer it. No other client's records are ever included. (Sending an enhancement request also emails its details to your broker — those are the two times anything leaves the Keep.)" },
   { ic: "mail", t: "Invite-only access", b: "Accounts exist only by broker invitation. There is no public sign-up to your portal." },
   { ic: "check", t: "Least privilege", b: "The public website can only submit a request — it can never read client data. Privileged keys stay on our servers and never reach your browser." },
   { ic: "briefcase", t: "Never sold", b: "Your information is used only to advise you on coverage. We never sell or share it for marketing." },

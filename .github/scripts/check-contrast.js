@@ -224,6 +224,13 @@ const pairs = [
   // so it needs the same AA floor as any other body text.
   ['--color-danger', '--color-surface', AA, 'danger / surface'],
   ['--color-danger', '--color-bg', AA, 'danger / bg'],
+  // `.k-ilink` is 14px/700 body text, so it answers to AA, not AA_LARGE — and it
+  // renders on the PAGE background and on the accent tint, never on surface.
+  // Checking only accent/surface (4.65) passed both of these while they measured
+  // 4.26 and 4.03. One of them is the Help desk's broker hand-off, i.e. the
+  // safety remedy the whole fact/advice boundary routes a client to.
+  ['--color-accent-hover', '--color-bg', AA, 'accent-hover / bg (inline link)'],
+  ['--color-accent-hover', '--color-accent-light', AA, 'accent-hover / accent-light (link on tint)'],
 ];
 
 // The measured set, derived from `pairs` so there is no second list of names.

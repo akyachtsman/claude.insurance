@@ -1,0 +1,124 @@
+{
+  "topics": [
+    {
+      "id": "home",
+      "title": "Your home screen",
+      "route": "#/keep",
+      "nav": "The Keep \u2192 home",
+      "body": "The first screen after you sign in. It shows renewals coming up in the next 60 days, at-a-glance totals for your entities, assets and policies, and the status of any requests you have open.",
+      "ask": "What's on my home screen?"
+    },
+    {
+      "id": "list",
+      "title": "Your entities",
+      "route": "#/keep/list",
+      "nav": "Entities",
+      "body": "Every entity you hold cover under \u2014 yourself plus any businesses or trusts. The table shows each one's type, subtype, asset count, open gaps and total value, and you can switch to a card view showing assets, gaps and value. Open one to see its detail.",
+      "ask": "Where do I see my entities?"
+    },
+    {
+      "id": "grid",
+      "title": "Entities as cards",
+      "route": "#/keep/grid",
+      "nav": "Entities \u2192 card view",
+      "body": "The same entities shown as cards you can drag to reorder. The order is remembered in the browser you set it in, so it will not follow you to another device.",
+      "ask": "Can I reorder my entities?"
+    },
+    {
+      "id": "entities",
+      "title": "Relationships map",
+      "route": "#/keep/entities",
+      "nav": "Entities \u2192 relationships",
+      "body": "A diagram of how your entities own or hold one another \u2014 who is the owner, who is the trustee. Useful when a business is held by a trust, or an asset sits under a company.",
+      "ask": "How do I see how my entities connect?"
+    },
+    {
+      "id": "add-entity",
+      "title": "Add a business or trust",
+      "route": "#/keep/add-entity",
+      "nav": "Entities \u2192 Add",
+      "body": "Creates a new entity under your account. Pick a specific type (LLC, revocable trust, and so on) and give it a name. You can add assets to it straight afterwards.",
+      "ask": "How do I add a business entity?"
+    },
+    {
+      "id": "assets",
+      "title": "All your assets",
+      "route": "#/keep/assets",
+      "nav": "Assets",
+      "body": "Every asset across all your entities in one sortable table \u2014 type, which entity holds it, value, annual depreciation (or \u201cHolds value\u201d for types that do not depreciate), and how many policies cover it.",
+      "ask": "Where do I see all my assets?"
+    },
+    {
+      "id": "asset",
+      "title": "An asset's detail",
+      "route": "#/keep/assets",
+      "nav": "Assets \u2192 open one",
+      "body": "Everything about one asset: its value and depreciation schedule, the policies covering it, and a coverage analysis showing gaps against what we would expect for that asset type.",
+      "ask": "How do I check one asset?"
+    },
+    {
+      "id": "add-asset",
+      "title": "Add an asset",
+      "route": "#/keep/add-asset",
+      "nav": "Assets \u2192 Add",
+      "body": "Adds a vehicle, property, watercraft or valuable under one of your entities. Give it a type, a name and a value; your broker binds the cover.",
+      "ask": "How do I add a new asset?"
+    },
+    {
+      "id": "insurance",
+      "title": "All your policies",
+      "route": "#/keep/insurance",
+      "nav": "Policies",
+      "body": "Every policy across your entities \u2014 carrier, renewal date, premium and documents. Sorted by renewal date so the nearest is first.",
+      "ask": "Where do I see all my policies?"
+    },
+    {
+      "id": "policy",
+      "title": "A policy's detail",
+      "route": "#/keep/insurance",
+      "nav": "Policies \u2192 open one",
+      "body": "One policy in full: coverages and limits, renewal reminders, documents to download, and the form to request an enhancement.",
+      "ask": "How do I look at one policy?"
+    },
+    {
+      "id": "requests",
+      "title": "Your requests",
+      "route": "#/keep/requests",
+      "nav": "Account menu \u2192 My requests",
+      "body": "Enhancement requests you have sent your broker, with where each one has reached: submitted, broker review, underwriting, approved or declined.",
+      "ask": "How do I check a request I sent?"
+    },
+    {
+      "id": "request",
+      "title": "Request an enhancement",
+      "route": "#/keep/insurance",
+      "nav": "Policies \u2192 open one \u2192 Request",
+      "body": "Asks your broker to change cover on a policy \u2014 raise a limit, add an item, adjust a deductible. Your broker reviews it and sends it to underwriting.",
+      "ask": "How do I ask to change my cover?"
+    },
+    {
+      "id": "documents",
+      "title": "Your documents",
+      "route": "#/keep/documents",
+      "nav": "Account menu \u2192 Documents",
+      "body": "Every document attached to any of your policies, in one place, ready to download.",
+      "ask": "Where are my policy documents?"
+    },
+    {
+      "id": "account",
+      "title": "Account settings",
+      "route": "#/keep/account",
+      "nav": "Account menu \u2192 Account settings",
+      "body": "Your name and email, and your renewal-reminder preferences \u2014 the address reminders are sent to (shown there, changed by your broker) and how far ahead you want them.",
+      "ask": "How do I change my reminder settings?"
+    },
+    {
+      "id": "security",
+      "title": "Security and privacy",
+      "route": "#/keep/security",
+      "nav": "Account menu \u2192 Security & privacy",
+      "body": "How your account is protected and who can see your records: your entities, assets and policies are visible to you and your licensed broker, and no other client can see them. Two things leave the Keep. When you ask the Help desk a question, your question and a summary of your own records go to our AI provider (Anthropic) to answer it. When you send an enhancement request, its details are emailed to your broker.",
+      "ask": "Who can see my information?"
+    }
+  ]
+}
