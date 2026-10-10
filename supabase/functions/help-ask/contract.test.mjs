@@ -103,8 +103,14 @@ test("retryAfter is sent in SECONDS, and is never a hardcoded literal", () => {
   assert.equal(literal, null,
     `retryAfter is hardcoded as ${literal && literal[1]} — both cap windows roll, so a constant is a wait the endpoint cannot honour`);
   assert.ok(/retryAfterFor\(/.test(fnSrc), "the wait is no longer computed by retryAfterFor()");
-  assert.ok(/Math\.ceil\(GRACE_MS \/ 1000\)/.test(fnSrc),
-    "the grace-case wait is not converted to seconds");
+  // ⚠️ The grace case no longer produces a number at all — it is the AMBIGUOUS
+  // case, and the function now sends the window rather than inventing a duration
+  // for it (Codex, round 22). This used to assert `Math.ceil(GRACE_MS / 1000)`,
+  // which is a line the redesign correctly deleted; the assertion followed it
+  // rather than outliving it as a check that could only pass while the
+  // understatement was there.
+  assert.ok(/window: WINDOW_S/.test(fnSrc),
+    "a refusal with no derivable wait must still carry its window");
 });
 
 test("usedRecords is sent as a list of the records actually used, not all of them", () => {
@@ -219,20 +225,34 @@ test("past the model call, ONLY a provider HTTP error releases the reservation",
     "a raw delete after the model call bypasses the one place this rule is stated");
 });
 
-test("the daily cap derives its retryAfter instead of reusing the hourly 3600", () => {
-  // An hour is an UPPER bound for the hourly window, so 3600 there is
-  // conservative and never a false promise. On the rolling 24-hour window it is
-  // the opposite: 400 calls in the last hour means the cap holds for nearly
-  // another 23, and "try again in an hour" is a promise the endpoint cannot keep.
+test("neither cap reports a wait it cannot derive — it reports the WINDOW instead", () => {
+  // ⚠️ REWRITTEN FOR THE THIRD TIME, and the rewrite is the point. This test has
+  // tracked one mechanism through three failures: a flat 3600 on the daily cap
+  // (understating a 24h window), omitting the number (which the view read as
+  // "tomorrow", overstating), and a five-second grace (understating by up to an
+  // hour on 20 real asks inside it). `global.md` -> Review Rounds Have to
+  // Terminate: the third failure is a redesign. The function now sends
+  // `retryAfter` ONLY when it is derived from settled rows, and `window`
+  // otherwise — mutually exclusive — and the view has wording true across the
+  // whole of a window. So what this asserts is the PAIRING, not a number.
+  for (const [label, needle, win] of [
+    ["hourly", 'scope: "client"', "3600"],
+    ["daily", 'scope: "shared"', "86_400"],
+  ]) {
+    const at = fnSrc.indexOf(needle);
+    assert.ok(at > 0, `could not locate the ${label} refusal — did the parse break?`);
+    const branch = fnSrc.slice(Math.max(0, at - 600), at + 300);
+    assert.ok(new RegExp(`WINDOW_S = ${win}`).test(branch),
+      `the ${label} cap does not carry its own window`);
+    assert.ok(/\{ retryAfter: wait\.seconds \} : \{ window: WINDOW_S \}/.test(branch),
+      `the ${label} cap does not pair a derived retryAfter with a window fallback — ` +
+      "one or the other must always be sent, or the view has nothing true to say");
+  }
+  // And the daily branch still derives from the 24-hour window, not the hour.
   const at = fnSrc.indexOf("DAILY_TOTAL_CAP) {");
-  assert.ok(at > 0, "could not locate the daily-cap branch — did the parse break?");
   const branch = fnSrc.slice(at, fnSrc.indexOf("\n  }", at));
-  assert.ok(!/retryAfter:\s*3600/.test(branch),
-    "the daily cap reports the hourly 3600, which under-states a 24-hour window");
   assert.ok(/86_400_000|86400000/.test(branch),
     "the daily cap does not derive its wait from the 24-hour window");
-  assert.ok(/retryAfter \?/.test(branch),
-    "the daily cap must omit retryAfter when it cannot be derived — a wrong number is worse than none");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

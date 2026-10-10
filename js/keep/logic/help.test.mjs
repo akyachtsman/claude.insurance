@@ -567,3 +567,52 @@ test("a shared-cap refusal does not blame the client, whatever the wait", () => 
   assert.match(answerShape({ answer: null, reason: "rate_limited", retryAfter: 80000 }).notice, /limit for today/i);
   assert.match(answerShape({ answer: null, reason: "rate_limited", retryAfter: 120 }).notice, /you've asked/i);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE `window` WORDING. A number cannot say "I do not know, but it is bounded by
+// this", and three review rounds were spent trying to make one do it: a flat
+// hour on the daily cap (understated it), omitting the number (which the
+// branches below read as "a few minutes" / "tomorrow", so the overstatement just
+// moved from the function into this file), and a five-second grace (understated
+// by up to an hour when the rows inside it were real). `global.md` -> Review
+// Rounds Have to Terminate. The function now sends `retryAfter` only when it can
+// derive it, and `window` otherwise — and these are the wordings that have to be
+// true across the WHOLE of a window, which is the property none of the three
+// numbers had.
+// ─────────────────────────────────────────────────────────────────────────────
+test("a client-scope refusal with only a window promises no duration", () => {
+  const s = answerShape({ answer: null, reason: "rate_limited", scope: "client", window: 3600 });
+  assert.match(s.notice, /limit of questions for the hour/i);
+  assert.match(s.notice, /later in the hour/i);
+  // The two readings this must survive: it may clear in seconds (a peer
+  // releasing) or hold for nearly the full hour (twenty real asks in a burst).
+  assert.ok(!/few minutes|about a minute|about \d+ minutes/i.test(s.notice),
+    `a bounded-but-unknown wait was rendered as a duration: ${s.notice}`);
+  assert.equal(s.retryAfter, null, "no retryAfter was sent, so none may be reported");
+});
+
+test("a shared-scope refusal with only a window does not say tomorrow", () => {
+  const s = answerShape({ answer: null, reason: "rate_limited", scope: "shared", window: 86_400 });
+  assert.match(s.notice, /at its limit right now/i);
+  assert.ok(!/tomorrow|today/i.test(s.notice),
+    `a rolling 24-hour window was rendered as a calendar claim: ${s.notice}`);
+  assert.ok(!/few minutes/i.test(s.notice), `an unknown wait was rendered as minutes: ${s.notice}`);
+});
+
+test("a derived retryAfter still wins over a window, and keeps its own wording", () => {
+  // The two are mutually exclusive on the wire, but a defensive consumer must
+  // not start ignoring a number it was actually given.
+  const s = answerShape({ answer: null, reason: "rate_limited", scope: "client", retryAfter: 180, window: 3600 });
+  assert.match(s.notice, /about 3 minutes/i);
+  assert.equal(s.retryAfter, 180);
+  const sh = answerShape({ answer: null, reason: "rate_limited", scope: "shared", retryAfter: 45, window: 86_400 });
+  assert.match(sh.notice, /briefly at its limit/i);
+});
+
+test("a junk window is ignored rather than rendered", () => {
+  for (const junk of [0, -1, "soon", null, undefined, NaN, {}]) {
+    const s = answerShape({ answer: null, reason: "rate_limited", scope: "client", window: junk });
+    assert.ok(s.notice && !/\bnull\b|\bundefined\b|NaN|\[object/.test(s.notice),
+      `window ${JSON.stringify(junk)} leaked into the notice: ${s.notice}`);
+  }
+});

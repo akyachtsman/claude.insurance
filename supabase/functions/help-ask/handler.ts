@@ -577,9 +577,20 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       // An ask fits when the retained count is at most cap-1, so `survivors - cap`
       // is the 0-based index of the last row that has to expire.
       const offset = (survivors ?? 0) - cap;
-      // GRACE_MS is how long a peer's row stays excluded, so that is the honest
-      // wait; seconds, rounded up, never zero.
-      if (offset < 0) return { seconds: Math.ceil(GRACE_MS / 1000), failed: false };
+      // ⚠️ AMBIGUOUS — AND IT NO LONGER INVENTS A NUMBER FOR IT. A negative
+      // offset means the refusal is explained only by rows younger than the
+      // grace, and nothing here can tell which of those will be DELETED (a peer
+      // about to release) from which will STAY for the whole window (a real ask
+      // already past the billing line). The two readings are "retry in seconds"
+      // and "retry in up to an hour", and no age-based rule gets both right:
+      // counting survivors understates (20 real asks inside five seconds get
+      // told "about a minute" for an hour-long block — Codex, round 22, and an
+      // independent review before it), counting every row but our own overstates
+      // in the concurrent case this grace was added for (Codex, round 20).
+      // So the function stops answering a question it cannot answer: no
+      // `retryAfter`, and the caller sends the WINDOW instead, which is true
+      // whichever reading holds. See the note on the callers.
+      if (offset < 0) return { seconds: null, failed: false };
       const { data: oldest, error: oldErr } = await scoped(
         admin.from("help_queries").select("asked_at"),
       ).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
@@ -620,17 +631,22 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // shared cap had already had.
   if ((count ?? 0) > HOURLY_CAP) {
     const wait = await retryAfterFor(since, 3600_000, HOURLY_CAP, (q) => q.eq("owner", owner));
-    // ⚠️ ON FAILURE, FALL BACK TO THE WINDOW — one hour, the bound the flat 3600
-    // always was. Omitting the number here is the one direction that is not safe:
-    // see `retryAfterFor`'s note. A legitimate `null` (nothing left to expire)
-    // still omits, and "in a few minutes" is then true.
-    const retryAfter = wait.seconds ?? (wait.failed ? Math.ceil(3600_000 / 1000) : null);
-    // `scope` so the consumer can word this correctly. Without it the view
-    // guessed from the WAIT LENGTH, which told a client who had asked nothing all
-    // day "You've asked a few questions in a short time" whenever the SHARED cap
-    // happened to clear in under 90 minutes — the common case for a rolling
-    // window.
-    return await releaseAnd("rate_limited", { scope: "client", ...(retryAfter ? { retryAfter } : {}) });
+    // ⚠️ `window` IS SENT WHENEVER `retryAfter` IS NOT, and that pairing is the
+    // whole redesign. Three rounds running, this branch tried to express
+    // uncertainty as a DURATION — a flat 3600 (overstated), then an omission
+    // (which the view read as "a few minutes", understating), then a five-second
+    // grace (understating by up to an hour). A single number cannot carry "I do
+    // not know, but it is bounded by this", so the contract now carries the bound
+    // separately and the view has wording that is true across the whole of it.
+    // `global.md` → Review Rounds Have to Terminate: the third failure of one
+    // mechanism is a redesign, not another patch.
+    // `retryAfter` is sent ONLY when it is derived from settled rows alone, i.e.
+    // when it is actually known.
+    const WINDOW_S = 3600;
+    return await releaseAnd("rate_limited", {
+      scope: "client",
+      ...(wait.seconds ? { retryAfter: wait.seconds } : { window: WINDOW_S }),
+    });
   }
 
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
@@ -654,11 +670,17 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // clears when enough rows age out, and `retryAfterFor` works out which row
     // that is — see its note for why the count comes from survivors rather than
     // from `total`, and why a negative offset still sends a short number.
-    // No failure fallback on this side, deliberately: a shared-cap refusal with no
-    // number renders as "try again tomorrow", which OVERSTATES a rolling 24-hour
-    // window rather than understating it. The log now says why it had none.
-    const retryAfter = (await retryAfterFor(dayAgo, 86_400_000, DAILY_TOTAL_CAP, (q) => q)).seconds;
-    return await releaseAnd("rate_limited", { scope: "shared", ...(retryAfter ? { retryAfter } : {}) });
+    // Same pairing as the hourly branch above: a number only when it is known,
+    // and the window otherwise. `scope` is what lets the view word the two caps
+    // differently — without it the view guessed from the WAIT LENGTH, and told a
+    // client who had asked nothing all day "You've asked a few questions in a
+    // short time" whenever the shared cap happened to clear in under 90 minutes.
+    const wait = await retryAfterFor(dayAgo, 86_400_000, DAILY_TOTAL_CAP, (q) => q);
+    const WINDOW_S = 86_400;
+    return await releaseAnd("rate_limited", {
+      scope: "shared",
+      ...(wait.seconds ? { retryAfter: wait.seconds } : { window: WINDOW_S }),
+    });
   }
 
   const topics = await loadGuide();

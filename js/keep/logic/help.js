@@ -10,7 +10,11 @@
 //                usedRecords: ["<display line>", …],
 //                reason: "answered" | "refused" | "no_records" }
 //   failure →  { answer: null, reason: "<key of FAILURE_NOTICE>",
-//                retryAfter: <seconds, rate_limited only>,
+//                retryAfter: <seconds, rate_limited only — sent ONLY when the
+//                            function can actually derive it>,
+//                window:     <seconds, rate_limited only — the cap's window,
+//                            sent INSTEAD of retryAfter when the wait cannot be
+//                            derived. The two are mutually exclusive.>,
 //                scope: "client" | "shared" (rate_limited only — WHICH cap) }
 // Credited TOPICS travel as corpus ids, never as titles: the title shown to the
 // client is read back from the corpus by creditedTopics(), per CLAUDE.md's "one
@@ -190,7 +194,7 @@ function waitPhrase(seconds) {
 
 // The throttle notice, with the retry time when the function gave one and a
 // complete sentence when it did not — never a hole where the number should be.
-function rateLimitNotice(seconds, scope) {
+function rateLimitNotice(seconds, scope, window) {
   // Two different caps reach this, and the wording has to survive both. The
   // per-client cap clears within the hour; the SHARED daily one can be most of a
   // day away, and it is not the reader's doing — they may have asked nothing.
@@ -205,6 +209,29 @@ function rateLimitNotice(seconds, scope) {
   // function now says which cap fired and that is what decides the wording.
   // The duration heuristic survives ONLY as a fallback for a deployed function
   // older than this field; it is a guess, and labelled as one.
+  // ⚠️ THE `window` BRANCH EXISTS BECAUSE A NUMBER CANNOT SAY "I DO NOT KNOW".
+  // The function sends `retryAfter` only when it is derived from rows that have
+  // settled; when the refusal depends on rows that may be peers about to release,
+  // it cannot tell "clears in seconds" from "clears in an hour" and sends the
+  // WINDOW instead. Three rounds of review were spent trying to express that
+  // uncertainty as a duration — a flat hour (overstated), nothing at all (which
+  // this function read as "a few minutes", understating), and a five-second grace
+  // (understating by up to an hour, on 20 real asks inside that grace). Each
+  // wording below is true across the whole of its window, which is the property
+  // none of the three numbers had.
+  // ⚠️ `!Number.isFinite(Number(seconds))` IS WRONG HERE and was the first
+  // version: `answerShape` passes `null` when no number was sent, `Number(null)`
+  // is **0**, and 0 is finite — so this branch never fired and the whole redesign
+  // was inert, rendering the same "in a few minutes" it exists to replace. Caught
+  // by its own test on the first run, which is the only reason it is not in the
+  // commit. The test asserts the WORDING, not the branch, which is why it could
+  // catch it at all.
+  const haveSeconds = Number.isFinite(Number(seconds)) && Number(seconds) > 0;
+  if (!haveSeconds && Number.isFinite(Number(window)) && Number(window) > 0) {
+    return scope === "shared"
+      ? "The help desk is at its limit right now. Please try again later."
+      : "You've reached your limit of questions for the hour. Please try again later in the hour.";
+  }
   if (scope === "client") {
     return `You've asked a few questions in a short time. Please try again ${waitPhrase(seconds) || "in a few minutes"}.`;
   }
@@ -301,7 +328,7 @@ export function answerShape(payload) {
       topics: [],
       records: [],
       reason: key,
-      notice: key === "rate_limited" ? rateLimitNotice(retryAfter, str(p && p.scope)) : FAILURE_NOTICE[key],
+      notice: key === "rate_limited" ? rateLimitNotice(retryAfter, str(p && p.scope), p && p.window) : FAILURE_NOTICE[key],
       retryAfter,
     };
   }

@@ -1187,10 +1187,58 @@ the fix. Two halves now:
   what counts as short — it reads "The help desk is briefly at its limit."
 Both mutation-tested, on both sides of the wire.
 
-⛔ **THE EXACT ANSWER NEEDS THE RESERVE AND THE COUNT TO BE ONE ATOMIC
-STATEMENT** — a Postgres function, so a migration and an owner decision. Until
-then a burst of 400 genuine asks inside the grace window reports the same short
-wait, which is the understating direction. Not approximated further on purpose.
+### ⛔ REDESIGNED, ROUND 22 — the function stops answering a question it cannot answer
+
+**Three rounds, one mechanism: "derive a precise wait from a count that cannot
+tell a transient reservation from a billable one."** `global.md` → *Review Rounds
+Have to Terminate* says the third failure of a mechanism is a revert or a
+redesign, not a third patch. The three:
+
+| attempt | what it sent | how it was wrong |
+|---|---|---|
+| 1 | a flat `3600` on the daily cap | understates a rolling 24-hour window |
+| 2 | **nothing**, for the concurrent case | the view reads a numberless refusal as "tomorrow" (shared) / "a few minutes" (client) — the overstatement just moved out of the function |
+| 3 | the **5s grace** in seconds | understates by up to an hour: 20 real asks inside that grace are excluded as "possible peers" while they hold the cap for the full window (Codex, round 22 — and an independent review before it, at lower confidence, which I under-weighted) |
+
+**No age-based rule gets both cases right**, and that is the finding rather than
+any one number. Counting survivors understates when the young rows are real;
+counting every row but our own overstates in the concurrent case the grace was
+added for. The two readings of an ambiguous count are "clears in seconds" and
+"clears in an hour", and a single integer cannot carry "I do not know, but it is
+bounded by this".
+
+**So the contract carries the bound separately.** `retryAfterFor` returns
+`{ seconds, failed }`; `seconds` is non-null **only** when it is derived from
+settled rows alone. Each caller then sends exactly one of:
+- `retryAfter: <seconds>` — a wait that is actually known, or
+- `window: 3600 | 86400` — the cap's window, when it is not.
+
+and `rateLimitNotice` has a third pair of wordings, true across the *whole* of a
+window: *"You've reached your limit of questions for the hour. Please try again
+later in the hour."* and *"The help desk is at its limit right now. Please try
+again later."* Neither promises a duration, so neither can be false.
+
+⚠️ **THE FIRST VERSION OF THE VIEW SIDE WAS INERT, and its own test caught it on
+the first run.** The branch guard was `!Number.isFinite(Number(seconds))`, and
+`answerShape` passes **`null`** when no number was sent — `Number(null)` is `0`,
+which is finite — so the branch never fired and the whole redesign rendered the
+same "in a few minutes" it exists to replace. The test asserts the **wording**,
+not the branch, which is the only reason it could catch it.
+
+⚠️ **Three tests were rewritten and that is expected, not a smell** — each had
+pinned a previous attempt, and two carried justifications that the next fix
+retired ("a SHORT number, not no number, *because* the view says tomorrow" was
+true of its round and false after the view gained the third wording). A test
+whose reason has expired is the `.k-help__out` class of defect: it can only pass
+while the thing it was written beside is still wrong.
+
+⛔ **THE EXACT ANSWER STILL NEEDS A SCHEMA CHANGE, and it is now a sharper ask
+than "one atomic statement".** What removes the ambiguity is a **billing-line
+marker** on `help_queries` — a column the handler sets when a request passes the
+point of no return, so a retry calculation can count committed rows and ignore
+reservations outright. That is a migration plus an owner decision, and it would
+close this class rather than bound it. Recorded here rather than approximated a
+fourth time.
 
 ⚠️ **AND THE HOURLY CAP HAD NONE OF THIS FOR FIVE ROUNDS — it sent a flat
 `retryAfter: 3600`.** Found by Codex, round 20, pointing at the fix the branch

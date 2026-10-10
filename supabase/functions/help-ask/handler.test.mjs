@@ -228,14 +228,18 @@ test("the hourly cap admits the 20th ask and refuses the 21st", async () => {
   const body = await (await ask(over.d)).json();
   assert.equal(body.reason, "rate_limited", "the 21st ask was allowed");
   assert.equal(body.scope, "client");
-  // ⚠️ NOT 3600 — and the inequality is the assertion, because a flat 3600 is
-  // exactly what this branch sent for five rounds. The twenty rows above are all
-  // seeded "now", so every one of them is inside the 5s grace window and is
-  // excluded as a possible concurrent peer: nothing has to expire for an ask to
-  // fit, and the honest answer is the grace itself. One extra cheap refusal, not
-  // an hour's lockout, which is the designed direction of the approximation.
-  assert.notEqual(body.retryAfter, 3600, "the hourly cap is back to a flat hour");
-  assert.equal(body.retryAfter, 5);
+  // ⚠️ NO NUMBER, AND THE WINDOW INSTEAD — and this assertion has now been
+  // rewritten twice, which is the history worth keeping. It first required 3600
+  // (a flat hour, which overstates for a client 59 minutes in), then 5 (the
+  // grace, which UNDERSTATES by up to an hour for exactly this seed: these
+  // twenty rows are real asks that will be billed and will hold the cap for the
+  // full window, and nothing distinguishes them from a peer about to release).
+  // Codex found that in round 22 against the seed this very test had pinned.
+  // The function no longer answers it: `window` is true whichever reading holds,
+  // and `rateLimitNotice` has wording for a bounded-but-unknown wait.
+  assert.equal(body.retryAfter, undefined,
+    "the function invented a wait it cannot derive — 20 real asks inside the grace hold the cap for the hour");
+  assert.equal(body.window, 3600, "a refusal with no derivable wait must still carry its window");
 });
 
 test("the hourly retry time is when the oldest SETTLED ask actually ages out", async () => {
@@ -328,14 +332,16 @@ test("the shared-cap retry time is read from rows that will SURVIVE the rejectio
   const b = await (await ask(deps({ tables: seed({ help_queries: racing }) }).d)).json();
   assert.equal(b.reason, "rate_limited", "the cap did not fire at all — the setup is wrong, not the fix");
   assert.equal(b.scope, "shared");
-  // ⚠️ A SHORT NUMBER, NOT NO NUMBER. Omitting it was this fix's first version,
-  // and `rateLimitNotice` renders a shared-cap refusal with no number as
-  // "Please try again TOMORROW" — so omitting reproduced the ~24h overstatement
-  // in the view. The assertion is therefore on the RANGE, which is what the
-  // client actually reads through waitPhrase's first bucket (<90s).
-  assert.ok(Number.isFinite(b.retryAfter) && b.retryAfter > 0 && b.retryAfter < 90,
-    `a concurrent reservation produced ${JSON.stringify(b.retryAfter)} — it must be a SHORT wait: the rows that ` +
-    `pushed the cap over are being released right now, and both no-number and a 24h number read as "tomorrow"`);
+  // ⚠️ NO NUMBER, AND THE WINDOW — rewritten from "a SHORT number, not no
+  // number", which was right about its own round and wrong about the next. That
+  // version justified itself on the view rendering a numberless shared refusal as
+  // "try again TOMORROW"; the view now has a third wording for exactly this
+  // state, so the justification expired. The ambiguity is real and the function
+  // says so instead of guessing: the peer may release and let the next ask
+  // straight through, or it may be a billable call that holds the cap for hours.
+  assert.equal(b.retryAfter, undefined,
+    `a concurrent reservation produced ${JSON.stringify(b.retryAfter)} — the wait is not derivable here`);
+  assert.equal(b.window, 86_400, "a shared refusal with no derivable wait must still carry its window");
 });
 
 test("a refused ask gives its reservation back; an answered one keeps it", async () => {
@@ -845,10 +851,13 @@ for (const [label, failAt, stage, ageMins] of [
     const body = await res.json();
     assert.equal(body.reason, "rate_limited");
     assert.equal(body.scope, "client");
-    // 3600, NOT absent. Absent is the one answer that is wrong here: it renders
-    // as "in a few minutes" for a block that can have most of an hour to run.
-    assert.equal(body.retryAfter, 3600,
-      "a failed retry-time query omitted the number, which the consumer renders as a few minutes");
+    // ⚠️ THE WINDOW, NOT A NUMBER — and this started as `retryAfter: 3600`,
+    // which was a fallback invented to dodge the view's "in a few minutes"
+    // wording for a numberless client refusal. The redesign removed the need:
+    // `window` is sent whenever the wait is not derivable, for a failure exactly
+    // as for an ambiguous count, and the view has honest wording for both.
+    assert.equal(body.retryAfter, undefined, "a failed query produced a number it could not know");
+    assert.equal(body.window, 3600, "a failed retry-time query dropped the window too, leaving nothing true to say");
     const line = logged.find((l) => l.includes("retry_after"));
     assert.ok(line, `nothing was logged; an operator reading the \`where\` field sees no cause. Got: ${JSON.stringify(logged)}`);
     assert.ok(line.includes(`"stage":"${stage}"`), `the log does not name the stage: ${line}`);
