@@ -3836,3 +3836,89 @@ test('S23: a data load that outlived its login never reaches the cache', async (
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S24 — THE BUSY GATE ON THE SHARED ACCOUNT: a settling ask must release only
+// ITS OWN slot. The gate is keyed on the owner id, and the login screen
+// prefills ONE shared demo credential, so two different people are the SAME
+// owner. A's ask is pending; A signs out (which clears the gate); the next
+// person signs into the same account and asks; A's response then settles and its
+// `finally` deleted the entry — which now belongs to THEM. The busy recompute
+// immediately after reads the gate, finds it empty and ENABLES their form while
+// their own provider call is still running, so a second submit is a second PAID
+// call. Found by Codex, round 21, against the round-20 commit.
+//
+// ⚠️ Distinct from S16, which is the same shape with a DIFFERENT client — and so
+// passes against an owner-keyed gate, because the two ids differ. Only the
+// shared credential exposes this, which is the same reason S19 exists.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S24: a settling ask releases only its own gate, on the shared account', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  const A_ANS = { ...ANSWER_PAYLOAD, answer: "THE FIRST PERSON'S ANSWER." };
+  const B_ANS = { ...ANSWER_PAYLOAD, answer: "THE SECOND PERSON'S ANSWER." };
+  await seedKeepSession(page, 'a');
+  // Three bodies for two expected asks: a third request is served rather than
+  // throwing inside the route, so the assertion is the COUNT and not a crash.
+  const fn = await routeHelpAskSequence(page, [A_ANS, B_ANS, B_ANS]);
+
+  // A asks. Held.
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await page.locator('.k-help__input').fill("A's question about their dwelling limit");
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+
+  // A signs out, and the NEXT PERSON signs in on the same prefilled credential.
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await page.getByRole('button', { name: /sign out/i }).first().click();
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  await page.locator('.k-authcard input[type=text]').fill('user');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+
+  // They ask their own question. It must reach the endpoint — the gate was
+  // cleared on the auth change, and a gate that refused them here would be
+  // locking them out over a departed person's call.
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await expect(page.locator('.k-help__ask'), 'the new person inherited a disabled form').toBeEnabled();
+  await page.locator('.k-help__input').fill("B's own question");
+  await page.locator('.k-help__ask').click();
+  await expect(page.getByText(/looking/i)).toBeVisible({ timeout: 3_000 });
+  expect(fn.requests(), "the second person's own ask never reached the endpoint").toBe(2);
+
+  // A's older response lands FIRST, under the same owner id.
+  fn.release(0);
+  await page.waitForTimeout(1_000);
+
+  // ⚠️ THE ASSERTION. Their call is still in flight, so their controls must stay
+  // disabled — and `disabled` is not the protection, so the spend half is
+  // asserted by bypassing it exactly as S15 does.
+  await expect(page.locator('.k-help__ask'),
+    "the previous person's settling ask re-enabled this person's form while their own call was in flight")
+    .toBeDisabled();
+  await page.evaluate(() => {
+    const inp = document.querySelector('.k-help__input');
+    const btn = document.querySelector('.k-help__ask');
+    inp.disabled = false; btn.disabled = false;
+    inp.value = 'A THIRD question, while the second is still in flight';
+    document.querySelector('form.k-help__form').requestSubmit();
+  });
+  await page.waitForTimeout(500);
+  expect(fn.requests(),
+    "the released gate let a THIRD paid provider call through while the second was still running").toBe(2);
+
+  // And nothing of A's reached them.
+  await expect(page.locator('body')).not.toContainText(/THE FIRST PERSON'S ANSWER/);
+
+  // Their own answer still lands.
+  fn.release(1);
+  await expect(page.locator('.k-help__a')).toContainText(/THE SECOND PERSON'S ANSWER/, { timeout: 10_000 });
+  await expect(page.locator('.k-help__ask'), 'the desk stayed locked after their own answer arrived').toBeEnabled();
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

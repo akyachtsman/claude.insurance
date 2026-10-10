@@ -1117,6 +1117,30 @@ edit will be tempted to undo one of them.
 | 14 | `setBusy(false)` **before** the owner check | a departed client's completion RE-ENABLED the current client's form while their own call was in flight — an enabled control that silently does nothing |
 | 17 | `setBusy(false)` **after** the checks | the mirror image: on a mismatch it returned before any `setBusy`, so on the shared account B's view stayed DEAD after A's call settled, until B navigated away and back |
 
+⚠️ **AND ROUND 21 FOUND THE THIRD, IN THE GATE THE RECOMPUTE READS.**
+`pendingByOwner` was a `Set` of owner ids, and the login screen prefills ONE
+shared demo credential — so two different people are the same id. A has an ask
+pending; A signs out (the listener clears the gate); the next person signs in and
+asks, adding an entry under the identical id; A's response settles and its
+`finally` deleted **their** entry. The recompute then reads an empty gate and
+ENABLES their form while their own provider call is still running, so a second
+submit is a second PAID call, and the `abort()` only cancels their browser fetch
+while the Edge Function bills on.
+Now a `Map` of owner → **per-ask token**, and the `finally` deletes only if the
+token still matches — false exactly when someone else holds the slot. Deliberately
+not keyed on the login epoch: this PR's other lesson is that a guard resting on a
+second mechanism fails when that one does.
+⚠️ **The comment on that gate already claimed the fix** — it opened *"Carries
+`seq` so an earlier ask's completion cannot release a later one's gate"*, a line
+left behind from the design the Set replaced. The Set carried no seq.
+⚠️ **And the fix promoted a neighbour from belt to load-bearing.**
+`help-view.js`'s `onAuthChange` clear was labelled BELT (measured: deleting it
+passed every scenario). With the token, a departed client's slot is no longer
+released by their own settling ask — so without the clear the next person
+inherits a **disabled form** and is locked out by a call that is not theirs.
+Mutation-tested: it now fails S24. The two halves of that listener are labelled
+separately in the code, because `lastAsk`/`liveView` are still belt.
+
 Both found by Codex. The resolution is neither position: the busy state is
 **recomputed from `pendingByOwner`** immediately after the gate is released, on
 every path including the mismatches. B is enabled iff B has nothing in flight,
@@ -1188,6 +1212,26 @@ passed against unscoped code. Mutation-tested after a rewrite that puts the othe
 client's 300 rows NEWER, where unscoped quotes 3300s instead of 600s. Five
 mutations, five caught: flat 3600, lost owner filter, no grace short-circuit, no
 grace exclusion, wrong window.
+
+⚠️ **AND `releaseAnd` DISCARDED ITS OWN DELETE'S RESULT, so a failed release read
+exactly like a successful one** (Codex, round 21). PostgREST resolves a failed
+DELETE with `{ error }` rather than throwing, so a transient 5xx or a privilege
+regression left the reservation in place while the function returned the notice as
+though the slot had been given back — an **unbilled** attempt counted against the
+caller's 20/hour and the shared 400/day, and repeated failures lock the caller, or
+everyone, out after the dependency has recovered. Now checked, **retried once**
+(the statement is idempotent — `eq("id", slot.id)` on a row only this request
+knows about), and logged as `where: "release"` if it still does not take. The fake
+database could not fail a delete at all until this was written, which is why
+nothing covered it: *a fake that cannot fail cannot test a failure.*
+
+⚠️ **The same round also found that the first version of the hourly fix traded a
+safe error path for an unsafe one** — see the `retryAfterFor` note in
+`handler.ts`. Omitting `retryAfter` on a client-scope refusal renders as "in a few
+minutes"; the flat 3600 it replaced overstated, which is the safe direction. The
+helper now returns `{ seconds, failed }` so the two are distinguishable, logs both
+failure stages, and the hourly caller falls back to the window on `failed` while
+the shared one deliberately does not.
 
 ⚠️ **`contract.test.mjs`'s `retryAfter` assertion is now INVERTED, and the
 inversion is itself the finding.** It used to *require* a literal
@@ -1454,6 +1498,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S21 | Help desk — an answer ALREADY RENDERED is cleared (offline harness, **runs locally**) | Tab 1 asks and **receives**; tab 2 signs out of the shared account; tab 1 is never touched again. The answer, its credits and the question must leave tab 1's page on the broadcast alone. ⚠️ Distinct from S20: there the epoch stops the answer being WRITTEN, here it has already been written and rendered, and the epoch guards neither. | The previous person's answer stays on screen after their session ended elsewhere |
 | S22 | The Keep — a dispatch that outlives its session (offline harness, **runs locally**) | A cold `#/keep/list` navigation parked inside `ensureData()` (the first `/rest/v1/entities` request held open); tab 2 then signs the shared account out. Tab 1 must re-dispatch to the login card, and when the parked load is released the superseded dispatch must **not run at all** — asserted on the absence of a `route error:` console log, because the layered cache fix (S23) masks the DOM assertions. | A Keep page mounts under no session, or a superseded dispatch runs and throws |
 | S23 | The Keep — a data load that outlived its login (offline harness, **runs locally**) | Same park, then a **different** client signs in on tab 1 and their tree fills the cache; the first client's load is then released. Its tree must never reach `cache`: asserted on the app's own `getUser()` through a dynamic import of the same module URL (bounded poll, decided in both directions) **and** on what the next render shows ("Welcome back, Other", never "Demo"). | The previous client's entities, assets and policies are served to the next person to sign in |
+| S24 | Help desk — a settling ask releases only ITS OWN gate, shared account (offline harness, **runs locally**) | A asks (held); A signs out; the next person signs in on the **same prefilled credential** and asks their own question, which must reach the endpoint; A's older response is released FIRST. Their controls must stay **disabled** while their own call runs, and re-enabling them in the page and calling `form.requestSubmit()` must not raise the endpoint's request count — then their own answer lands and the desk unlocks. ⚠️ Distinct from S16, which is this shape with a DIFFERENT client and so passes against an owner-keyed gate: only the shared credential makes two people one owner id. | A departed person's settling ask re-enables the next person's form mid-call, letting a second paid provider call through |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

@@ -465,8 +465,32 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // deletes is what lets a test assert the rule instead of trusting it: see
   // contract.test.mjs, which fails on a bare `unavailable(` in this region. Two
   // of the four paths did not release before that test existed.
+  // ⚠️ THE DELETE'S RESULT IS CHECKED, and discarding it was a real hole: a
+  // failed release reads exactly like a successful one. PostgREST resolves a
+  // failed DELETE with `{ error }` rather than throwing, so a transient 5xx, a
+  // network blip or a privilege regression left the reservation in place while
+  // this returned the notice as though it had been given back — an UNBILLED
+  // attempt counted against the caller's 20/hour and the shared 400/day. Repeat
+  // that and the desk is locked out for the caller, or for everyone, after the
+  // dependency it was failing on has recovered. Found by Codex, round 21.
+  // Retried once because the statement is idempotent (`eq("id", slot.id)` on a
+  // row only this request knows about), and logged with the same `where` shape as
+  // every other failure here if it still does not take — an operator reading the
+  // logs is the only way this is ever noticed.
   const releaseAnd = async (reason: string, extra: Record<string, unknown> = {}) => {
-    await admin.from("help_queries").delete().eq("id", slot.id);
+    let relErr: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { error } = await admin.from("help_queries").delete().eq("id", slot.id);
+      relErr = error ?? null;
+      if (!relErr) break;
+    }
+    if (relErr) {
+      console.error(JSON.stringify({
+        where: "release", reason,
+        code: (relErr as { code?: string })?.code ?? null,
+        message: (relErr as { message?: string })?.message ?? "unknown",
+      }));
+    }
     return unavailable(reason, extra);
   };
 

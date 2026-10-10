@@ -52,19 +52,35 @@ let lastAsk = null;
 // render. Found by Codex.
 // Keyed on the owner, not a bare boolean: if A's ask is still in flight when B
 // signs in on the same tab, B must not be locked out of their own desk.
-// Carries `seq` so an earlier ask's completion cannot release a later one's gate.
-// Owners with a provider call in flight. ⚠️ A SET, NOT A SINGLE SLOT, and that
-// is not tidiness — a single slot had a real hole. `pending = { owner }` is
-// overwritten by the next client's ask, so: A asks, A signs out, B signs in and
-// asks (overwriting A's entry), A signs back in and asks — and A's gate is gone,
-// so A now has TWO live calls whose answers can land out of order. A generation
-// token used to sit alongside this to make that safe, and it was the only guard
-// with no scenario driving it. Keying the gate properly removes the hole AND the
-// need for the token: with this, a second ask by the SAME owner is impossible
-// while the first is live, so an out-of-order same-owner pair cannot arise.
-// Cross-owner is handled by the owner captured before the await (S14).
-// Entries are deleted in a `finally`, so nothing accumulates.
-const pendingByOwner = new Set();   // owner ids with a call in flight
+// Owners with a provider call in flight → the TOKEN of the ask that holds the
+// slot. ⚠️ A MAP, NOT A SET, and the token is the whole of the difference.
+//
+// It was a set, and before that a single slot. The single slot was overwritten by
+// the next client's ask (A asks, A signs out, B signs in and asks, A signs back
+// in and asks — A's gate gone, two live calls, answers landing out of order).
+// Keying on the owner fixed that and left a hole one layer down, **on the shared
+// demo credential, where two different people ARE the same owner id**: A has an
+// ask pending; A signs out, which clears this map; B signs in to the same account
+// and asks, adding an entry under the identical id; A's response then settles and
+// its `finally` deleted B's entry. The busy recompute right after reads the gate,
+// finds it empty, and ENABLES B's form while B's own provider call is still
+// running — so B submits again, the gate no longer refuses, and that is a second
+// paid call, with the first `abort()` only cancelling B's browser fetch while the
+// Edge Function bills on regardless. Found by Codex, round 21.
+//
+// ⚠️ THE COMMENT HERE ALREADY CLAIMED THE FIX: it opened "Carries `seq` so an
+// earlier ask's completion cannot release a later one's gate" — a line left
+// behind from the design the set replaced. The set carried no seq. A comment
+// promising exactly the property the code dropped is the recurring defect of this
+// PR, not an incident.
+//
+// So: `set(owner, token)` on entry, and the `finally` deletes **only if the
+// token still matches**, which is false precisely when someone else has taken
+// the slot. It does not depend on the login epoch moving — this PR's other
+// lesson is that a guard resting on a second mechanism fails when that one does.
+// Cross-owner is still handled by the owner captured before the await (S14).
+const pendingByOwner = new Map();   // owner id -> token of the ask holding the slot
+let askToken = 0;
 
 // The Help view currently on screen. `ask()` renders its RESULT through this
 // rather than through its own closures, because the render that started an ask
@@ -86,16 +102,25 @@ let liveView = null;  // { renderAnswer, renderNotice, setBusy, input }
 // in a mounted view after the browser session stops being A's. `main.js`
 // re-dispatches the route on the same signal, which replaces the DOM; this is
 // the half that clears the references behind it. Found by Codex, round 19.
-// The gate is cleared too: a new login must not inherit a departed client's
-// in-flight slot, and that ask's own `finally` keys on its own owner anyway.
+// ⚠️ THE TWO HALVES ARE NOT THE SAME STRENGTH ANY MORE, and the label was stale
+// within one round. This used to read "THIS IS BELT — measured", because deleting
+// the whole listener passed every scenario: `main.js`'s re-dispatch replaces the
+// DOM and the epoch blocks the restore, so nothing was OBSERVABLE without it.
 //
-// ⚠️ THIS IS BELT — measured, and labelled rather than left to be discovered.
-// Deleting it passes every scenario, because `main.js`'s re-dispatch replaces the
-// DOM and the epoch blocks the restore, so nothing is OBSERVABLE without it. It
-// is kept on data-hygiene grounds, which no UI test can express: without it the
+// `pendingByOwner.clear()` IS NOW LOAD-BEARING — mutation-tested, it fails S24.
+// Once the gate holds a per-ask token (see its note), a departed client's slot is
+// no longer released by their own settling ask, so without this clear the NEXT
+// person on the shared credential inherits a disabled form and is locked out of
+// the desk by a call that is not theirs. The fix that closed one hole made this
+// line the thing standing between them and the lockout.
+//
+// `lastAsk = null` and `liveView = null` remain BELT, for the reason above, and
+// are kept on data-hygiene grounds no UI test can express: without them the
 // previous person's question, answer and credited record values stay in this
-// module's memory after their session has ended. Cheap, and the right default for
-// private data.
+// module's memory after their session has ended.
+// Labelling the two separately because this PR has twice had a comment call a
+// guard belt after it had stopped being so, and both corrections came a round
+// late.
 onAuthChange(() => { lastAsk = null; liveView = null; pendingByOwner.clear(); });
 
 // Which Help render is current. Bumped on entry, checked after the only await,
@@ -259,7 +284,8 @@ export async function renderKeepHelp() {
     // Edge Function keeps going whatever the browser does — so the only thing
     // that actually protects spend is not sending the second one.
     if (pendingByOwner.has(asker)) return;
-    pendingByOwner.add(asker);
+    const token = ++askToken;
+    pendingByOwner.set(asker, token);
 
     if (inFlight) inFlight.abort();
     const controller = new AbortController();
@@ -283,7 +309,12 @@ export async function renderKeepHelp() {
       // against that contract changing — not a live case. It matters because a
       // leaked gate is not a glitch: it locks the client out of the desk
       // entirely until they reload the page.
-      pendingByOwner.delete(asker);
+      //
+      // ⚠️ ONLY IF THIS ASK STILL HOLDS THE SLOT. An unconditional delete here
+      // released the NEXT person's gate on the shared credential — see the note
+      // on `pendingByOwner`. Nothing accumulates either way: whoever holds the
+      // slot deletes it on their own exit.
+      if (pendingByOwner.get(asker) === token) pendingByOwner.delete(asker);
     }
     inFlight = null;
 

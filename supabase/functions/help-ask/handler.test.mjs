@@ -27,6 +27,7 @@ import { handle } from "./handler.ts";
 function fakeDb(tables = {}, opts = {}) {
   const log = [];
   const counts = {};
+  const dels = {};
   const api = {
     log, tables,
     from(table) {
@@ -77,7 +78,18 @@ function fakeDb(tables = {}, opts = {}) {
           q._single = { id };
           return chain;
         },
-        delete() { q.deleted = true; q._delete = true; return chain; },
+        delete() {
+          q.deleted = true; q._delete = true;
+          // `failDelete: { help_queries: n }` errors the Nth delete on that
+          // table. Added for the release-retry path: the fake used to resolve
+          // EVERY delete as `{ error: null }`, so a test could not tell a failed
+          // release from a successful one — which is precisely the bug the
+          // handler had. A fake that cannot fail cannot test a failure.
+          const n = (dels[table] = (dels[table] ?? 0) + 1);
+          const want = opts.failDelete?.[table];
+          if (want === n || want === "all") q._deleteFails = true;
+          return chain;
+        },
         maybeSingle() { const r = run(); return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error }); },
         single() {
           if (opts.denied?.includes(table)) return Promise.resolve({ data: null, error: { code: "42501", message: `permission denied for table ${table}` } });
@@ -86,6 +98,9 @@ function fakeDb(tables = {}, opts = {}) {
         },
         then(res, rej) {
           if (q._delete) {
+            if (q._deleteFails) {
+              return Promise.resolve({ data: null, error: { message: `delete failed: ${table}` } }).then(res, rej);
+            }
             const doomed = new Set(run().data.map((r) => r.id));
             tables[table] = (tables[table] ?? []).filter((r) => !doomed.has(r.id));
             return Promise.resolve({ data: null, error: null }).then(res, rej);
@@ -856,4 +871,39 @@ test("when the SHARED-cap retry time fails, the number is omitted — 'tomorrow'
     "a shared-cap failure sent a number it could not know; omitting lands on 'tomorrow', which overstates a rolling window");
   assert.ok(logged.some((l) => l.includes("retry_after")), "the shared-cap failure was silent");
   assert.equal(rowsOf("help_queries").length, 400, "the refused ask kept its reservation");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE RELEASE PATH. `releaseAnd` discarded its DELETE's result, so a failed
+// release was indistinguishable from a successful one: an UNBILLED attempt left
+// counted against the caller's hourly cap and the shared daily one. Found by
+// Codex, round 21. The fake could not fail a delete at all until this was
+// written, which is why nothing covered it.
+// ─────────────────────────────────────────────────────────────────────────────
+test("a release that fails is RETRIED, and logged if it still does not take", async () => {
+  const { d, db, rows } = deps({
+    tables: seed(), loadGuide: async () => [],         // forces releaseAnd("unavailable")
+    dbOpts: { failDelete: { help_queries: "all" } },
+  });
+  const [res, logged] = await capturingConsoleError(() => ask(d));
+  assert.equal((await res.json()).answer, null, "the caller should still get the notice");
+  const deletes = db.log.filter((q) => q.table === "help_queries" && q.deleted);
+  assert.equal(deletes.length, 2, `an idempotent release should be retried once; saw ${deletes.length} attempt(s)`);
+  const line = logged.find((l) => l.includes('"where":"release"'));
+  assert.ok(line, `a stuck release was silent; an operator has no way to see the leaked reservation. Got: ${JSON.stringify(logged)}`);
+  assert.ok(line.includes('"reason":"unavailable"'), `the log does not say which refusal leaked its slot: ${line}`);
+  assert.equal(rows("help_queries").length, 1, "the fake was supposed to refuse the delete, so the row should still be there");
+});
+
+test("a release that succeeds on the RETRY gives the reservation back and logs nothing", async () => {
+  const { d, db, rows } = deps({
+    tables: seed(), loadGuide: async () => [],
+    dbOpts: { failDelete: { help_queries: 1 } },       // first attempt only
+  });
+  const [res, logged] = await capturingConsoleError(() => ask(d));
+  assert.equal((await res.json()).answer, null);
+  const deletes = db.log.filter((q) => q.table === "help_queries" && q.deleted);
+  assert.equal(deletes.length, 2);
+  assert.equal(rows("help_queries").length, 0, "the retry did not actually release the reservation");
+  assert.ok(!logged.some((l) => l.includes('"where":"release"')), "a recovered release should not be reported as stuck");
 });
