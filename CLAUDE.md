@@ -1333,19 +1333,33 @@ identity's goes straight through. Exact, and immune to both retries and ordering
 the parked state, so a gate that catches nothing fails loudly instead of
 vacuously.
 
-**And the SECOND flake in the same pair was a budget, not a bug.** S22 failed
-with an empty `<main>` and no login card: the cross-tab sign-out had not reached
-tab 1. Measured on webkit over five runs, that signal arrives in **1034, 1634,
-1759, 1826 and 2308 ms** — it is not blocked. It only exceeded 10s under parallel
-load (two workers, 60 tests), never in isolation.
-⚠️ **Raising the assertion to 30s did nothing, and the reason is worth keeping:**
-`playwright.config.js` sets `timeout: 30_000` **per test**, so a 30s wait inside a
-30s test cannot fit — the failure just became *"Test timeout of 30000ms
-exceeded"* with the same message. These two scenarios drive TWO pages (tab 2 must
-load the Keep fully before its sign-out button exists) plus a broadcast, so they
-carry `test.setTimeout(60_000)`. The default budget is sized for one page.
-Verified after both fixes: **24/24, three repeats on all four projects, no
-flakes.**
+**The SECOND flake in the same pair was the CROSS-TAB SCAFFOLDING, and it took
+three attempts to stop patching it.** S22 failed with an empty `<main>` and no
+login card: the sign-out in tab 2 had not reached tab 1. Measured on webkit over
+five runs, that signal arrives in **1034, 1634, 1759, 1826 and 2308 ms** — it is
+not blocked in isolation. The three attempts:
+
+| attempt | what happened |
+|---|---|
+| raise the assertion 10s → 30s | **no effect** — `playwright.config.js` sets `timeout: 30_000` **per test**, so a 30s wait inside a 30s test cannot fit; the failure just became *"Test timeout of 30000ms exceeded"* with the same message |
+| add `test.setTimeout(60_000)` | passed 24/24 in isolation, **flaked again on the full suite** — 30s against a 1-2s median is not jitter |
+| **drop the second tab** | 24/24, three repeats, four projects, and the mutations still fail |
+
+⚠️ **The third is the one to keep, and it is a redesign rather than a bound.**
+Neither scenario is *about* the broadcast — S20 and S21 cover that — so the
+second tab was scaffolding, and it was the only flaky part. S22 now ends the
+session in the same page through the app's own exported `signOut()` (a dynamic
+import of the same module URL the import map keys, so the same module record the
+app is running — not a stub), and S23 switches identity by navigating to
+`#/keep/login`, which `dispatchKeep` answers **above** the session check and so
+renders with nothing to wait for. Both are faster, deterministic, and a more
+direct statement of their own claim: one machine, two people in turn.
+⚠️ **The rewrite silently DELETED S22** — the splice cut from its header through
+to S23's — and the only reason it was caught is that `--repeat-each=3` across
+four projects reported **12 passed instead of 24**. `npx playwright test --list`
+is the check; a green run proves nothing about a test that no longer exists.
+Re-mutation-tested after the rewrite, both still caught: the generation check
+fails S22, the cache-fill guard fails S23.
 
 ### ⚠️ A `.k-h1` VISIBILITY ASSERTION AFTER A NAVIGATION CHECKS NOTHING
 

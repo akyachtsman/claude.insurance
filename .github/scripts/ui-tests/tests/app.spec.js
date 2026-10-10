@@ -3719,63 +3719,53 @@ test('S21: an answer already rendered is cleared when another tab signs out', as
 // already on screen; this is the layer under it, a render that had not happened
 // yet when the session ended, which no epoch check reaches. Found by Codex,
 // round 20.
-// ─────────────────────────────────────────────────────────────────────────────
-test('S22: a Keep load that outlives its session mounts nothing', async ({ context, renderWitness }) => {
+//
+// ⚠️ ONE PAGE, NOT TWO — AND THE SECOND PAGE WAS THE FLAKY PART. This drove the
+// sign-out from a second tab and waited for the BroadcastChannel to re-dispatch
+// tab 1. That wait failed three times on iphone/webkit under parallel load, the
+// last time at 30s against a MEASURED median of 1-2s, which is not jitter. The
+// cross-tab path is not what this scenario is about and is already covered by
+// S20 and S21, so it is gone: the sign-out now runs in the same page through the
+// app's own exported `signOut()`, reached by a dynamic import of the same module
+// URL the import map keys — the same module record the app is running, not a
+// stub. Simpler, deterministic, and a more direct statement of the claim.
+test('S22: a Keep load that outlives its session mounts nothing', async ({ page, renderWitness }) => {
   renderWitness();
-  // ⚠️ A LONGER PER-TEST BUDGET, AND RAISING THE ASSERTION ALONE DID NOTHING.
-  // playwright.config.js sets `timeout: 30_000` per test, so a 30s wait inside a
-  // 30s test cannot fit: the first attempt at this raised the assertion to 30s
-  // and the failure simply became "Test timeout of 30000ms exceeded" with the
-  // same message. This scenario drives TWO pages — tab 2 has to load the Keep
-  // fully before its sign-out button exists — plus a cross-tab broadcast, on
-  // webkit, under parallel load. The default budget is sized for one page.
-  test.setTimeout(60_000);
-  const tab1 = await context.newPage();
   const pageErrors = [];
   const routeErrors = [];
-  tab1.on('pageerror', e => pageErrors.push(e.message));
-  tab1.on('console', (m) => { if (m.type() === 'error' && /route error/.test(m.text())) routeErrors.push(m.text()); });
-  await seedKeepSession(tab1, 'a');
-  const gate = await gateOwner(tab1, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
+  page.on('pageerror', e => pageErrors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && /route error/.test(m.text())) routeErrors.push(m.text()); });
+  await seedKeepSession(page, 'a');
+  const gate = await gateOwner(page, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
 
   // Parked mid-dispatch: the guard has passed (the session is in storage, read
   // with no network call), and the data load is held open.
-  await tab1.goto('./#/keep/list');
-  await expect(tab1.locator('.k-h1'), 'the parked navigation rendered anyway').toHaveCount(0);
-  await expect(tab1.locator('.k-authcard')).toHaveCount(0);
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1'), 'the parked navigation rendered anyway').toHaveCount(0);
+  await expect(page.locator('.k-authcard')).toHaveCount(0);
 
-  // Tab 2 signs the shared account out. Tab 1 is not touched.
-  const tab2 = await context.newPage();
-  await seedKeepSession(tab2, 'a');
-  await tab2.goto('./#/keep/account');
-  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
-  await tab2.getByRole('button', { name: /sign out/i }).first().click();
-  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
-  // ⚠️ 30s, NOT 10s, AND THE NUMBER IS MEASURED. This wait is a BroadcastChannel
-  // message crossing two pages while tab 1 sits parked mid-dispatch with a held
-  // request — more contended than S20/S21, where tab 1 is idle. Measured on
-  // iphone/webkit, five runs: 1034, 1634, 1759, 1826, 2308 ms. It went flaky at
-  // 10s only under parallel load (two workers, 60 tests), never in isolation, so
-  // the bound was losing to scheduler jitter rather than to anything in the app.
-  // 30s still fails if the signal genuinely never arrives, which is the thing
-  // worth asserting; raising it does not weaken that.
-  await expect(tab1.locator('.k-authcard'),
-    'tab 1 did not re-dispatch to the login card on the cross-tab sign-out')
-    .toBeVisible({ timeout: 30_000 });
+  // The session ends WHILE the load is parked, through the app's own API.
+  await page.evaluate(async () => {
+    const m = await import(new URL('js/supabase.js', document.baseURI).href);
+    await m.signOut();
+  });
+  await expect(page.locator('.k-authcard'),
+    'signing out mid-dispatch did not re-dispatch to the login card')
+    .toBeVisible({ timeout: 15_000 });
   // The gate must actually have caught the load, or everything above is vacuous.
   expect(gate.held(), 'the gate never held a request — the parked state was never reached').toBeGreaterThan(0);
 
   // Now let the parked load finish. Its dispatch is superseded; it must mount
   // nothing at all.
   gate.release();
-  await tab1.waitForTimeout(1_500);
+  await page.waitForTimeout(1_500);
   // ⚠️ A NON-RETRYING PAIR, deliberately. `mount()` REPLACES the main region, so
   // the stale render and the login card cannot both be present: counting one is
   // counting the other. Asserted together so the failure message names which.
-  await expect(tab1.locator('.k-authcard'),
+  await expect(page.locator('.k-authcard'),
     "a load that outlived its session mounted the signed-out client's page over the login card")
     .toHaveCount(1);
-  await expect(tab1.locator('.k-h1'),
+  await expect(page.locator('.k-h1'),
     'a Keep page heading rendered under no session').toHaveCount(0);
   // ⚠️ THE ASSERTION THAT ACTUALLY CATCHES THIS, and it took a mutation test to
   // find that out: with the generation check deleted, the two assertions above
@@ -3803,51 +3793,36 @@ test('S22: a Keep load that outlives its session mounts nothing', async ({ conte
 // Asserted twice over: on the app's own `getUser()` accessor (bounded poll, so
 // it is decided in both directions rather than waited out) and on what the next
 // render actually shows.
+//
+// ⚠️ ONE PAGE, NOT TWO — see S22's note. The identity switch no longer waits for
+// a cross-tab broadcast to produce the login card; it navigates to
+// `#/keep/login`, which `dispatchKeep` answers ABOVE the session check and so
+// renders immediately with no signal to wait for. That is also closer to the
+// case the fix is about: one machine, one browser, two people in turn.
 // ─────────────────────────────────────────────────────────────────────────────
-test('S23: a data load that outlived its login never reaches the cache', async ({ context, renderWitness }) => {
+test('S23: a data load that outlived its login never reaches the cache', async ({ page, renderWitness }) => {
   renderWitness();
-  // ⚠️ A LONGER PER-TEST BUDGET, AND RAISING THE ASSERTION ALONE DID NOTHING.
-  // playwright.config.js sets `timeout: 30_000` per test, so a 30s wait inside a
-  // 30s test cannot fit: the first attempt at this raised the assertion to 30s
-  // and the failure simply became "Test timeout of 30000ms exceeded" with the
-  // same message. This scenario drives TWO pages — tab 2 has to load the Keep
-  // fully before its sign-out button exists — plus a cross-tab broadcast, on
-  // webkit, under parallel load. The default budget is sized for one page.
-  test.setTimeout(60_000);
-  const tab1 = await context.newPage();
   const pageErrors = [];
-  tab1.on('pageerror', e => pageErrors.push(e.message));
-  await seedKeepSession(tab1, 'a');
-  const gate = await gateOwner(tab1, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  const gate = await gateOwner(page, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
 
-  await tab1.goto('./#/keep');
-  await expect(tab1.locator('.k-welcome__h')).toHaveCount(0);
+  await page.goto('./#/keep');
+  await expect(page.locator('.k-welcome__h')).toHaveCount(0);
 
-  const tab2 = await context.newPage();
-  await seedKeepSession(tab2, 'a');
-  await tab2.goto('./#/keep/account');
-  await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
-  await tab2.getByRole('button', { name: /sign out/i }).first().click();
-  await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
-  // ⚠️ 30s for the same measured reason as S22. This wait is a BroadcastChannel
-  // message crossing two pages while tab 1 sits parked mid-dispatch with a held
-  // request — more contended than S20/S21, where tab 1 is idle. Measured on
-  // iphone/webkit, five runs: 1034, 1634, 1759, 1826, 2308 ms. It went flaky at
-  // 10s only under parallel load (two workers, 60 tests), never in isolation, so
-  // the bound was losing to scheduler jitter rather than to anything in the app.
-  // 30s still fails if the signal genuinely never arrives, which is the thing
-  // worth asserting; raising it does not weaken that.
-  await expect(tab1.locator('.k-authcard')).toBeVisible({ timeout: 30_000 });
+  // A DIFFERENT client signs in, while the first one's load is still parked.
+  // `#/keep/login` renders without consulting the session, so there is nothing
+  // to wait for; their own load is not gated (the gate holds the first client's
+  // bearer only) so their tree fills the cache normally.
+  await page.goto('./#/keep/login');
+  await expect(page.locator('.k-authcard')).toBeVisible({ timeout: 15_000 });
   expect(gate.held(), 'the gate never held a request — the parked state was never reached').toBeGreaterThan(0);
-
-  // A DIFFERENT client signs in on tab 1. Their own load is not gated — the gate
-  // holds the first request only — so their tree fills the cache normally.
-  await tab1.locator('.k-authcard input[type=text]').fill('other');
-  await tab1.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
-  await tab1.getByRole('button', { name: /log in/i }).click();
+  await page.locator('.k-authcard input[type=text]').fill('other');
+  await page.locator('.k-authcard input[type=password]').fill('keep-demo-2026');
+  await page.getByRole('button', { name: /log in/i }).click();
   // "Welcome back, Other" — the view greets by first name, so this is the whole
   // of the discriminator and `Other` vs `Demo` is what the assertions key on.
-  await expect(tab1.locator('.k-welcome__h')).toContainText(/Welcome back, Other/, { timeout: 15_000 });
+  await expect(page.locator('.k-welcome__h')).toContainText(/Welcome back, Other/, { timeout: 15_000 });
 
   // Release the FIRST client's parked load, which now resolves under the second
   // client's session.
@@ -3858,7 +3833,7 @@ test('S23: a data load that outlived its login never reaches the cache', async (
   // SAME module record the app is running — same `cache`, same accessors. The
   // poll is bounded and returns the email it found, so a pass is "A's tree never
   // arrived" and not "the test gave up first".
-  const landed = await tab1.evaluate(async () => {
+  const landed = await page.evaluate(async () => {
     const m = await import(new URL('js/supabase.js', document.baseURI).href);
     const deadline = Date.now() + 3000;
     for (;;) {
@@ -3873,15 +3848,15 @@ test('S23: a data load that outlived its login never reaches the cache', async (
 
   // The user-visible half. A hash `goto` does not reload the document, so this
   // re-renders from the cache that is actually in memory.
-  await tab1.goto('./#/keep/account');
-  await expect(tab1.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
-  await tab1.goto('./#/keep');
-  await expect(tab1.locator('.k-welcome__h'),
+  await page.goto('./#/keep/account');
+  await expect(page.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
+  await page.goto('./#/keep');
+  await expect(page.locator('.k-welcome__h'),
     "the previous client's name came back out of the cache")
     .toContainText(/Welcome back, Other/, { timeout: 15_000 });
   // Scoped to the heading, not the document: the Keep carries a demo ribbon, so
   // "demo" appears on every page and a body-wide negative would be vacuous.
-  await expect(tab1.locator('.k-welcome__h')).not.toContainText(/Demo/);
+  await expect(page.locator('.k-welcome__h')).not.toContainText(/Demo/);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
