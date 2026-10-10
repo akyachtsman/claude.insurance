@@ -2730,8 +2730,8 @@ function routeHelpAskSequence(page, bodies) {
   return armed.then(() => ({ release: (i) => gates[i].r(), requests: () => n }));
 }
 
-// Hold the FIRST matching request on ONE page until the test releases it, then
-// let it and every later one through to the handler registered before this.
+// Hold every matching request made BY ONE IDENTITY on one page until the test
+// releases it, letting any other identity's through untouched.
 //
 // It parks a cold Keep navigation inside `ensureData()` — the window between the
 // route guard passing and the view mounting, which is where S22 and S23 both
@@ -2739,16 +2739,30 @@ function routeHelpAskSequence(page, bodies) {
 // second tab in the same context still loads normally and can drive a real
 // sign-out while the first tab is parked. `route.fallback()` hands off to the
 // fixture registered by `seedKeepSession`, so the response is the real one.
-async function gateFirst(page, re) {
+//
+// ⚠️ KEYED ON THE BEARER, NOT ON AN ORDINAL — and the ordinal version was FLAKY,
+// caught on iphone/webkit rather than reasoned about. It held "request #1" and
+// let everything after through; when the browser **retried** the held request,
+// the retry arrived as #2, sailed past the gate, and the parked client's data
+// load completed while the test still believed it was held. The artifact showed
+// tab 1 on the fully rendered signed-in home — "Welcome back, Demo", with data —
+// where the login card was expected. Measured first: an instrumented run printed
+// three GETs on the same URL and no OPTIONS, which ruled out the CORS-preflight
+// explanation I had assumed.
+// The bearer's `sub` is exact and immune to both retries and ordering: a retry of
+// the parked client's request carries the same token and stays held, while the
+// other client's goes straight through. `held()` is exposed so a test can assert
+// the gate actually caught something rather than trusting that it did.
+async function gateOwner(page, re, uid) {
   let release = () => {};
-  const held = new Promise((r) => { release = r; });
-  let n = 0;
+  const open = new Promise((r) => { release = r; });
+  let heldCount = 0;
   await page.route(re, async (route) => {
-    n += 1;
-    if (n === 1) await held;
+    const bearer = (route.request().headers()['authorization'] || '').replace(/^Bearer\s+/i, '');
+    if (subOf(bearer) === uid) { heldCount += 1; await open; }
     await route.fallback();
   });
-  return { release, requests: () => n };
+  return { release, held: () => heldCount };
 }
 
 // A payload shaped exactly as handler.ts sends one on the success path:
@@ -3708,13 +3722,21 @@ test('S21: an answer already rendered is cleared when another tab signs out', as
 // ─────────────────────────────────────────────────────────────────────────────
 test('S22: a Keep load that outlives its session mounts nothing', async ({ context, renderWitness }) => {
   renderWitness();
+  // ⚠️ A LONGER PER-TEST BUDGET, AND RAISING THE ASSERTION ALONE DID NOTHING.
+  // playwright.config.js sets `timeout: 30_000` per test, so a 30s wait inside a
+  // 30s test cannot fit: the first attempt at this raised the assertion to 30s
+  // and the failure simply became "Test timeout of 30000ms exceeded" with the
+  // same message. This scenario drives TWO pages — tab 2 has to load the Keep
+  // fully before its sign-out button exists — plus a cross-tab broadcast, on
+  // webkit, under parallel load. The default budget is sized for one page.
+  test.setTimeout(60_000);
   const tab1 = await context.newPage();
   const pageErrors = [];
   const routeErrors = [];
   tab1.on('pageerror', e => pageErrors.push(e.message));
   tab1.on('console', (m) => { if (m.type() === 'error' && /route error/.test(m.text())) routeErrors.push(m.text()); });
   await seedKeepSession(tab1, 'a');
-  const gate = await gateFirst(tab1, /\/rest\/v1\/entities/);
+  const gate = await gateOwner(tab1, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
 
   // Parked mid-dispatch: the guard has passed (the session is in storage, read
   // with no network call), and the data load is held open.
@@ -3729,9 +3751,19 @@ test('S22: a Keep load that outlives its session mounts nothing', async ({ conte
   await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
   await tab2.getByRole('button', { name: /sign out/i }).first().click();
   await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  // ⚠️ 30s, NOT 10s, AND THE NUMBER IS MEASURED. This wait is a BroadcastChannel
+  // message crossing two pages while tab 1 sits parked mid-dispatch with a held
+  // request — more contended than S20/S21, where tab 1 is idle. Measured on
+  // iphone/webkit, five runs: 1034, 1634, 1759, 1826, 2308 ms. It went flaky at
+  // 10s only under parallel load (two workers, 60 tests), never in isolation, so
+  // the bound was losing to scheduler jitter rather than to anything in the app.
+  // 30s still fails if the signal genuinely never arrives, which is the thing
+  // worth asserting; raising it does not weaken that.
   await expect(tab1.locator('.k-authcard'),
     'tab 1 did not re-dispatch to the login card on the cross-tab sign-out')
-    .toBeVisible({ timeout: 10_000 });
+    .toBeVisible({ timeout: 30_000 });
+  // The gate must actually have caught the load, or everything above is vacuous.
+  expect(gate.held(), 'the gate never held a request — the parked state was never reached').toBeGreaterThan(0);
 
   // Now let the parked load finish. Its dispatch is superseded; it must mount
   // nothing at all.
@@ -3774,11 +3806,19 @@ test('S22: a Keep load that outlives its session mounts nothing', async ({ conte
 // ─────────────────────────────────────────────────────────────────────────────
 test('S23: a data load that outlived its login never reaches the cache', async ({ context, renderWitness }) => {
   renderWitness();
+  // ⚠️ A LONGER PER-TEST BUDGET, AND RAISING THE ASSERTION ALONE DID NOTHING.
+  // playwright.config.js sets `timeout: 30_000` per test, so a 30s wait inside a
+  // 30s test cannot fit: the first attempt at this raised the assertion to 30s
+  // and the failure simply became "Test timeout of 30000ms exceeded" with the
+  // same message. This scenario drives TWO pages — tab 2 has to load the Keep
+  // fully before its sign-out button exists — plus a cross-tab broadcast, on
+  // webkit, under parallel load. The default budget is sized for one page.
+  test.setTimeout(60_000);
   const tab1 = await context.newPage();
   const pageErrors = [];
   tab1.on('pageerror', e => pageErrors.push(e.message));
   await seedKeepSession(tab1, 'a');
-  const gate = await gateFirst(tab1, /\/rest\/v1\/entities/);
+  const gate = await gateOwner(tab1, /\/rest\/v1\/entities/, KEEP_USERS.a.uid);
 
   await tab1.goto('./#/keep');
   await expect(tab1.locator('.k-welcome__h')).toHaveCount(0);
@@ -3789,7 +3829,16 @@ test('S23: a data load that outlived its login never reaches the cache', async (
   await expect(tab2.locator('.k-h1')).toHaveText(/account/i, { timeout: 15_000 });
   await tab2.getByRole('button', { name: /sign out/i }).first().click();
   await expect(tab2.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
-  await expect(tab1.locator('.k-authcard')).toBeVisible({ timeout: 10_000 });
+  // ⚠️ 30s for the same measured reason as S22. This wait is a BroadcastChannel
+  // message crossing two pages while tab 1 sits parked mid-dispatch with a held
+  // request — more contended than S20/S21, where tab 1 is idle. Measured on
+  // iphone/webkit, five runs: 1034, 1634, 1759, 1826, 2308 ms. It went flaky at
+  // 10s only under parallel load (two workers, 60 tests), never in isolation, so
+  // the bound was losing to scheduler jitter rather than to anything in the app.
+  // 30s still fails if the signal genuinely never arrives, which is the thing
+  // worth asserting; raising it does not weaken that.
+  await expect(tab1.locator('.k-authcard')).toBeVisible({ timeout: 30_000 });
+  expect(gate.held(), 'the gate never held a request — the parked state was never reached').toBeGreaterThan(0);
 
   // A DIFFERENT client signs in on tab 1. Their own load is not gated — the gate
   // holds the first request only — so their tree fills the cache normally.

@@ -1306,6 +1306,47 @@ because distinguishing a regex literal from division is not something to get
 half-right inside a shared guard. Expect it again on any regex containing
 `word(`.
 
+### ⚠️ A COUNT-BASED REQUEST GATE IS DEFEATED BY A BROWSER RETRY (webkit, measured 2026-10-10)
+
+Found as a *flake* in S23 on the `iphone` project and run down rather than
+re-run, because `test.md` says grade on what actually happened and name the
+assertion.
+
+`gateFirst(page, re)` held "request #1" and let everything after it through.
+**WebKit retries a request that is held open** — measured, `held=2` on every one
+of five runs — so the retry arrived as #2, sailed past the gate, and the parked
+client's data load **completed while the test still believed it was held**. The
+failure artifact showed tab 1 on the fully rendered signed-in home ("Welcome
+back, Demo", 1 Entities, 1 Assets) where the login card was expected: a test
+whose premise had silently stopped holding.
+
+⚠️ **The first explanation was wrong and measuring killed it.** I assumed a CORS
+preflight was consuming the gate's first slot (the REST GET carries
+`Authorization` and `apikey`, so a preflight is required). An instrumented run
+printed **three GETs on the same URL and no OPTIONS at all**. Reasoning about
+what a browser "must" send decided nothing; one `console.log` did.
+
+Now `gateOwner(page, re, uid)`, keyed on the **bearer's `sub`**: a retry of the
+parked client's request carries the same token and stays held, while another
+identity's goes straight through. Exact, and immune to both retries and ordering.
+`held()` is exposed and both scenarios assert it is non-zero before relying on
+the parked state, so a gate that catches nothing fails loudly instead of
+vacuously.
+
+**And the SECOND flake in the same pair was a budget, not a bug.** S22 failed
+with an empty `<main>` and no login card: the cross-tab sign-out had not reached
+tab 1. Measured on webkit over five runs, that signal arrives in **1034, 1634,
+1759, 1826 and 2308 ms** — it is not blocked. It only exceeded 10s under parallel
+load (two workers, 60 tests), never in isolation.
+⚠️ **Raising the assertion to 30s did nothing, and the reason is worth keeping:**
+`playwright.config.js` sets `timeout: 30_000` **per test**, so a 30s wait inside a
+30s test cannot fit — the failure just became *"Test timeout of 30000ms
+exceeded"* with the same message. These two scenarios drive TWO pages (tab 2 must
+load the Keep fully before its sign-out button exists) plus a broadcast, so they
+carry `test.setTimeout(60_000)`. The default budget is sized for one page.
+Verified after both fixes: **24/24, three repeats on all four projects, no
+flakes.**
+
 ### ⚠️ A `.k-h1` VISIBILITY ASSERTION AFTER A NAVIGATION CHECKS NOTHING
 
 Found 2026-10-09 writing S15, and it had been latent in S13 since the day before.
