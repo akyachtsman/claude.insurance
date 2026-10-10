@@ -3946,3 +3946,83 @@ test('S24: a settling ask releases only its own gate, on the shared account', as
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S25 — A HELP RENDER PARKED ON THE CORPUS, WHEN THE SESSION ENDS UNDER IT.
+// `renderKeepHelp` awaits `loadHelpGuide()` and then checks two things before
+// mounting: its own generation, and that the hash still names Help. A SIGN-OUT
+// defeats both. The hash does not change — it is still `#/keep/help` — so the
+// hash check passes; and nothing calls `renderKeepHelp()` again, so the
+// generation has not moved either. The route guard re-dispatches and mounts the
+// login card, then the old corpus fetch resolves and mounts the authenticated
+// Help form, ask box and all, straight over it.
+// ⚠️ `main.js`'s dispatch generation cannot reach this: it checks its own
+// generation before CALLING this function, and the mount happens inside this
+// continuation afterwards. S17 (navigated away) and S18 (a newer render) cover
+// the other two ways this render goes stale; neither covers an ended session.
+// Found by Codex, round 23.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S25: a Help render parked on the corpus does not mount after a sign-out', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  const routeErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && /route error/.test(m.text())) routeErrors.push(m.text()); });
+  await seedKeepSession(page, 'a');
+
+  let release = () => {};
+  const held = new Promise((r) => { release = r; });
+  let corpusRequests = 0;
+  await page.route(/content\/help-guide\.json/, async (route) => {
+    corpusRequests += 1;
+    await held;
+    return route.fallback();
+  });
+
+  // The first Help visit parks on the corpus — the only await in that function.
+  await page.goto('./#/keep/help');
+  await expect.poll(() => corpusRequests, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect(page.locator('.k-help__input'),
+    'Help rendered before the corpus arrived — this scenario cannot test anything')
+    .toHaveCount(0);
+
+  // The session ends while it is parked, through the app's own exported API.
+  // The hash stays `#/keep/help` throughout, which is the whole point.
+  await page.evaluate(async () => {
+    const m = await import(new URL('js/supabase.js', document.baseURI).href);
+    await m.signOut();
+  });
+  await expect(page.locator('.k-authcard'),
+    'signing out did not re-dispatch to the login card').toBeVisible({ timeout: 15_000 });
+  expect(page.url(), 'the hash moved, so this is no longer the case under test').toContain('#/keep/help');
+
+  // Release the parked corpus. The stale render must mount nothing.
+  release();
+  await page.waitForTimeout(1_500);
+  await expect(page.locator('.k-authcard'),
+    'the parked Help render mounted over the login card after the session ended')
+    .toHaveCount(1);
+  await expect(page.locator('.k-help__input'),
+    'an authenticated ask box rendered under no session').toHaveCount(0);
+  await expect(page.locator('.k-help__ai'),
+    'the Help page mounted after the session ended').toHaveCount(0);
+  // ⚠️ THE ASSERTION THAT ACTUALLY CATCHES THIS, and only a mutation test found
+  // that out: with the epoch check deleted, every DOM assertion above STILL
+  // PASSED. Instrumented to see why — the stale continuation resumes with a
+  // valid 15-topic guide, passes both the generation and the hash check, and
+  // REACHES `mount()`. What stops it is that building the signed-in Help page
+  // then throws (its data cache was cleared by the sign-out), and the parked
+  // promise is still inside `route()`'s try, whose catch is generation-guarded
+  // by the round-20 fix — so the throw is swallowed and the login card survives.
+  // That is an accident, not a defence: it holds only while that construction
+  // happens to throw. The epoch check is what makes it deliberate, and a clean
+  // run never enters the continuation at all, so there is nothing to log.
+  expect(routeErrors,
+    `the stale Help render ran and threw rather than being refused: ${routeErrors.join('; ')}`)
+    .toHaveLength(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+
+

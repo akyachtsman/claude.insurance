@@ -570,9 +570,22 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // to prevent. Same review.
     try {
       const settled = new Date(Date.now() - GRACE_MS).toISOString();
+      // ⚠️ OUR OWN RESERVATION IS EXCLUDED BY ID, NOT BY AGE, and leaving it to
+      // the grace was a real error. The grace exists for rows that MIGHT be
+      // peers about to release; this row is one we KNOW will be released, two
+      // lines further down, by `releaseAnd`. If the insert and the count are
+      // more than GRACE_MS apart — a slow count, a cold function, a retried
+      // query — our own row ages past the grace and is counted as settled, so
+      // with 20 retained hourly rows the offset comes out 1 and the answer is
+      // the SECOND-oldest row's expiry when only the oldest has to go. Found by
+      // Codex, round 23, against the redesign that was supposed to have removed
+      // this class.
+      // Exact where it can be exact: the id is known, so no approximation is
+      // needed for it. The grace still covers OTHER requests' reservations,
+      // which is the residual the billing-line marker would close.
       const { count: survivors, error: survErr } = await scoped(
         admin.from("help_queries").select("id", { count: "exact", head: true }),
-      ).gte("asked_at", windowStart).lt("asked_at", settled);
+      ).neq("id", slot.id).gte("asked_at", windowStart).lt("asked_at", settled);
       if (survErr) return fail("survivors", survErr);
       // An ask fits when the retained count is at most cap-1, so `survivors - cap`
       // is the 0-based index of the last row that has to expire.
@@ -591,9 +604,11 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
       // `retryAfter`, and the caller sends the WINDOW instead, which is true
       // whichever reading holds. See the note on the callers.
       if (offset < 0) return { seconds: null, failed: false };
+      // Excluded here too, or the index can land ON our own row and report the
+      // expiry of a reservation that is about to be deleted.
       const { data: oldest, error: oldErr } = await scoped(
         admin.from("help_queries").select("asked_at"),
-      ).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
+      ).neq("id", slot.id).gte("asked_at", windowStart).order("asked_at", { ascending: true }).range(offset, offset);
       // ⚠️ THIS ERROR WAS DESTRUCTURED AWAY. `{ data: oldest }` alone turned a
       // failed select into `at = NaN` → `secs = NaN` → a silent `null`, which is
       // the understatement above with no trace of a cause.

@@ -45,6 +45,7 @@ function fakeDb(tables = {}, opts = {}) {
               : op === "in" ? val.includes(r[col])
               : op === "gte" ? String(r[col]) >= String(val)
               : op === "lt" ? String(r[col]) < String(val)
+              : op === "neq" ? r[col] !== val
               // ⚠️ THROW, do not pass. This used to be `: true`, so a filter the
               // fake did not implement was SILENTLY IGNORED — and a test written
               // for a fix that depends on that filter would pass against code
@@ -68,6 +69,7 @@ function fakeDb(tables = {}, opts = {}) {
         in(c, v) { q.filters.push(["in", c, v]); return chain; },
         gte(c, v) { q.filters.push(["gte", c, v]); return chain; },
         lt(c, v) { q.filters.push(["lt", c, v]); return chain; },
+        neq(c, v) { q.filters.push(["neq", c, v]); return chain; },
         order(c) { q._order = c; return chain; },
         range(a, b) { q._range = [a, b]; return chain; },
         insert(row) {
@@ -915,4 +917,55 @@ test("a release that succeeds on the RETRY gives the reservation back and logs n
   assert.equal(deletes.length, 2);
   assert.equal(rows("help_queries").length, 0, "the retry did not actually release the reservation");
   assert.ok(!logged.some((l) => l.includes('"where":"release"')), "a recovered release should not be reported as stuck");
+});
+
+test("the caller's OWN reservation is excluded by id, not left to the grace window", async () => {
+  // Codex, round 23: the grace is for rows that MIGHT be peers about to release.
+  // Our own row is one we KNOW will be released, by `releaseAnd`, moments later —
+  // so if the insert and the count are more than GRACE_MS apart (a slow count, a
+  // cold function, a retried query) it ages past the grace, counts as settled,
+  // and the offset comes out one too high: the answer becomes the SECOND-oldest
+  // row's expiry when only the oldest has to go.
+  //
+  // `dbOpts.now` backdates what the fake stamps on the inserted row, which is
+  // the only way to reach this: 6 seconds is past the 5s grace.
+  // The twenty retained rows are STAGGERED a minute apart so the oldest and the
+  // second-oldest give different answers — seeded at one timestamp they would be
+  // indistinguishable and this test would pass either way.
+  const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+  const rows = Array.from({ length: 20 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: minsAgo(50 - i) }));
+  const { d } = deps({
+    tables: seed({ help_queries: rows }),
+    dbOpts: { now: new Date(Date.now() - 6_000).toISOString() },
+  });
+  const body = await (await ask(d)).json();
+  assert.equal(body.reason, "rate_limited");
+  assert.equal(body.scope, "client");
+  // The oldest retained row is 50 minutes old, so it leaves the window in ~600s.
+  // Counting our own aged reservation would point at the 49-minute row instead,
+  // i.e. ~660s — the off-by-one this asserts against.
+  assert.ok(body.retryAfter > 580 && body.retryAfter < 625,
+    `expected ~600s (the OLDEST retained row). Got ${body.retryAfter}; ~660 means the caller's own ` +
+    `reservation was counted as settled and the offset came out one too high`);
+});
+
+test("the own-slot exclusion applies to the OLDEST-row read too", async () => {
+  // The second `.neq("id", slot.id)` only changes the answer when our own
+  // reservation is the OLDEST row in the window — otherwise it sorts after the
+  // retained rows and the index never reaches it. Mutation-tested: without this
+  // case, deleting that exclusion passed.
+  // Reaching it needs a reservation that sat for most of the window before the
+  // count ran, which is extreme; the guard is kept because it is exact and free,
+  // and this is the case that makes it load-bearing rather than decorative.
+  const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+  const rows = Array.from({ length: 20 }, (_, i) => ({ id: `h${i}`, owner: OWNER, asked_at: minsAgo(50 - i) }));
+  const { d } = deps({
+    tables: seed({ help_queries: rows }),
+    dbOpts: { now: minsAgo(56) },          // our own row, older than every retained one
+  });
+  const body = await (await ask(d)).json();
+  assert.equal(body.reason, "rate_limited");
+  assert.ok(body.retryAfter > 580 && body.retryAfter < 625,
+    `expected ~600s (the oldest RETAINED row, 50 min old). Got ${body.retryAfter}; ~240 means the index ` +
+    `landed on the caller's own reservation, which is about to be deleted`);
 });

@@ -139,6 +139,9 @@ const onHelp = () =>
 
 export async function renderKeepHelp() {
   const gen = ++helpRenderGen;
+  // The LOGIN this render belongs to. See the third check below — neither the
+  // generation nor the hash can see a sign-out.
+  const epoch = authEpoch();
   const guide = await loadHelpGuide();
 
   // ⚠️ TWO WAYS THIS RENDER IS ALREADY OBSOLETE, and both end with `mount()`
@@ -153,9 +156,19 @@ export async function renderKeepHelp() {
   //     hash can tell.
   //   · A newer Help render started (away and straight back) and may already
   //     have mounted. The hash still says Help, so only the generation can tell.
-  // Both checks, because neither covers the other.
+  //   · THE SESSION ENDED. A sign-out re-dispatches the route (`main.js`), and
+  //     the hash is UNCHANGED — still `#/keep/help` — so the guard renders the
+  //     login card over this page and neither check above can tell: nothing
+  //     called this function again, so the generation has not moved, and the
+  //     hash still says Help. The old corpus fetch then resolved and mounted the
+  //     authenticated Help form, with its ask box, straight over the login card.
+  //     `main.js`'s dispatch generation cannot reach this either — it checks its
+  //     own generation before CALLING this function, and the mount happens inside
+  //     this continuation, afterwards. Found by Codex, round 23.
+  // Three checks, because no one of them covers the other two.
   if (gen !== helpRenderGen) return;
   if (!onHelp()) return;
+  if (authEpoch() !== epoch) return;
 
   const input = el("input", {
     class: "k-help__input",

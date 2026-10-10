@@ -1107,6 +1107,46 @@ event. A deliberate refresh-on-refocus would be a new feature with its own
 decision to make (what it costs on a metered connection, what it does to an
 answer mid-render), not a side effect of an auth listener.
 
+### ⚠️ A STALE RENDER CAN BE STOPPED BY AN ACCIDENT RATHER THAN A GUARD (round 23)
+
+`renderKeepHelp` awaits the corpus and then checks two things before mounting:
+its own generation, and that the hash still names Help. **A SIGN-OUT defeats
+both.** The hash does not change — it is still `#/keep/help` — and nothing calls
+the function again, so the generation has not moved either. The route guard
+re-dispatches and mounts the login card, and then the old corpus fetch resolves
+and mounts the authenticated Help form, ask box and all, over the top.
+`main.js`'s dispatch generation cannot reach it: that is checked before CALLING
+this function, and the mount happens inside the continuation afterwards. Found by
+Codex, round 23. Fixed with a third check, `authEpoch() !== epoch`.
+
+⚠️ **AND THE DOM SAID IT WAS ALREADY FINE, WHICH IS THE PART WORTH KEEPING.**
+With the new check deleted, every DOM assertion in S25 still passed. Instrumented
+rather than assumed, in three steps:
+
+| probe | result |
+|---|---|
+| does the continuation resume? | **yes** — `gen=1 cur=1 onHelp=true epoch=0→2` |
+| with what guide? | **15 topics** — a valid corpus (the first probe printed `guide.length`, which is `undefined` for `{topics:[…]}`; that was a probe artefact, not evidence) |
+| does it reach `mount()`? | **yes** |
+
+So the stale render *does* mount. What saves the page is that building the
+signed-in Help view then **throws** — its data cache was cleared by the sign-out
+— and the parked promise is still inside `route()`'s `try`, whose `catch` is
+generation-guarded by the round-20 fix, so the throw is swallowed and the login
+card survives by being last.
+
+**That is an accident, not a defence.** It holds only while that construction
+happens to throw, which no test asserts and no comment promises. The epoch check
+makes the refusal deliberate; S25 asserts the absence of a `route error:` log,
+because a clean run never enters the continuation and so has nothing to log —
+the same signal S22 needed for the same reason.
+
+⚠️ **The lesson generalises past this fix: a green DOM assertion does not
+establish that the guard you just wrote is the thing holding the line.** Mutate
+it. Three of this PR's scenarios (S22, S25, and the hourly owner-scoping unit
+test) passed against the code they were written to catch, and all three were only
+found by deleting the fix and re-running.
+
 ### ⚠️ `setBusy` after an ask has been WRONG TWICE, in opposite directions
 
 Worth its own entry because the two fixes pull against each other and a third
@@ -1602,6 +1642,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S22 | The Keep — a dispatch that outlives its session (offline harness, **runs locally**) | A cold `#/keep/list` navigation parked inside `ensureData()` (the first `/rest/v1/entities` request held open); tab 2 then signs the shared account out. Tab 1 must re-dispatch to the login card, and when the parked load is released the superseded dispatch must **not run at all** — asserted on the absence of a `route error:` console log, because the layered cache fix (S23) masks the DOM assertions. | A Keep page mounts under no session, or a superseded dispatch runs and throws |
 | S23 | The Keep — a data load that outlived its login (offline harness, **runs locally**) | Same park, then a **different** client signs in on tab 1 and their tree fills the cache; the first client's load is then released. Its tree must never reach `cache`: asserted on the app's own `getUser()` through a dynamic import of the same module URL (bounded poll, decided in both directions) **and** on what the next render shows ("Welcome back, Other", never "Demo"). | The previous client's entities, assets and policies are served to the next person to sign in |
 | S24 | Help desk — a settling ask releases only ITS OWN gate, shared account (offline harness, **runs locally**) | A asks (held); A signs out; the next person signs in on the **same prefilled credential** and asks their own question, which must reach the endpoint; A's older response is released FIRST. Their controls must stay **disabled** while their own call runs, and re-enabling them in the page and calling `form.requestSubmit()` must not raise the endpoint's request count — then their own answer lands and the desk unlocks. ⚠️ Distinct from S16, which is this shape with a DIFFERENT client and so passes against an owner-keyed gate: only the shared credential makes two people one owner id. | A departed person's settling ask re-enables the next person's form mid-call, letting a second paid provider call through |
+| S25 | Help desk — a render parked on the CORPUS when the session ends (offline harness, **runs locally**) | Hold `content/help-guide.json`, start the first Help visit, then sign out **in the same page** through the app's own exported `signOut()` — the hash never changes, so neither the render generation nor the hash check can see it. Release: the login card must survive, no `.k-help__input` or `.k-help__ai` may mount, and **no `route error:` may be logged** — that last one is the only assertion that fails when the epoch check is deleted, because the DOM is otherwise saved by an accident (the stale build throws into `route()`'s generation-guarded catch). | An authenticated Help form mounts over the login card, or the stale render runs and throws instead of being refused |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
