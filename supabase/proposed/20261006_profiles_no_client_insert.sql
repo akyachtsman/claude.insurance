@@ -1,0 +1,149 @@
+-- 20261006_profiles_no_client_insert.sql
+--
+-- Take INSERT on public.profiles away from `authenticated`, and drop the
+-- "profiles insert own" policy that goes with it.
+--
+-- ⚠️ PARTIALLY SUPERSEDED, 2026-10-09 — READ THIS BEFORE ACTING ON THE FILE.
+--
+-- THE SECURITY EFFECT OF THIS FILE IS LIVE. `revoke insert on public.profiles
+-- from authenticated` was applied as step 2 of
+-- `supabase/migrations/20261005120100_profiles_role_not_self_assignable.sql`,
+-- which carries the identical statement. Measured afterwards as a real client
+-- session (password grant, then PostgREST with that bearer):
+--
+--   insert into public.profiles (id) values (<own uid>)
+--     -> HTTP 403, SQLSTATE 42501 "permission denied for table profiles"
+--
+-- So `help-ask`'s invite check is a real gate now, not a decorative one, and
+-- feature 003's owner-gate step 2 is satisfied. Nothing is waiting on this file
+-- for that.
+--
+-- WHAT IS STILL OUTSTANDING is the second statement only — `drop policy if
+-- exists "profiles insert own"` — and it is now BOTH redundant and unrunnable
+-- from here:
+--   * Redundant, because 20261005120100 narrowed that policy to
+--     `with check (id = auth.uid() and role = 'client')`. It is strictly tighter
+--     than the policy this file wanted to delete, and dormant regardless:
+--     Postgres checks privileges before policies, and INSERT is revoked.
+--   * Unrunnable, because the Supabase MCP hangs for 60s on any statement
+--     containing a DROP and applies nothing — CREATE and ALTER return instantly,
+--     and Postgres is not the bottleneck (`set local lock_timeout` never fires,
+--     nothing waits on a lock). That is why 20261005120100 used ALTER POLICY
+--     where it was written as DROP + CREATE.
+--
+-- So this file remains here as a ONE-STATEMENT TIDY-UP for whoever next has the
+-- Dashboard SQL editor open, not as a security gate:
+--     drop policy "profiles insert own" on public.profiles;
+-- Running it changes no privilege and no access decision. NOT running it leaves
+-- a policy in `pg_policies` that looks live and is not — which is the only cost,
+-- and the reason this is written down rather than dropped from the README.
+--
+-- ⚠️ THE ORDERING WARNING FURTHER DOWN THIS FILE IS NOW MOOT and is kept only so
+-- a reader meeting it is not misled: 20261005120100 no longer contains a DROP or
+-- a CREATE of this policy, so there is no order in which applying it re-creates
+-- anything.
+--
+-- (Original header: NOT APPLIED. CLAUDE.md requires explicit owner approval for
+-- migrations.)
+--
+-- ─── WHY ──────────────────────────────────────────────────────────────────────
+--
+-- `help-ask` refuses a caller with no `profiles` row, so that the Help desk's
+-- per-client spend cap is a per-INVITED-client cap rather than a per-account one
+-- (public sign-up is ON — `disable_signup: false`, measured 2026-10-06 — so
+-- accounts are freely creatable and the cap alone bounds nothing).
+--
+-- ⚠️ THAT CHECK DOES NOT HOLD UNTIL THIS MIGRATION IS APPLIED, and the first
+-- version of it shipped claiming otherwise. Measured against the live project:
+--
+--     grantee        privilege
+--     authenticated  INSERT          ← on public.profiles
+--
+--     policy "profiles insert own"  INSERT  to authenticated
+--       with check (id = auth.uid())
+--
+-- So one PostgREST call — `supabase.from("profiles").insert({ id: uid })` —
+-- creates the very row the check looks for. Gating on a row the client can write
+-- is not a gate. Found by an automated security review of the commit that added
+-- the check, which is the only reason it did not ship as a closed hole.
+--
+-- ─── WHY REVOKING IS SAFE, verified rather than assumed ───────────────────────
+--
+--   1. NOTHING IN THE APP INSERTS A PROFILE. The only `profiles` writes in `js/`
+--      are a SELECT in `loadTree()` and `savePrefs()`, which UPDATEs exactly
+--      `reminder_email` and `reminder_schedule` (js/supabase.js). Grep for
+--      `from("profiles")` returns those two and nothing else.
+--   2. NO TRIGGER CREATES ONE EITHER. `pg_trigger` has no non-internal trigger on
+--      `auth.users` or on `public.profiles` — this project has no
+--      `handle_new_user` function, so a row appears only from an explicit insert.
+--      That matters: with such a trigger, revoking the client grant would close
+--      nothing, because the row would be created for them with definer rights.
+--   3. Rows are therefore service-role provisioned already — which is what
+--      "invite-only" means here, and what the check is reading.
+--
+-- After this, a self-signed-up account can authenticate but can never obtain a
+-- profiles row, so `help-ask` refuses it before reserving a slot or spending
+-- anything. Turning public sign-up off in the dashboard remains worth doing — it
+-- is what makes the Security page's "Invite-only access" card true — but this
+-- holds the spend boundary even if sign-up is ever turned back on.
+--
+-- RELATED, and deliberately NOT merged into this file:
+-- `20261005_profiles_role_not_self_assignable.sql` revokes column-level UPDATE on
+-- `role`. Different hole (privilege escalation, not account creation), different
+-- approval, and either can be applied without the other.
+
+-- ⚠️ APPLY THIS AFTER `20261005_profiles_role_not_self_assignable.sql`, not
+-- before. That file re-creates "profiles insert own", so in the other order the
+-- policy comes back. It is dormant (the revoke below means privileges stop an
+-- insert before any policy is consulted), but the end state recorded in this file
+-- would then be wrong, which is the kind of drift this directory exists to
+-- prevent. Found by review round 5.
+revoke insert on public.profiles from authenticated;
+drop policy if exists "profiles insert own" on public.profiles;
+
+-- INVERSE (reversible-by-design, per data.md):
+--   grant insert on public.profiles to authenticated;
+--   create policy "profiles insert own" on public.profiles
+--     for insert to authenticated with check (id = auth.uid());
+-- Non-destructive: no row is read, written or dropped, so re-granting restores
+-- the previous state exactly. The only thing lost is the ability of a client to
+-- create their own profile, which nothing in the app does.
+
+-- ─── POST-APPLY PROBE (run as a CLIENT session — service-role bypasses RLS (it does NOT bypass privileges, and holds none
+--   on the client tables here) and would report a false pass on every step) ───────────────
+--
+--   1. Client inserts its own profile — expect FAILURE, SQLSTATE 42501:
+--        insert into public.profiles (id) values (auth.uid());
+--      Via PostgREST: supabase.from("profiles").insert({ id: "<own uuid>" })
+--      A SUCCESS here means the grant came back and help-ask's invite check is
+--      decorative again.
+--
+--   2. Client still reads its own profile — expect SUCCESS, exactly one row:
+--        select id, role from public.profiles;
+--      This must keep working: loadTree() reads it on every sign-in, so a
+--      probe that only checked step 1 could pass while the Keep failed to load.
+--
+--   3. Client still saves its reminder preferences — expect SUCCESS:
+--        update public.profiles set reminder_email = true where id = auth.uid();
+--      The Account screen's only write. Asserted because revoking one verb on a
+--      table is exactly the change that silently takes another with it.
+--
+--   4. ⚠️ DO NOT expect a service-role INSERT to work — it never did.
+--      An earlier version of this step said "Service-role can still provision —
+--      expect SUCCESS", which would have failed on a correctly applied migration
+--      and sent the next person hunting a fault that was not there. Measured
+--      2026-10-06:
+--        has_table_privilege('service_role','public.profiles','INSERT') -> false
+--      service_role holds only REFERENCES/TRIGGER/TRUNCATE on this table. The
+--      broker provisions a profile as `postgres` — the dashboard SQL editor or a
+--      migration — never through the service key. Verify THAT path:
+--        insert into public.profiles (id) values ('<a real auth.users id>');
+--      run in the SQL editor; expect SUCCESS.
+--
+--      ⚠️ AND NOTE WHAT THIS MEANS FOR help-ask. Nothing creates a profiles row
+--      automatically: no trigger, no client insert once this is applied, and no
+--      service-role insert ever. An invited client without one gets a working
+--      Keep (js/supabase.js tolerates its absence — the name falls back to the
+--      email and the role to "client") and a Help desk that refuses every
+--      question. Provisioning the row is a manual broker step and belongs in the
+--      invite runbook, or the desk looks broken for exactly the people it is for.

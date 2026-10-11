@@ -11,7 +11,7 @@ import { ASSET_META } from "../logic/asset-meta.js";
 import { analyzeAsset } from "../logic/analysis.js";
 import { depreciationFor, depreciationMilestones } from "../logic/depreciation.js";
 import { fetchRules, findAsset, addAsset, ensureData, getAllAssets, getEntities } from "../../supabase.js";
-import { BROKER_NAME, sep, page, backLink, originHref, money, cic, assetTypeLabel, assetTypeIcon, coveragePill, policiesSection, sortableTable, statTile } from "./shell.js";
+import { BROKER_NAME, sep, page, backLink, originBackRow, originHref, money, cic, assetTypeLabel, assetTypeIcon, coveragePill, policiesSection, sortableTable, statTile } from "./shell.js";
 
 // Assets — every asset across all entities in one table, sorted by clicking the
 // column headers (defaults to Entity). Assets whose entity didn't load (true
@@ -51,6 +51,9 @@ export function renderKeepAssets() {
   const insuredEntities = new Set(rows.filter((r) => r.entity).map((r) => r.entity.id)).size;
 
   const view = page("assets", [
+    // Credited by the `assets` and `asset` topics. Its siblings `#/keep/list` and
+    // `#/keep/grid` already carry this; it was the odd one out.
+    originBackRow(),
     el("div", { class: "k-reqhead" }, [
       el("div", {}, [
         el("h1", { class: "k-h1", text: "Assets" }),

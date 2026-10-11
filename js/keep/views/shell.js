@@ -393,6 +393,7 @@ function accountMenu() {
     el("a", { attrs: { href: "#/keep/account" } }, [icon("user", { size: 18 }), el("span", { text: "Account settings" })]),
     el("a", { attrs: { href: "#/keep/security" } }, [icon("shield", { size: 18 }), el("span", { text: "Security & privacy" })]),
     el("a", { attrs: { href: "#/keep/documents" } }, [icon("doc", { size: 18 }), el("span", { text: "Documents" })]),
+    el("a", { attrs: { href: "#/keep/help" } }, [icon("spark", { size: 18 }), el("span", { text: "Help" })]),
     el("div", { class: "k-menu__sep" }),
     signOutButton("k-menu__item k-menu__danger"),
   ]);
@@ -439,18 +440,125 @@ const KEEP_LABELS = {
   "#/keep/list": "entities",
   "#/keep/grid": "entities",
   "#/keep/insurance": "policies",
+  // Absent until 2026-10-08, so a back control pointing AT the assets table read
+  // a bare "Back" instead of naming it. The two add-* forms are deliberately
+  // still absent: pointing a user back INTO a half-filled form is not a
+  // destination worth naming, and `backLink` already gives those their own
+  // parent fallback.
+  "#/keep/assets": "assets",
   "#/keep/entities": "relationships",
   "#/keep/documents": "documents",
   "#/keep/requests": "my requests",
+  "#/keep/help": "help",
   "#/keep/account": "account",
   "#/keep/security": "security",
 };
 
-// The route to return to: where the user actually came from (when it's a Keep
-// route), else the hierarchical fallback the caller passes (deep-links/reloads).
-function originHref(fallbackHref) {
+// ⚠️ ROUTES THAT ARE NEVER A BACK DESTINATION, however the user reached them.
+// Two kinds, and each is here because it was MEASURED doing harm, not reasoned
+// about:
+//
+//   `login` — `renderKeepLogin`'s success path is `go("#/keep")`, and
+//   `nav.track` runs on every route including login, so the nav stack records
+//   `#/keep/login` as the origin of the landing page of EVERY signed-in session.
+//   It starts with `#/keep`, so the prefix test in `originRoute` admitted it:
+//   the first screen after every sign-in offered a bare "Back" to the login
+//   card, and `dispatchKeep` renders that card for `sub === "login"` with no
+//   session check, so following it showed a signed-in client the login form.
+//
+//   `add-asset` / `add-entity` / `request` — SINGLE-USE FORMS the app navigates
+//   away from on success (`assets.js` → `#/keep/asset/:id`, `keep.js` →
+//   `#/keep/entity/:id`, `policies-view.js` → `#/keep/requests`). Offering the
+//   submitted form as the place you came from invites a second submission: on the
+//   request form that is a DUPLICATE enhancement request. `KEEP_LABELS` already
+//   declines to name these routes, so before this they were both unnamed and
+//   offered — a bare "Back" to a blank form.
+//   ⚠️ `request` IS LISTED BARE, not only as `request/<id>`, and the first
+//   version of this got that wrong. `#/keep/request` with no id is the GENERAL
+//   enhancement form — reached from the "New request" button on My requests
+//   (`policies-view.js`) and from global search (`logic/search.js`), both of
+//   which link the bare route — and it submits to `#/keep/requests`, whose
+//   `backLink("#/keep", "home")` then pointed straight back at the form it had
+//   just submitted. So the one route the exclusion was added for was the one it
+//   missed. Caught by Codex on the PR.
+//
+// Both found by independent review of this branch (rounds 7 and 8, 2026-10-09),
+// each by driving a real sign-in / a real submit rather than reading the code:
+// the deep-link and credited-destination checks that came first could not reach
+// either stack. The pattern is anchored and allows a trailing `/` or a query
+// string, because `#/keep/login/` and `#/keep/login?x=1` both route to the login
+// card and an exact-string exclusion missed both.
+//
+// ⚠️ THIS IS AN ALLOW-LIST, AND IT USED TO BE A DENY-LIST. The direction is the
+// whole point, and it changed because the deny-list failed TWICE on this one
+// branch — `#/keep/login` (Codex round 1) and the bare `#/keep/request` (Codex
+// round 2), each a real defect, each "a route nobody remembered to exclude".
+// `global.md` → *Review Rounds Have to Terminate* says that when the same
+// mechanism fails again across rounds the mechanism is in the wrong place:
+// redesign rather than patch it a third time. A deny-list is incomplete by
+// construction — every route added later is a candidate omission and NOTHING
+// fails when one is missed.
+//
+// Inverted, the failure mode of forgetting a route is a MISSING back control,
+// which is cosmetic, instead of one pointing at a login card or a submitted
+// form, which is not. And `.github/scripts/check-keep-back-routes.js` makes
+// forgetting one fail the build: it asserts this table's keys are exactly the
+// `case` labels in `dispatchKeep`, so a new Keep route cannot ship without a
+// decision recorded here.
+//
+// `""` is `#/keep` itself (the router's `case undefined`).
+const BACK_ELIGIBLE = {
+  "": true,              // home — a credited Help topic, so it needs a way back
+  login: false,          // ⚠️ auth. Every sign-in lands with this as its origin.
+  insurance: true,
+  list: true,
+  grid: true,
+  entities: true,
+  entity: true,
+  assets: true,
+  asset: true,
+  policy: true,
+  request: false,        // ⚠️ single-use form; returning duplicates a request
+  requests: true,        // the LIST is an ordinary page — not the form
+  "add-asset": false,    // ⚠️ single-use form
+  "add-entity": false,   // ⚠️ single-use form
+  documents: true,
+  account: true,
+  security: true,
+  help: true,
+};
+
+// The Keep sub-route of a hash: "#/keep/entity/22?x=1" -> "entity", "#/keep" ->
+// "". Mirrors how `js/main.js` routes — strip the query, split on "/", drop
+// empties — so the two cannot disagree about what route a hash names, which is
+// what the trailing-slash and query-string variants (`#/keep/login/`,
+// `#/keep/login?x=1`) both exploited.
+function keepSubRoute(hash) {
+  const parts = hash.replace(/^#/, "").split("?")[0].split("/").filter(Boolean);
+  return parts[0] === "keep" ? (parts[1] || "") : null;
+}
+
+// The in-app Keep route the user actually came from, or null when there is none
+// to offer. ONE predicate, shared by every back control — `originHref` below
+// (nine `backLink` call sites plus `kProgress`'s cancel) and `originBackRow`
+// further down — so the exclusions above are decided in one place rather than
+// per call site, and a new back control inherits them by construction.
+function originRoute() {
   const prev = previousRoute();
-  return (prev && prev.startsWith("#/keep") && prev !== location.hash) ? prev : fallbackHref;
+  if (!prev || prev === location.hash) return null;
+  const sub = keepSubRoute(prev);
+  // `null` is a non-Keep route (the public site); an unlisted one is a Keep route
+  // nobody has classified. Neither is offered — the guard script turns the second
+  // into a build failure rather than leaving it to be noticed in review.
+  if (sub === null || BACK_ELIGIBLE[sub] !== true) return null;
+  return prev;
+}
+
+// The route to return to: where the user actually came from (when it's an
+// offerable Keep route), else the hierarchical fallback the caller passes
+// (deep-links/reloads).
+function originHref(fallbackHref) {
+  return originRoute() || fallbackHref;
 }
 
 // Origin-aware back affordance (CLAUDE.md coding standard).
@@ -479,11 +587,20 @@ function routeLabel(hash) {
   return null;
 }
 // Back row shown only when you arrived from another in-app Keep page (e.g. an
-// entity detail via its Relationships / All entities control) — so a top-level
-// nav visit to a list/map page doesn't get a spurious back control.
+// entity detail via its Relationships / All entities control, or a Help-desk
+// credit) — so a deep link or a fresh load doesn't get a spurious back control.
+//
+// ⚠️ "Another in-app Keep page" includes a LATERAL app-bar tab switch, not only
+// a drill-down: click Policies while on Entities and Policies renders "Back to
+// entities". That is pre-existing behaviour — `#/keep/list` and `#/keep/grid`
+// have always worked this way — and it is deliberate, since the coding standard
+// is that a back control points where the user came from, not at a fixed
+// parent. It is written down here because the change that extended this helper
+// to home / assets / insurance described it as invisible "unless you actually
+// arrived from somewhere", which reads narrower than it is.
 function originBackRow() {
-  const prev = previousRoute();
-  if (!prev || !prev.startsWith("#/keep") || prev === location.hash) return null;
+  const prev = originRoute();
+  if (!prev) return null;
   const label = routeLabel(prev);
   return el("div", { class: "k-backrow" }, [
     el("a", { class: "k-back", attrs: { href: prev } }, [

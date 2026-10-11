@@ -98,6 +98,21 @@ jobs:
         # Deliberately conservative: it under-reports rather than cry wolf.
         run: node .github/scripts/check-undefined-calls.js
 
+      - name: Keep back-destination routes are all classified
+        # `originRoute()` decides where a back control may point. It held a
+        # DENY-list of routes that must not be offered, and that list was found
+        # incomplete TWICE on one PR — `#/keep/login` (so every sign-in offered a
+        # "Back" to the login card) and the bare `#/keep/request` (so My requests
+        # pointed at the form it had just submitted, inviting a duplicate
+        # request). A deny-list is incomplete by construction: a route added
+        # later is a candidate omission and nothing fails when one is missed.
+        # The table is now an allow-list, and this asserts its keys are EXACTLY
+        # dispatchKeep's cases — so a new Keep route cannot ship unclassified,
+        # and a stale entry cannot outlive its route. Set equality, not
+        # containment, and it exits non-zero rather than certify a comparison it
+        # could not make. Mutation-tested on all four cases.
+        run: node .github/scripts/check-keep-back-routes.js
+
       - name: Tracked Python compiles without warnings
         # A `\` in a plain (non-raw) docstring is invisible on 3.11, a
         # SyntaxWarning on 3.12, and a SyntaxError on 3.15 — at which point the
@@ -157,7 +172,13 @@ jobs:
       # Explicit file list keeps discovery off the Playwright specs and off
       # node_modules under .github/scripts.
       - name: Unit tests
-        run: node --test $(find js -name '*.test.mjs')
+        # `js` AND `supabase/functions`: the Help desk's prompt builder is a Deno
+        # module, Deno is installed in neither this runner nor the agent sandbox,
+        # and that module is where feature 003's fact/advice boundary is written.
+        # A safety boundary whose only test nobody can execute is not tested.
+        # Node 22 strips TypeScript types natively, so its *.node.test.mjs twin
+        # imports the .ts unchanged — no build step, no second copy of the logic.
+        run: node --test $(find js supabase/functions -name '*.test.mjs')
 
       - name: Validate HTML
         run: npx --yes html-validate@11.5.6 index.html
@@ -193,7 +214,12 @@ jobs:
           # index.html, so a PR touching nothing but js/ or css/ set ui=false and
           # skipped the browser job entirely — on an app that is almost entirely
           # js/ and css/.
-          UI_PATHS: '(\.html$|^js/|^css/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
+          # ^content/ is in because the app RENDERS it: content/help-guide.json
+          # seeds the Help desk's chips and its credited-source links, and
+          # content/questionnaire.json builds the whole qualify flow. A
+          # corpus-only PR set ui=false and skipped the browser job entirely —
+          # the same class of gap this regex was already widened once to fix.
+          UI_PATHS: '(\.html$|^js/|^css/|^content/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
         run: |
           # This job gates the LOCAL suite, which serves the repo root as static
           # files, so it needs a static entry point. Enabling it for a repo with

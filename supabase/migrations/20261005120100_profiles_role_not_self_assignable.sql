@@ -38,10 +38,12 @@
 --
 -- INVERSE (reversible-by-design, per data.md):
 --   grant insert, update on public.profiles to authenticated;
---   drop policy "profiles insert own" on public.profiles;
---   create policy "profiles insert own" on public.profiles for insert
---     to authenticated with check (id = auth.uid());
+--   alter policy "profiles insert own" on public.profiles
+--     with check (id = auth.uid());
 -- Note that restoring the broad grant restores the hole — that is the point.
+-- Non-destructive: no row is read, written or deleted. The grant form is the
+-- inverse of a REVOKE, and the policy goes back to its pre-apply predicate
+-- without a DROP (which cannot be issued through the Supabase MCP — see step 3).
 
 -- 1. Narrow UPDATE to the two preference columns the account page edits.
 --    `full_name` is deliberately NOT included: nothing in js/ writes it, so
@@ -58,13 +60,54 @@ revoke insert on public.profiles from authenticated;
 --    re-granting INSERT later (by hand, or by a migration that restates the
 --    table-level grant) cannot silently reopen self-promotion. Belt and braces
 --    on purpose — step 2 is the guard, this is what survives step 2 being undone.
-drop policy if exists "profiles insert own" on public.profiles;
-create policy "profiles insert own" on public.profiles for insert to authenticated
+--
+-- ⚠️ ALTER POLICY, NOT DROP + CREATE. Written as `drop policy if exists` +
+-- `create policy`, this file could not be applied from a Claude Code web session
+-- at all: the Supabase MCP hangs for 60s on any statement containing a DROP and
+-- applies nothing, while CREATE and ALTER return instantly (Postgres is not the
+-- bottleneck — `set local lock_timeout` never fires and nothing waits on a lock,
+-- so the gate is in the MCP layer). `ALTER POLICY ... WITH CHECK` reaches the
+-- same end state with no window in which the table has no insert policy.
+--
+-- That also RESOLVES the ordering warning this file used to carry against
+-- `20261006_profiles_no_client_insert.sql`: there is no DROP here any more, so
+-- nothing of that file's can be re-created by running this one. What is left of
+-- the ordering question is recorded in that file instead — its own `revoke
+-- insert` is step 2 above, so the only statement of it still outstanding is its
+-- `drop policy`, which is now redundant (the policy below is strictly narrower
+-- than the one it wanted to remove) and unrunnable here for the same reason.
+alter policy "profiles insert own" on public.profiles
   with check (id = auth.uid() and role = 'client');
+
+-- APPLIED 2026-10-09, version 20261005120100. The post-apply probe below was run
+-- AS A REAL CLIENT SESSION — a password grant against /auth/v1/token as
+-- user@example.com, then PostgREST with that bearer, not service-role. Results:
+--
+--   update profiles set role='broker' where id = <own uid>
+--     -> HTTP 403, SQLSTATE 42501 "permission denied for table profiles"   PASS
+--   update profiles set reminder_email=true where id = <own uid>
+--     -> HTTP 204                                                          PASS
+--   insert into profiles (id) values (<own uid>)
+--     -> HTTP 403, SQLSTATE 42501                                          PASS
+--   select id, role from profiles
+--     -> HTTP 200, exactly one row (the caller's own)                      PASS
+--
+--   and the resulting privilege state:
+--     authenticated SELECT  -> created_at, full_name, id, reminder_email,
+--                              reminder_schedule, role
+--     authenticated UPDATE  -> reminder_email, reminder_schedule   (was: all six)
+--     authenticated INSERT  -> none                                (was: all six)
+--
+-- The third and fourth probes are 20261006_profiles_no_client_insert.sql's
+-- checks, passing here because step 2 above carries the same `revoke insert`.
+-- The second one matters as much as the first: revoking one verb on a table is
+-- exactly the change that silently takes another with it, and `savePrefs`
+-- (js/supabase.js:312) writes precisely those two columns on every Account-page
+-- save. Verified against the source before revoking, then measured after.
 
 -- POST-APPLY PROBE (run as a CLIENT session, not service-role — service-role
 --   bypasses RLS and would report a false pass):
 --   update profiles set role='broker' where id = auth.uid();
---     → expect 42501 insufficient_privilege
+--     -> expect 42501 insufficient_privilege
 --   update profiles set reminder_schedule='{30,7}' where id = auth.uid();
---     → expect success (the account page must keep working)
+--     -> expect success (the account page must keep working)
