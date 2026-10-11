@@ -206,7 +206,15 @@ This is the one to follow; the others defer to it.
    step. The code's caps are the first line; the Console limit is the backstop if
    they have a bug, and it is named as the backstop in this file's security
    constraints without ever having been a step here.
-7. **Merge PR #254, and wait for the Pages deploy to finish.**
+7. ✅ **DONE 2026-10-11.** PR #254 merged as squash commit `8449ddf` at
+   00:17:46Z, and `pages build and deployment` completed **success** at
+   00:18:29Z (`Pages Monitor` green, `Pages Deploy Retry` correctly skipped).
+   `${APP_URL}/content/help-guide.json` now serves **200** where it was a 404,
+   so the corpus fetch this gate's reordering note is about can succeed and
+   step 8 is reachable for the first time.
+   ⚠️ **The first live run of S10 then turned `main` red, on webkit only** — see
+   *A CORS-BLOCKED FETCH IS A `pageerror` ON WEBKIT AND NOT ON CHROMIUM* below.
+   Test-side, not the app: the notice rendered correctly on all four projects.
 8. Ask one question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
    deploy worked. If it still shows the notice, read the function logs: the
@@ -1464,6 +1472,62 @@ feature the guard arrived with. Deliberately not smuggled in.
 down now rather than after a third failure: a mechanism that fails a third time
 gets reverted or redesigned, not patched again. **The next failure of this scan
 is not another patch.**
+
+### ⚠️ A CORS-BLOCKED FETCH IS A `pageerror` ON WEBKIT AND NOT ON CHROMIUM (measured 2026-10-11)
+
+Found the only way it could be found: the **first live execution of S10**, on
+`main`, minutes after feature 003 merged. 102 passed, 2 failed — `tablet` and
+`iphone`, the two webkit projects, both with:
+
+```
+Uncaught page errors: /bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask
+                      due to access control checks.
+```
+
+**Why it could not have been caught earlier, which is the part worth keeping.**
+S10 self-skips off `LIVE_TARGET`, so `qa.yml` on the PR never ran it; `qa-live`
+runs only after a Pages deploy of `main`. So the assertion that failed had
+**never once executed on webkit** — and the comment above it asserted a
+cross-browser fact (*"a 404 from a not-yet-deployed function does NOT raise an
+uncaught exception, so anything there is a real defect"*) that had only ever
+been observed on Chromium. A merge gate cannot cover a test that only the merge
+can run.
+
+**Measured, not reasoned about** — two local static servers on different ports,
+a 404 with no CORS headers, the rejection caught exactly as `askHelp` catches
+it:
+
+| browser | what the app saw | `pageerror` |
+|---|---|---|
+| **webkit** | caught `"Load failed"` | `"/127.0.0.1:8778/functions/v1/help-ask due to access control checks."` |
+| **chromium** | caught `"Failed to fetch"` | **none** |
+
+Byte-for-byte the shape CI reported, leading slash included. So WebKit raises a
+page-level error for a CORS-blocked subresource **in addition to** rejecting the
+fetch, and it does so **whether or not the rejection is caught**. The app is
+correct on both: `askHelp` catches, FR-17's notice renders, and S10 reached step
+7 before failing — the product behaved as designed and the test was wrong, which
+is the same class as the 45s settle recorded in the S10 section below.
+
+**The fix is a narrow filter plus NEW strictness, not a loosening.**
+- `pageErrors` had **no pre-ask gate at all** — it was checked once at the very
+  end, so an uncaught error raised during login was indistinguishable from one
+  raised by the ask. It now has one, mirroring `consoleErrors`.
+- After the ask settles, `pageErrors` is **filtered** on
+  `/functions\/v1\/help-ask/`, not cleared the way `consoleErrors` is. Verified
+  against the measured string and four near-misses: a blocked `/rest/v1/entities`,
+  a blocked `/functions/v1/notify-enhancement` and a plain `TypeError` are all
+  **kept** and still fail.
+- The filter goes **inert** once the function is deployed: with CORS `*` and a
+  real response there is no block, so nothing to discard. A 500 *with* CORS
+  headers raises no `pageerror` either.
+
+⚠️ **The verification chain here has no live run in it, and that is stated
+rather than papered over.** S10 needs real Supabase Auth the sandbox browser
+cannot reach. What closes the loop is that **CI handed over the actual array
+contents** — the exact string, twice, on two projects — and the filter is
+verified against that exact string. Both ends are measured; the middle is the
+one CI already executed.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 

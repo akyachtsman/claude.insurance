@@ -2472,6 +2472,11 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   //    console errors, so this test would have gone red on exactly the state the
   //    PR ships in.
   expect(consoleErrors, `Console errors before the ask: ${consoleErrors.join('; ')}`).toHaveLength(0);
+  //    pageErrors gets the same pre-ask gate. It had NONE — it was checked once
+  //    at the end, so an uncaught error raised while logging in was
+  //    indistinguishable from one raised by the ask. Asserting here is what lets
+  //    the ask's own class be discarded below without going blanket-permissive.
+  expect(pageErrors, `Uncaught page errors before the ask: ${pageErrors.join('; ')}`).toHaveLength(0);
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
@@ -2497,6 +2502,17 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   //    a failed function call is a HANDLED state (step 6 asserted the notice
   //    rendered), and before the owner gate completes it is the expected one.
   consoleErrors.length = 0;
+  //    pageErrors is FILTERED, not cleared, and only of this one class: WebKit
+  //    raises a page-level error for a CORS-BLOCKED request on top of rejecting
+  //    the fetch, so an undeployed `help-ask` lands here even though `askHelp`
+  //    catches the rejection and FR-17's notice renders (step 6 asserted it).
+  //    Anything not naming this endpoint is still a real defect and still fails.
+  {
+    const blocked = /functions\/v1\/help-ask/;
+    const kept = pageErrors.filter(m => !blocked.test(m));
+    pageErrors.length = 0;
+    pageErrors.push(...kept);
+  }
 
   // 7. The AI-generated label and the broker channel are on screen in BOTH
   //    branches — neither is gated on anything the model says. The hand-off used
@@ -2516,9 +2532,23 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
       'An answer rendered without the broker channel — FR-8\'s remedy must not depend on the model').toHaveCount(1);
   }
 
-  // Console-error gate. pageErrors stays strict throughout: a 404 from a
-  // not-yet-deployed function does NOT raise an uncaught exception, so anything
-  // there is a real defect.
+  // Error gates. ⚠️ THIS COMMENT USED TO SAY "pageErrors stays strict
+  // throughout: a 404 from a not-yet-deployed function does NOT raise an
+  // uncaught exception, so anything there is a real defect." That is true on
+  // CHROMIUM and FALSE ON WEBKIT, and it turned `main` red on the first live run
+  // after the feature merged — S10 self-skips off LIVE_TARGET locally and
+  // qa-live only runs on main, so this assertion had never executed on webkit.
+  //
+  // Measured offline rather than reasoned about (two local origins, a 404 with
+  // no CORS headers, the rejection caught exactly as `askHelp` catches it):
+  //   webkit    → app caught "Load failed";   pageerror
+  //               "/<host>/functions/v1/help-ask due to access control checks."
+  //   chromium  → app caught "Failed to fetch"; NO pageerror
+  // So WebKit reports a CORS-blocked subresource as a page-level error IN
+  // ADDITION to rejecting the fetch, whether or not the rejection is caught.
+  // The app is correct on both: the notice rendered, which is why this test
+  // reached step 7 before failing. Hence the narrow filter above — and the new
+  // pre-ask gate, so discarding that class costs no strictness anywhere else.
   //
   // consoleErrors was TEXT-FILTERED over the whole test
   // (`/help-ask|functions\/v1|Failed to load resource/`), which this comment
