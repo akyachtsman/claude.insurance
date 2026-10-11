@@ -1534,10 +1534,26 @@ is the same class as the 45s settle recorded in the S10 section below.
   Verified on ten strings — **one** allowed, **nine** kept, including both
   rounds' cases, a different host, a leading space, a changed case, a blocked
   `/rest/v1/entities` and a blocked `/functions/v1/notify-enhancement`.
+- The allowance is **CONSUMED, not matched** — `allowed.delete(m)`, so each
+  string is spent on its first occurrence and a **duplicate survives**.
+  ⚠️ **Round 3 found that `filter` + `Set.has` dropped EVERY identical
+  occurrence**, because `Set.has` is not consumptive — so two diagnostics from a
+  doubled ask both vanished, contradicting this record's own "a second
+  occurrence remains visible" claim. **Three rounds, three times the comment
+  claimed more than the code did**, which is the defect class to watch for here
+  rather than any one of the three fixes.
+- **And `askCalls` is now asserted on the real ask**, not only around the blank
+  submission: one ask is one request. That is the direct check on the regression
+  the duplicate case describes — two **paid** provider calls — and it fires
+  before the allowance can matter.
+  ⚠️ **Measured before asserting it**: one caught cross-origin POST yields
+  exactly **one** `request` event (method POST, **no OPTIONS surfaced**), three
+  runs each on webkit and chromium. Asserting a count without measuring how the
+  preflight is reported would have turned S10 red on webkit — the engine it had
+  just gone red on.
 - It **fails closed in every direction**: a reshaped message, an extra prefix, a
-  different host or a second occurrence all stop equalling the allowed string
-  and turn the test red, which is the right direction for a gate on uncaught
-  errors.
+  different host or a second occurrence all fail the gate, which is the right
+  direction for a check on uncaught errors.
 - The allowance goes **inert** once the function is deployed: with CORS `*` and a
   real response there is no block, so nothing matches. A 500 *with* CORS headers
   raises no `pageerror` either.

@@ -2504,6 +2504,20 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   // The ask box must come back for a second question either way.
   await expect(input, 'The ask box stayed disabled after the request settled').toBeEnabled();
 
+  //    ONE ask is ONE request. `askCalls` was previously checked only around the
+  //    blank submission, so a regression that sent the real question twice —
+  //    two PAID provider calls — was invisible here (Codex #255 round 3). This
+  //    is the direct assertion on that, and it is also what makes the
+  //    single-allowance filter below safe: two requests mean two identical
+  //    diagnostics, and this fails before that can matter.
+  //    Measured on both engines before asserting it: one caught cross-origin
+  //    POST yields exactly ONE `request` event (method POST, no OPTIONS
+  //    surfaced), three runs each on webkit and chromium. Asserting a count
+  //    without measuring how the preflight is reported would have turned S10 red
+  //    on webkit — the engine it had just gone red on.
+  expect(askCalls, 'The real question did not reach the endpoint exactly once')
+    .toBe(before + 1);
+
   //    NOW discard the ask's own request noise, scoped to the step that made it:
   //    a failed function call is a HANDLED state (step 6 asserted the notice
   //    rendered), and before the owner gate completes it is the expected one.
@@ -2545,7 +2559,14 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
       const u = new URL(askUrl);
       allowed.add(`/${u.host}${u.pathname} due to access control checks.`);
     }
-    const kept = pageErrors.filter(m => !allowed.has(m));
+    //    CONSUMED, not matched: each allowed string is spent on its FIRST
+    //    occurrence, so a DUPLICATE survives and still fails the gate.
+    //    ⚠️ `filter` + `Set.has` dropped EVERY identical occurrence, because
+    //    `Set.has` is not consumptive — so two diagnostics from a doubled ask
+    //    both vanished, contradicting this block's own "a second occurrence
+    //    remains visible" claim (Codex #255 round 3). The comment was wrong
+    //    about the code again, which is the same defect as rounds 1 and 2.
+    const kept = pageErrors.filter(m => !allowed.delete(m));
     pageErrors.length = 0;
     pageErrors.push(...kept);
   }
