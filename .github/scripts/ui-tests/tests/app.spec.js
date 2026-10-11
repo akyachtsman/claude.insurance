@@ -2418,8 +2418,14 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
 
   // Count calls to the endpoint itself, so "a blank question sends nothing" is
   // measured rather than inferred from the error message being visible.
+  // The URL is captured too, so the one WebKit diagnostic below can be matched
+  // by EXACT STRING EQUALITY against what was actually requested rather than by
+  // a pattern. See the error gates at the end of this test for why that matters.
   let askCalls = 0;
-  page.on('request', r => { if (/\/functions\/v1\/help-ask/.test(r.url())) askCalls += 1; });
+  let askUrl = null;
+  page.on('request', r => {
+    if (/\/functions\/v1\/help-ask/.test(r.url())) { askCalls += 1; askUrl = r.url(); }
+  });
 
   const authcard = page.locator('.k-authcard');
   const dashboard = page.locator('.k-welcome__h');
@@ -2502,35 +2508,44 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   //    a failed function call is a HANDLED state (step 6 asserted the notice
   //    rendered), and before the owner gate completes it is the expected one.
   consoleErrors.length = 0;
-  //    pageErrors is FILTERED, not cleared, and narrowed THREE ways — engine,
-  //    branch, and the whole message shape. WebKit raises a page-level error for
-  //    a CORS-BLOCKED request on top of rejecting the fetch, so an undeployed
-  //    `help-ask` lands here even though `askHelp` catches the rejection and
-  //    FR-17's notice renders (step 6 asserted it).
+  //    pageErrors is narrowed to ONE EXACT STRING — no pattern at all.
   //
-  //    ⚠️ AN ENDPOINT-ONLY REGEX WAS THE FIRST VERSION AND IT WAS TOO WIDE
-  //    (Codex #255 round 1, P2). A genuine uncaught exception that merely
-  //    MENTIONS this URL — response-handling code reporting the request it was
-  //    working on — would have been discarded by the one gate that catches it.
-  //    Rendering the notice proves the REQUEST failure was handled; it does not
-  //    make every other exception naming that URL benign.
+  //    ⚠️ THIS IS A REDESIGN, NOT A THIRD TIGHTENING. Two Codex rounds on PR
+  //    #255 found the same mechanism too wide: round 1, an endpoint-only regex
+  //    that swallowed any exception merely naming the URL; round 2, a regex
+  //    anchored only at the end, so `TypeError: /host/functions/v1/help-ask due
+  //    to access control checks.` still slipped through — while the comment
+  //    beside it claimed "the whole measured message shape". global.md →
+  //    *Review Rounds Have to Terminate* says a mechanism that fails again
+  //    across rounds is in the wrong place, so the pattern is gone rather than
+  //    patched a third time: there is no prefix, suffix or anchor left to get
+  //    wrong, because `Set.has` is exact.
   //
-  //    So all three must hold, and each one is load-bearing:
-  //      engine — only WebKit raises this at all; on Chromium (measured: zero
-  //               pageErrors for the same block) there is nothing to discard, so
-  //               the gate stays absolutely strict there.
+  //    The string is BUILT FROM THE REQUEST THE TEST ACTUALLY OBSERVED, and the
+  //    construction is measured, not guessed — probed on webkit against a
+  //    cross-origin 404, where
+  //      `/${u.host}${u.pathname} due to access control checks.`
+  //    equals the raised message byte-for-byte.
+  //
+  //    Two further conditions, each load-bearing:
+  //      engine — only WebKit raises this at all. Chromium yields zero
+  //               pageErrors for the identical block (measured), so on that half
+  //               of the matrix nothing is allowed and the gate is untouched.
   //      branch — only when FR-17's NOTICE rendered. Once the function is
-  //               deployed and answering, no request is blocked, so a pageerror
-  //               naming the endpoint on the answer branch is real.
-  //      shape  — the full measured message, `… due to access control checks.`
-  //               anchored at the end, not just the path.
-  //    This fails CLOSED: a message WebKit reshapes stops matching and the test
-  //    goes red, which is the safe direction for a filter on an error gate.
+  //               deployed and answering, no request is blocked, so any
+  //               pageerror on the answer branch is real.
+  //
+  //    This fails CLOSED in every direction: a reshaped message, an extra
+  //    prefix, a different host, a second occurrence — none of them equal the
+  //    allowed string, so the test goes red rather than quietly passing.
   {
-    const corsBlocked = /functions\/v1\/help-ask due to access control checks\.$/;
+    const allowed = new Set();
     const noticeShown = await page.locator('.k-help__notice').count() > 0;
-    const discardable = browserName === 'webkit' && noticeShown;
-    const kept = pageErrors.filter(m => !(discardable && corsBlocked.test(m)));
+    if (browserName === 'webkit' && noticeShown && askUrl) {
+      const u = new URL(askUrl);
+      allowed.add(`/${u.host}${u.pathname} due to access control checks.`);
+    }
+    const kept = pageErrors.filter(m => !allowed.has(m));
     pageErrors.length = 0;
     pageErrors.push(...kept);
   }
@@ -2568,11 +2583,11 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   // So WebKit reports a CORS-blocked subresource as a page-level error IN
   // ADDITION to rejecting the fetch, whether or not the rejection is caught.
   // The app is correct on both: the notice rendered, which is why this test
-  // reached step 7 before failing. Hence the narrow filter above — gated on the
-  // engine, on FR-17's notice branch and on the whole measured message shape —
-  // and the new pre-ask gate, so discarding that class costs no strictness
-  // anywhere else. On Chromium, and on any run that actually answers, this gate
-  // is exactly as strict as it was before.
+  // reached step 7 before failing. Hence the single exact-string allowance above
+  // — gated on the engine and on FR-17's notice branch, and built from the URL
+  // actually requested — plus the new pre-ask gate, so allowing that one message
+  // costs no strictness anywhere else. On Chromium, and on any run that actually
+  // answers, this gate is exactly as strict as it was before.
   //
   // consoleErrors was TEXT-FILTERED over the whole test
   // (`/help-ask|functions\/v1|Failed to load resource/`), which this comment

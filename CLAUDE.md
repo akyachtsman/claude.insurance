@@ -1513,28 +1513,34 @@ is the same class as the 45s settle recorded in the S10 section below.
 - `pageErrors` had **no pre-ask gate at all** — it was checked once at the very
   end, so an uncaught error raised during login was indistinguishable from one
   raised by the ask. It now has one, mirroring `consoleErrors`.
-- After the ask settles, `pageErrors` is **filtered**, not cleared the way
-  `consoleErrors` is — and narrowed **three ways**, each load-bearing:
-  **engine** (`browserName === 'webkit'`; Chromium raises nothing for the same
-  block, so the gate stays absolutely strict there), **branch** (only when
-  FR-17's notice rendered — once the function answers, no request is blocked),
-  and **shape** (the whole measured message, `… due to access control checks.`
-  anchored at the end, not just the path).
-  ⚠️ **An endpoint-only regex was the first version and it was too wide** — P2,
-  Codex round 1 on PR #255, and it is the exact risk the review request had
-  flagged against itself. A genuine uncaught exception that merely *mentions*
-  the URL (response-handling code naming the request it was working on) would
-  have been discarded by the one gate that catches it. Rendering the notice
-  proves the **request** failure was handled; it does not make every other
-  exception naming that URL benign. Verified on eight strings: the two measured
-  blocks discard; Codex's own case, a reshaped tail, a blocked
-  `/rest/v1/entities`, a blocked `/functions/v1/notify-enhancement` and a plain
-  `TypeError` are all **kept**.
-- It **fails closed**: a message WebKit reshapes stops matching and the test goes
-  red, which is the safe direction for a filter sitting on an error gate.
-- The filter goes **inert** once the function is deployed: with CORS `*` and a
-  real response there is no block, so nothing to discard. A 500 *with* CORS
-  headers raises no `pageerror` either.
+- After the ask settles, `pageErrors` is narrowed to **ONE EXACT STRING** — no
+  pattern at all — and only on WebKit, and only when FR-17's notice rendered.
+  The string is **built from the request the test actually observed**,
+  `` `/${u.host}${u.pathname} due to access control checks.` ``, and that
+  construction is **measured**: probed on webkit against a cross-origin 404, it
+  equals the raised message byte-for-byte.
+  ⚠️ **THIS IS A REDESIGN AFTER TWO ROUNDS ON THE SAME MECHANISM, not a third
+  tightening.** Both rounds were Codex on PR #255, and both were "the filter is
+  wider than its comment claims":
+
+  | round | what shipped | what it still swallowed |
+  |---|---|---|
+  | 1 | `/functions\/v1\/help-ask/` | any exception merely **naming** the URL — e.g. response-handling code reporting the request it was working on |
+  | 2 | the same, anchored with `$` only | `TypeError: /host/functions/v1/help-ask due to access control checks.` — a **prefix** walks straight in, while the comment beside it claimed "the whole measured message shape" |
+
+  `global.md` → *Review Rounds Have to Terminate* says a mechanism that fails
+  again across rounds is in the wrong place. So the pattern is **gone**: there is
+  no prefix, suffix or anchor left to get wrong, because `Set.has` is exact.
+  Verified on ten strings — **one** allowed, **nine** kept, including both
+  rounds' cases, a different host, a leading space, a changed case, a blocked
+  `/rest/v1/entities` and a blocked `/functions/v1/notify-enhancement`.
+- It **fails closed in every direction**: a reshaped message, an extra prefix, a
+  different host or a second occurrence all stop equalling the allowed string
+  and turn the test red, which is the right direction for a gate on uncaught
+  errors.
+- The allowance goes **inert** once the function is deployed: with CORS `*` and a
+  real response there is no block, so nothing matches. A 500 *with* CORS headers
+  raises no `pageerror` either.
 - **Gate on `browserName`, not the project name.** `devices` maps
   `iPad (gen 7)` and `iPhone 12` → **webkit** and `Desktop Chrome` / `Pixel 5` →
   **chromium**, measured — which is exactly the failing and passing sets, an
