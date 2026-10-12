@@ -206,7 +206,15 @@ This is the one to follow; the others defer to it.
    step. The code's caps are the first line; the Console limit is the backstop if
    they have a bug, and it is named as the backstop in this file's security
    constraints without ever having been a step here.
-7. **Merge PR #254, and wait for the Pages deploy to finish.**
+7. ✅ **DONE 2026-10-11.** PR #254 merged as squash commit `8449ddf` at
+   00:17:46Z, and `pages build and deployment` completed **success** at
+   00:18:29Z (`Pages Monitor` green, `Pages Deploy Retry` correctly skipped).
+   `${APP_URL}/content/help-guide.json` now serves **200** where it was a 404,
+   so the corpus fetch this gate's reordering note is about can succeed and
+   step 8 is reachable for the first time.
+   ⚠️ **The first live run of S10 then turned `main` red, on webkit only** — see
+   *A CORS-BLOCKED FETCH IS A `pageerror` ON WEBKIT AND NOT ON CHROMIUM* below.
+   Test-side, not the app: the notice rendered correctly on all four projects.
 8. Ask one question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
    deploy worked. If it still shows the notice, read the function logs: the
@@ -1464,6 +1472,103 @@ feature the guard arrived with. Deliberately not smuggled in.
 down now rather than after a third failure: a mechanism that fails a third time
 gets reverted or redesigned, not patched again. **The next failure of this scan
 is not another patch.**
+
+### ⚠️ A CORS-BLOCKED FETCH IS A `pageerror` ON WEBKIT AND NOT ON CHROMIUM (measured 2026-10-11)
+
+Found the only way it could be found: the **first live execution of S10**, on
+`main`, minutes after feature 003 merged. 102 passed, 2 failed — `tablet` and
+`iphone`, the two webkit projects, both with:
+
+```
+Uncaught page errors: /bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask
+                      due to access control checks.
+```
+
+**Why it could not have been caught earlier, which is the part worth keeping.**
+S10 self-skips off `LIVE_TARGET`, so `qa.yml` on the PR never ran it; `qa-live`
+runs only after a Pages deploy of `main`. So the assertion that failed had
+**never once executed on webkit** — and the comment above it asserted a
+cross-browser fact (*"a 404 from a not-yet-deployed function does NOT raise an
+uncaught exception, so anything there is a real defect"*) that had only ever
+been observed on Chromium. A merge gate cannot cover a test that only the merge
+can run.
+
+**Measured, not reasoned about** — two local static servers on different ports,
+a 404 with no CORS headers, the rejection caught exactly as `askHelp` catches
+it:
+
+| browser | what the app saw | `pageerror` |
+|---|---|---|
+| **webkit** | caught `"Load failed"` | `"/127.0.0.1:8778/functions/v1/help-ask due to access control checks."` |
+| **chromium** | caught `"Failed to fetch"` | **none** |
+
+Byte-for-byte the shape CI reported, leading slash included. So WebKit raises a
+page-level error for a CORS-blocked subresource **in addition to** rejecting the
+fetch, and it does so **whether or not the rejection is caught**. The app is
+correct on both: `askHelp` catches, FR-17's notice renders, and S10 reached step
+7 before failing — the product behaved as designed and the test was wrong, which
+is the same class as the 45s settle recorded in the S10 section below.
+
+**The fix is a narrow filter plus NEW strictness, not a loosening.**
+- `pageErrors` had **no pre-ask gate at all** — it was checked once at the very
+  end, so an uncaught error raised during login was indistinguishable from one
+  raised by the ask. It now has one, mirroring `consoleErrors`.
+- After the ask settles, `pageErrors` is narrowed to **ONE EXACT STRING** — no
+  pattern at all — and only on WebKit, and only when FR-17's notice rendered.
+  The string is **built from the request the test actually observed**,
+  `` `/${u.host}${u.pathname} due to access control checks.` ``, and that
+  construction is **measured**: probed on webkit against a cross-origin 404, it
+  equals the raised message byte-for-byte.
+  ⚠️ **THIS IS A REDESIGN AFTER TWO ROUNDS ON THE SAME MECHANISM, not a third
+  tightening.** Both rounds were Codex on PR #255, and both were "the filter is
+  wider than its comment claims":
+
+  | round | what shipped | what it still swallowed |
+  |---|---|---|
+  | 1 | `/functions\/v1\/help-ask/` | any exception merely **naming** the URL — e.g. response-handling code reporting the request it was working on |
+  | 2 | the same, anchored with `$` only | `TypeError: /host/functions/v1/help-ask due to access control checks.` — a **prefix** walks straight in, while the comment beside it claimed "the whole measured message shape" |
+
+  `global.md` → *Review Rounds Have to Terminate* says a mechanism that fails
+  again across rounds is in the wrong place. So the pattern is **gone**: there is
+  no prefix, suffix or anchor left to get wrong, because `Set.has` is exact.
+  Verified on ten strings — **one** allowed, **nine** kept, including both
+  rounds' cases, a different host, a leading space, a changed case, a blocked
+  `/rest/v1/entities` and a blocked `/functions/v1/notify-enhancement`.
+- The allowance is **CONSUMED, not matched** — `allowed.delete(m)`, so each
+  string is spent on its first occurrence and a **duplicate survives**.
+  ⚠️ **Round 3 found that `filter` + `Set.has` dropped EVERY identical
+  occurrence**, because `Set.has` is not consumptive — so two diagnostics from a
+  doubled ask both vanished, contradicting this record's own "a second
+  occurrence remains visible" claim. **Three rounds, three times the comment
+  claimed more than the code did**, which is the defect class to watch for here
+  rather than any one of the three fixes.
+- **And `askCalls` is now asserted on the real ask**, not only around the blank
+  submission: one ask is one request. That is the direct check on the regression
+  the duplicate case describes — two **paid** provider calls — and it fires
+  before the allowance can matter.
+  ⚠️ **Measured before asserting it**: one caught cross-origin POST yields
+  exactly **one** `request` event (method POST, **no OPTIONS surfaced**), three
+  runs each on webkit and chromium. Asserting a count without measuring how the
+  preflight is reported would have turned S10 red on webkit — the engine it had
+  just gone red on.
+- It **fails closed in every direction**: a reshaped message, an extra prefix, a
+  different host or a second occurrence all fail the gate, which is the right
+  direction for a check on uncaught errors.
+- The allowance goes **inert** once the function is deployed: with CORS `*` and a
+  real response there is no block, so nothing matches. A 500 *with* CORS headers
+  raises no `pageerror` either.
+- **Gate on `browserName`, not the project name.** `devices` maps
+  `iPad (gen 7)` and `iPhone 12` → **webkit** and `Desktop Chrome` / `Pixel 5` →
+  **chromium**, measured — which is exactly the failing and passing sets, an
+  independent corroboration of the diagnosis. A project rename cannot silently
+  defeat the engine check.
+
+⚠️ **The verification chain here has no live run in it, and that is stated
+rather than papered over.** S10 needs real Supabase Auth the sandbox browser
+cannot reach. What closes the loop is that **CI handed over the actual array
+contents** — the exact string, twice, on two projects — and the filter is
+verified against that exact string. Both ends are measured; the middle is the
+one CI already executed.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 

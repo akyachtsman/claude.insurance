@@ -2404,7 +2404,7 @@ test('S9: Keep auth gate blocks a signed-out deep link, rejects a bad password, 
 // unconditionally rather than off anything on the wire.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('S10: the Help desk labels its answers, refuses a blank question, and never leaves the answer region empty', async ({ page, renderWitness }) => {
+test('S10: the Help desk labels its answers, refuses a blank question, and never leaves the answer region empty', async ({ page, renderWitness, browserName }) => {
   renderWitness();
   test.skip(!LIVE_TARGET, 'The Help desk sits behind real Supabase Auth — unreachable from the local CI server; qa-live covers it.');
   // 150s, not 90s: the login allows 30s and the ask below allows 90s, which 90
@@ -2418,8 +2418,14 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
 
   // Count calls to the endpoint itself, so "a blank question sends nothing" is
   // measured rather than inferred from the error message being visible.
+  // The URL is captured too, so the one WebKit diagnostic below can be matched
+  // by EXACT STRING EQUALITY against what was actually requested rather than by
+  // a pattern. See the error gates at the end of this test for why that matters.
   let askCalls = 0;
-  page.on('request', r => { if (/\/functions\/v1\/help-ask/.test(r.url())) askCalls += 1; });
+  let askUrl = null;
+  page.on('request', r => {
+    if (/\/functions\/v1\/help-ask/.test(r.url())) { askCalls += 1; askUrl = r.url(); }
+  });
 
   const authcard = page.locator('.k-authcard');
   const dashboard = page.locator('.k-welcome__h');
@@ -2472,6 +2478,11 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   //    console errors, so this test would have gone red on exactly the state the
   //    PR ships in.
   expect(consoleErrors, `Console errors before the ask: ${consoleErrors.join('; ')}`).toHaveLength(0);
+  //    pageErrors gets the same pre-ask gate. It had NONE — it was checked once
+  //    at the end, so an uncaught error raised while logging in was
+  //    indistinguishable from one raised by the ask. Asserting here is what lets
+  //    the ask's own class be discarded below without going blanket-permissive.
+  expect(pageErrors, `Uncaught page errors before the ask: ${pageErrors.join('; ')}`).toHaveLength(0);
   await input.fill('Where do I see when my policies renew?');
   await page.locator('.k-help__ask').click();
   const settled = page.locator('.k-help__a, .k-help__notice');
@@ -2493,10 +2504,72 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
   // The ask box must come back for a second question either way.
   await expect(input, 'The ask box stayed disabled after the request settled').toBeEnabled();
 
+  //    ONE ask is ONE request. `askCalls` was previously checked only around the
+  //    blank submission, so a regression that sent the real question twice —
+  //    two PAID provider calls — was invisible here (Codex #255 round 3). This
+  //    is the direct assertion on that, and it is also what makes the
+  //    single-allowance filter below safe: two requests mean two identical
+  //    diagnostics, and this fails before that can matter.
+  //    Measured on both engines before asserting it: one caught cross-origin
+  //    POST yields exactly ONE `request` event (method POST, no OPTIONS
+  //    surfaced), three runs each on webkit and chromium. Asserting a count
+  //    without measuring how the preflight is reported would have turned S10 red
+  //    on webkit — the engine it had just gone red on.
+  expect(askCalls, 'The real question did not reach the endpoint exactly once')
+    .toBe(before + 1);
+
   //    NOW discard the ask's own request noise, scoped to the step that made it:
   //    a failed function call is a HANDLED state (step 6 asserted the notice
   //    rendered), and before the owner gate completes it is the expected one.
   consoleErrors.length = 0;
+  //    pageErrors is narrowed to ONE EXACT STRING — no pattern at all.
+  //
+  //    ⚠️ THIS IS A REDESIGN, NOT A THIRD TIGHTENING. Two Codex rounds on PR
+  //    #255 found the same mechanism too wide: round 1, an endpoint-only regex
+  //    that swallowed any exception merely naming the URL; round 2, a regex
+  //    anchored only at the end, so `TypeError: /host/functions/v1/help-ask due
+  //    to access control checks.` still slipped through — while the comment
+  //    beside it claimed "the whole measured message shape". global.md →
+  //    *Review Rounds Have to Terminate* says a mechanism that fails again
+  //    across rounds is in the wrong place, so the pattern is gone rather than
+  //    patched a third time: there is no prefix, suffix or anchor left to get
+  //    wrong, because `Set.has` is exact.
+  //
+  //    The string is BUILT FROM THE REQUEST THE TEST ACTUALLY OBSERVED, and the
+  //    construction is measured, not guessed — probed on webkit against a
+  //    cross-origin 404, where
+  //      `/${u.host}${u.pathname} due to access control checks.`
+  //    equals the raised message byte-for-byte.
+  //
+  //    Two further conditions, each load-bearing:
+  //      engine — only WebKit raises this at all. Chromium yields zero
+  //               pageErrors for the identical block (measured), so on that half
+  //               of the matrix nothing is allowed and the gate is untouched.
+  //      branch — only when FR-17's NOTICE rendered. Once the function is
+  //               deployed and answering, no request is blocked, so any
+  //               pageerror on the answer branch is real.
+  //
+  //    This fails CLOSED in every direction: a reshaped message, an extra
+  //    prefix, a different host, a second occurrence — none of them equal the
+  //    allowed string, so the test goes red rather than quietly passing.
+  {
+    const allowed = new Set();
+    const noticeShown = await page.locator('.k-help__notice').count() > 0;
+    if (browserName === 'webkit' && noticeShown && askUrl) {
+      const u = new URL(askUrl);
+      allowed.add(`/${u.host}${u.pathname} due to access control checks.`);
+    }
+    //    CONSUMED, not matched: each allowed string is spent on its FIRST
+    //    occurrence, so a DUPLICATE survives and still fails the gate.
+    //    ⚠️ `filter` + `Set.has` dropped EVERY identical occurrence, because
+    //    `Set.has` is not consumptive — so two diagnostics from a doubled ask
+    //    both vanished, contradicting this block's own "a second occurrence
+    //    remains visible" claim (Codex #255 round 3). The comment was wrong
+    //    about the code again, which is the same defect as rounds 1 and 2.
+    const kept = pageErrors.filter(m => !allowed.delete(m));
+    pageErrors.length = 0;
+    pageErrors.push(...kept);
+  }
 
   // 7. The AI-generated label and the broker channel are on screen in BOTH
   //    branches — neither is gated on anything the model says. The hand-off used
@@ -2516,9 +2589,26 @@ test('S10: the Help desk labels its answers, refuses a blank question, and never
       'An answer rendered without the broker channel — FR-8\'s remedy must not depend on the model').toHaveCount(1);
   }
 
-  // Console-error gate. pageErrors stays strict throughout: a 404 from a
-  // not-yet-deployed function does NOT raise an uncaught exception, so anything
-  // there is a real defect.
+  // Error gates. ⚠️ THIS COMMENT USED TO SAY "pageErrors stays strict
+  // throughout: a 404 from a not-yet-deployed function does NOT raise an
+  // uncaught exception, so anything there is a real defect." That is true on
+  // CHROMIUM and FALSE ON WEBKIT, and it turned `main` red on the first live run
+  // after the feature merged — S10 self-skips off LIVE_TARGET locally and
+  // qa-live only runs on main, so this assertion had never executed on webkit.
+  //
+  // Measured offline rather than reasoned about (two local origins, a 404 with
+  // no CORS headers, the rejection caught exactly as `askHelp` catches it):
+  //   webkit    → app caught "Load failed";   pageerror
+  //               "/<host>/functions/v1/help-ask due to access control checks."
+  //   chromium  → app caught "Failed to fetch"; NO pageerror
+  // So WebKit reports a CORS-blocked subresource as a page-level error IN
+  // ADDITION to rejecting the fetch, whether or not the rejection is caught.
+  // The app is correct on both: the notice rendered, which is why this test
+  // reached step 7 before failing. Hence the single exact-string allowance above
+  // — gated on the engine and on FR-17's notice branch, and built from the URL
+  // actually requested — plus the new pre-ask gate, so allowing that one message
+  // costs no strictness anywhere else. On Chromium, and on any run that actually
+  // answers, this gate is exactly as strict as it was before.
   //
   // consoleErrors was TEXT-FILTERED over the whole test
   // (`/help-ask|functions\/v1|Failed to load resource/`), which this comment
