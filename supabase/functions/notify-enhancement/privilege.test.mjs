@@ -51,18 +51,49 @@ test("the source still parses the way this gate assumes", () => {
   assert.ok(/\.from\(/.test(code), "no table access at all — did the scan lose the code?");
 });
 
-test("every table access and RPC goes through the caller's client", () => {
-  // Each `.from(` / `.rpc(` must be preceded by `caller`. Anything else — an
-  // `admin`, an `authAdmin`, a fresh service-role client — is the defect.
-  const accesses = [...code.matchAll(/([A-Za-z_$][\w$]*)\s*\n?\s*\.\s*(from|rpc)\(\s*["']([^"']+)["']/g)]
+// Every `.from(` / `.rpc(` in the handler, as {client, kind, target}. Shared by
+// the two tests below and by the deploy-set gate, so there is one scrape rather
+// than three that can drift apart.
+function tableAccesses() {
+  return [...code.matchAll(/([A-Za-z_$][\w$]*)\s*\n?\s*\.\s*(from|rpc)\(\s*["']([^"']+)["']/g)]
     .map((m) => ({ client: m[1], kind: m[2], target: m[3] }));
+}
 
+// The ONE table a service-role client may touch: the server-only dedup log,
+// where `authenticated` holds nothing. Everything about a CLIENT's own records
+// goes through `caller` under RLS.
+const CLAIM_TABLE = "enhancement_notifications";
+
+test("every CLIENT table goes through the caller's client, and the claim table only through `claims`", () => {
+  // The invariant, in one place: a service-role client must never reach a table
+  // the client owns rows in. `caller` (anon key + the caller's JWT) is the only
+  // client permitted on those, so RLS scopes every read and write and cannot be
+  // removed by editing a `.eq()` out of this handler.
+  //
+  // ⚠️ THE CLAIM TABLE IS THE DELIBERATE EXCEPTION, and it is an exception that
+  // makes the boundary stronger rather than weaker: `authenticated` holds
+  // NOTHING on `enhancement_notifications`, which is the entire point — the
+  // client cannot write its own notification claim, which is the root all four
+  // bypasses in rounds 3-6 grew from. It is pinned to the `claims` client by
+  // name so a service-role client cannot quietly acquire a second table.
+  const accesses = tableAccesses();
   assert.ok(accesses.length >= 4, `expected at least 4 table/RPC accesses, found ${accesses.length}`);
 
-  const wrong = accesses.filter((a) => a.client !== "caller");
+  const wrong = accesses.filter((a) =>
+    a.target === CLAIM_TABLE ? a.client !== "claims" : a.client !== "caller");
   assert.deepEqual(
     wrong, [],
-    `these go through a client other than \`caller\`: ${wrong.map((w) => `${w.client}.${w.kind}("${w.target}")`).join(", ")}`,
+    `wrong client: ${wrong.map((w) => `${w.client}.${w.kind}("${w.target}")`).join(", ")} ` +
+    `(client tables must use \`caller\`; ${CLAIM_TABLE} must use \`claims\`)`,
+  );
+
+  // And `claims` must not acquire a second table. Asserted as its own check
+  // rather than left implied by the loop above, because "the service-role client
+  // touches exactly one table" is the claim a reader needs to be able to trust.
+  const claimsTargets = [...new Set(accesses.filter((a) => a.client === "claims").map((a) => a.target))];
+  assert.deepEqual(
+    claimsTargets, [CLAIM_TABLE],
+    `the \`claims\` service-role client must touch ${CLAIM_TABLE} and nothing else; found: ${claimsTargets.join(", ")}`,
   );
 });
 
@@ -91,50 +122,59 @@ test("the service-role CALLER path is gone", () => {
   );
 });
 
-test("the requested stamp goes through the RPC, not a direct update", () => {
-  // There is no owner UPDATE policy on enhancement_requests, so an owner's
-  // `.update({ requested_notified_at })` is refused by RLS — and a column grant
-  // cannot express the narrow thing, because client/broker/underwriter are all
-  // the `authenticated` role. See the migration for the rejected alternatives.
+test("the claim goes to the claim table, and the old stamp columns are not written", () => {
+  // Both branches must claim through the one helper, which is the only writer of
+  // the server-only table.
   assert.ok(
-    /\.rpc\(\s*["']stamp_requested_notified["']/.test(code),
-    "the requested-event stamp no longer calls stamp_requested_notified",
+    /async function claimNotification\(/.test(code),
+    "claimNotification is gone — the claim has moved somewhere this gate cannot see",
   );
-  const directStamp = /\.update\(\s*\{[^}]*requested_notified_at/s.test(code);
-  assert.equal(directStamp, false, "requested_notified_at is being written by a direct .update(), which RLS refuses");
+  for (const event of ["requested", "approved"]) {
+    assert.ok(
+      new RegExp(`claimNotification\\(\\s*requestId\\s*,\\s*["']${event}["']`).test(code),
+      `the ${event} branch no longer claims through claimNotification`,
+    );
+  }
+
+  // ⚠️ AND THE TWO OLD COLUMNS MUST STAY UNWRITTEN. They are vestigial after the
+  // redesign, and a future edit that "restores" either one would quietly bring
+  // back a second, client-reachable claim — which is the mechanism rounds 3-6
+  // kept bypassing. Checked for a direct write and for the retired RPCs alike.
+  for (const col of ["requested_notified_at", "approved_notified_at"]) {
+    assert.equal(
+      new RegExp(`\\.update\\(\\s*\\{[^}]*${col}`, "s").test(code), false,
+      `${col} is being written by a direct .update(); the claim lives in the claim table now`,
+    );
+  }
+  for (const fn of ["stamp_requested_notified", "stamp_approved_notified"]) {
+    assert.equal(
+      new RegExp(`\\.rpc\\(\\s*["']${fn}["']`).test(code), false,
+      `${fn} is called again; the migration revokes EXECUTE on it from authenticated, so this would fail closed — and it is the bypass round 6 found`,
+    );
+  }
 });
 
-test("every RPC the code calls is DEFINED IN SOURCE, and an unapplied one is declared as blocking", () => {
+test("the CLAIM TABLE is defined in source, fenced, and declared blocking while unapplied", () => {
   // Cross-file drift gate, over SOURCE ONLY. The code and the migration are two
-  // halves of one contract; renaming the function in one place would leave the
-  // claim silently returning an error nobody reads.
+  // halves of one contract: this handler writes `enhancement_notifications`, and
+  // if that table is not created and granted exactly as below, every claim
+  // returns 42501 and the function silently sends nothing.
   //
-  // ⚠️ WHAT THIS DOES NOT PROVE, stated here because the test name used to
-  // imply it did: that any migration is APPLIED. This reads directories. A file
-  // placed in supabase/migrations/ whose remote apply was skipped or FAILED is
-  // byte-identical to one that is live, so it classifies as applied, satisfies
-  // the definition lookup, and skips the proposed/ blocker checks below — while
-  // the deployed function returns `claim_failed` on every call. Codex round 7
-  // on PR #256; the claim is narrowed rather than the check strengthened,
-  // because strengthening it is not available here: a test that could tell
-  // would need production credentials, and this repo's Safety Rules say test
-  // commands must not require them. Directory placement is a CONVENTION this
-  // repo declares (CLAUDE.md: "`supabase/migrations/` means live and matching
-  // `list_migrations`"), not evidence.
-  // The authoritative check is therefore a DEPLOY STEP, written into index.ts's
-  // deploy header: run `list_migrations` and confirm the migration defining each
-  // called RPC is there, before deploying. Fail-closed if it is not, which is
-  // why a narrowed claim here is tolerable and a false one was not.
+  // ⚠️ WHAT THIS DOES NOT PROVE: that any migration is APPLIED. This reads
+  // directories. A file in supabase/migrations/ whose remote apply was skipped or
+  // FAILED is byte-identical to one that is live. Codex round 7 on PR #256; the
+  // claim is narrowed rather than the check strengthened, because strengthening
+  // it needs production credentials and this repo's Safety Rules forbid those in
+  // tests. Directory placement is a CONVENTION this repo declares (CLAUDE.md:
+  // "`supabase/migrations/` means live and matching `list_migrations`"), not
+  // evidence. The authoritative check is the deploy step in index.ts's header.
   //
-  // ⚠️ `proposed/` IS SEARCHED TOO, AND THAT IS NOT A LOOSENING. This repo keeps
-  // written-but-unapplied migrations in supabase/proposed/ precisely because
-  // `migrations/` must mean "live" (see that directory's README). An RPC defined
-  // only there is a REAL state — the code ships before the migration is
-  // approved — and the honest check is not "does it exist in migrations" but
-  // "is it defined, and if it is not applied, is that declared where an
-  // operator will see it". So an unapplied RPC must be named in
-  // proposed/README.md as blocking the deploy. That turns the coupling into
-  // something enforced rather than a sentence in a PR thread.
+  // ⚠️ `proposed/` IS SEARCHED TOO, AND THAT IS NOT A LOOSENING. Unapplied
+  // migrations live there precisely so `migrations/` can mean "live". A table
+  // defined only there is a REAL state — the code ships before the owner
+  // approves the migration — and the honest check is "is it defined, and if it
+  // is not applied, is that declared where an operator will see it". So it must
+  // be named in proposed/README.md as blocking the deploy.
   const root = join(here, "..", "..");
   const read = (dir) => readdirSync(join(root, dir))
     .filter((f) => f.endsWith(".sql"))
@@ -143,57 +183,71 @@ test("every RPC the code calls is DEFINED IN SOURCE, and an unapplied one is dec
   const proposed = read("proposed");
   const readme = readFileSync(join(root, "proposed", "README.md"), "utf8");
 
-  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
-  assert.ok(called.length > 0, "no rpc calls found — did the scan lose them?");
+  const createRe = new RegExp(
+    `create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?public\\.${CLAIM_TABLE}\\b([\\s\\S]*?);`, "i",
+  );
+  const hit = [...applied, ...proposed].find((m) => createRe.test(m.sql));
+  assert.ok(hit, `index.ts writes ${CLAIM_TABLE} but no migration creates public.${CLAIM_TABLE}`);
+  const sql = hit.sql.replace(/^\s*--.*$/gm, "");   // comments stripped: this file documents what it must not contain
+  const body = sql.match(createRe)[0];
 
-  for (const name of called) {
-    const defRe = new RegExp(
-      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
-    );
-    const hit = [...applied, ...proposed].find((m) => defRe.test(m.sql));
-    assert.ok(hit, `index.ts calls rpc("${name}") but no migration defines public.${name}( ... $$;`);
-    const body = hit.sql.match(defRe)[0];
+  // ⚠️ SCOPED TO THE CREATE STATEMENT'S OWN BODY, not the whole migration and
+  // certainly not the concatenated directory. The same scan, unscoped, passed a
+  // mutation that deleted the guard from the object under test — a dozen other
+  // migrations carry the same strings. An assertion that cannot fail is not a
+  // check.
+  assert.ok(
+    /primary\s+key\s*\(\s*request_id\s*,\s*event\s*\)/i.test(body),
+    `public.${CLAIM_TABLE} must keep its (request_id, event) primary key — that key IS the atomic claim, and without it two concurrent invocations both send`,
+  );
 
-    // ⚠️ SCOPED TO THIS FUNCTION'S OWN BODY, not the concatenated migrations.
-    // The first version asserted /owner = auth.uid()/ against ALL migrations
-    // joined together, and a mutation deleting the gate from THIS function
-    // PASSED — a dozen unrelated RLS policies contain that string. An assertion
-    // that cannot fail is not a check; found only by deleting the guard.
-    assert.ok(
-      /security\s+definer/i.test(body),
-      `public.${name} must stay SECURITY DEFINER, or the narrowed privileges refuse every call`,
-    );
-    assert.ok(
-      /set\s+search_path\s*=\s*''/.test(body),
-      `public.${name} must pin search_path (advisor 0011, and SECURITY DEFINER hygiene)`,
-    );
-    // Each stamp function authorizes its own caller. The requested one gates on
-    // ownership; the approved one on the underwriter role. Losing either makes
-    // the function a hole with a narrow name.
-    assert.ok(
-      /owner\s*=\s*auth\.uid\(\)/.test(body) || /role\s*=\s*'underwriter'/.test(body),
-      `public.${name} must authorize its caller (owner = auth.uid(), or the underwriter role)`,
-    );
-    assert.ok(
-      new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+authenticated`, "i").test(hit.sql),
-      `public.${name} must be granted EXECUTE to authenticated, or the caller cannot stamp`,
-    );
-    assert.ok(
-      !new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+[^;]*\\banon\\b`, "i").test(hit.sql),
-      `public.${name} must not be granted EXECUTE to anon`,
-    );
+  // The fence, asserted on the migration as a whole because these are separate
+  // statements from the CREATE.
+  assert.ok(
+    new RegExp(`alter\\s+table\\s+public\\.${CLAIM_TABLE}\\s+enable\\s+row\\s+level\\s+security`, "i").test(sql),
+    `public.${CLAIM_TABLE} must enable RLS; with no policies that is what closes it to every role that does not bypass RLS`,
+  );
+  assert.ok(
+    new RegExp(`revoke\\s+all\\s+on\\s+public\\.${CLAIM_TABLE}\\s+from\\s+[^;]*\\bauthenticated\\b`, "i").test(sql),
+    `public.${CLAIM_TABLE} must REVOKE ALL from authenticated — the client holding nothing here is the entire fix`,
+  );
+  assert.ok(
+    new RegExp(`grant\\s+select\\s*,\\s*insert\\s+on\\s+public\\.${CLAIM_TABLE}\\s+to\\s+service_role`, "i").test(sql),
+    `public.${CLAIM_TABLE} must grant select+insert to service_role — LOAD-BEARING: service_role has no table privileges in this project by default, so without it every claim is 42501`,
+  );
+  // ⚠️ NO DELETE, DELIBERATELY. A claim is kept once taken, including when the
+  // provider errors. An un-claim is exactly the unbounded re-send this table
+  // exists to prevent, so granting DELETE here would reopen the class.
+  assert.equal(
+    new RegExp(`grant\\s+[^;]*\\bdelete\\b[^;]*on\\s+public\\.${CLAIM_TABLE}`, "i").test(sql), false,
+    `nothing may be granted DELETE on public.${CLAIM_TABLE}: an un-claim reopens the unbounded re-send`,
+  );
+  assert.equal(
+    new RegExp(`grant\\s+[^;]*on\\s+public\\.${CLAIM_TABLE}\\s+to\\s+[^;]*\\b(authenticated|anon)\\b`, "i").test(sql), false,
+    `public.${CLAIM_TABLE} must not be granted to authenticated or anon at all`,
+  );
 
-    if (hit.file.startsWith("proposed/")) {
-      const base = hit.file.slice("proposed/".length);
-      assert.ok(
-        readme.includes(base),
-        `public.${name} is defined only in ${hit.file}, which is NOT applied — so ${base} must be listed in proposed/README.md`,
-      );
-      assert.ok(
-        /BLOCKS THE .*DEPLOY|blocking the deploy|blocks the deploy/i.test(readme),
-        `${base} is unapplied and the code calls it; proposed/README.md must say it blocks the deploy`,
-      );
-    }
+  // AND THE OLD CLAIM PATH MUST BE CLOSED IN THE SAME MIGRATION. Leaving EXECUTE
+  // with `authenticated` would leave round 6's bypass open for no reason: the
+  // grantee calls the stamp RPC directly, no email is sent, and a reader who
+  // still trusts those columns is misled.
+  for (const fn of ["stamp_requested_notified", "stamp_approved_notified"]) {
+    assert.ok(
+      new RegExp(`revoke\\s+execute\\s+on\\s+function\\s+public\\.${fn}\\([^)]*\\)\\s+from\\s+[^;]*\\bauthenticated\\b`, "i").test(sql),
+      `${hit.file} must revoke EXECUTE on public.${fn} from authenticated, or round 6's direct-RPC bypass stays open`,
+    );
+  }
+
+  if (hit.file.startsWith("proposed/")) {
+    const base = hit.file.slice("proposed/".length);
+    assert.ok(
+      readme.includes(base),
+      `${CLAIM_TABLE} is defined only in ${hit.file}, which is NOT applied — so ${base} must be listed in proposed/README.md`,
+    );
+    assert.ok(
+      /BLOCKS THE .*DEPLOY|blocking the deploy|blocks the deploy/i.test(readme),
+      `${base} is unapplied and the code writes it; proposed/README.md must say it blocks the deploy`,
+    );
   }
 });
 
@@ -289,20 +343,20 @@ const BRANCHES = [
     name: "requested",
     from: 'if (event === "requested")',
     to: 'event === "approved"',
-    claim: 'rpc("stamp_requested_notified"',
+    claim: 'claimNotification(requestId, "requested")',
     refusal: "already_notified",
     // Literal fragments that must be PRESENT and positioned before the first
     // send. ⚠️ Presence of the refusal STRING is not enough: a mutation to
     // `if (false) {` left "already_notified" sitting in a dead block, still
     // before the sends, and the position-only assertion passed. These pin the
     // guard EXPRESSION, which a dead branch cannot satisfy.
-    requires: ["if (!stamped)"],
+    requires: ["if (!claimed)"],
   },
   {
     name: "approved",
     from: 'if (row.status !== "underwriting" && row.status !== "approved")',
     to: null, // to end of file
-    claim: 'rpc("stamp_approved_notified"',
+    claim: 'claimNotification(requestId, "approved")',
     refusal: "already_notified",
     // `.select(` is load-bearing, not style: without it PostgREST returns no
     // body, `claimed` is empty on success as well as on a lost race, and the
@@ -395,9 +449,9 @@ test("the requested branch keeps its bad_stage refusal", () => {
 test("the deploy header names every RPC the code calls", () => {
   // The companion to the narrowed drift gate above. That gate cannot prove a
   // migration is applied, so the proof was moved to a DEPLOY STEP in index.ts's
-  // header — and a deploy step that does not list a newly added RPC is a step
-  // that silently stops covering it. This is what keeps the two in sync: add an
-  // `.rpc("x")` without naming x in the deploy header and this fails.
+  // header — and a deploy step that does not list a newly touched TABLE is a step
+  // that silently stops covering it. This is what keeps the two in sync: add a
+  // `.from("x")` without naming x in the deploy header and this fails.
   //
   // ⚠️ READS `src`, NOT `code`. `code` is comment-stripped (see the top of this
   // file), so the deploy header does not exist in it — the first version of this
@@ -414,12 +468,12 @@ test("the deploy header names every RPC the code calls", () => {
   assert.ok(end > start, "could not find the end of the comment header");
   const header = src.slice(start, end);
 
-  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
-  assert.ok(called.length > 0, "no rpc calls found — did the scan lose them?");
-  for (const name of called) {
+  const touched = [...new Set(tableAccesses().map((a) => a.target))];
+  assert.ok(touched.length > 0, "no table access found — did the scan lose it?");
+  for (const name of touched) {
     assert.ok(
       header.includes(name),
-      `index.ts calls rpc("${name}") but the deploy header does not name it, so the list_migrations step would miss it`,
+      `index.ts touches ${name} but the deploy header does not name it, so the list_migrations step would miss it`,
     );
   }
   assert.ok(
@@ -427,13 +481,13 @@ test("the deploy header names every RPC the code calls", () => {
     "the deploy header no longer names list_migrations, which is the only authoritative applied-migration check available here",
   );
 
-  // ⚠️ AND THE RPC MIGRATIONS ARE NOT THE WHOLE DEPENDENCY. The notification
-  // boundary is the PRIVILEGE NARROWING: without it the stamp functions are
-  // decorative, because the same caller writes the columns directly. A skipped
-  // apply there is WORSE than a skipped RPC migration — the RPC case is
-  // fail-closed (the claim errors, nothing is sent), while a missing revoke
-  // leaves a working function with no boundary. Codex #256 round 8; the
-  // header's first version listed only the two RPC migrations.
+  // ⚠️ AND NAMING THE TABLES IS NOT THE WHOLE DEPENDENCY. The notification
+  // boundary is the PRIVILEGE NARROWING on the tables this handler touches.
+  // ⚠️ The two kinds of missing migration FAIL DIFFERENTLY, which is why both
+  // are required: a missing CLAIM TABLE is fail-closed (every claim is 42501,
+  // the function answers `claim_failed`, nothing is sent), while a missing
+  // REVOKE leaves a working function with no boundary — silent, and the worse
+  // direction. Codex #256 round 8.
   //
   // SET EQUALITY AGAINST A DERIVED SET, on ONE machine-readable line.
   // ⚠️ An earlier version asked `header.includes(version)` and a mutation
@@ -443,52 +497,39 @@ test("the deploy header names every RPC the code calls", () => {
   // text than the property belongs to cannot fail. So the header carries a
   // single `CONFIRM APPLIED:` line and this compares that line, exactly.
   //
-  // THE REQUIRED SET IS DERIVED IN TWO HOPS, never hand-maintained:
-  //   1. every migration DEFINING an RPC this code calls;
-  //   2. every migration that REVOKES on a table those RPCs TRUST — read out of
-  //      each function's own body, not listed here.
+  // THE REQUIRED SET IS DERIVED, never hand-maintained: every APPLIED migration
+  // that REVOKES on a table this handler names in `.from(...)`.
   //
-  // ⚠️ HOP 2 USED TO SAY "revokes on public.enhancement_requests", WHICH MISSED
-  // A REAL DEPENDENCY. `stamp_approved_notified` authorizes its caller by
-  // reading `public.profiles` for role = 'underwriter'. If
-  // 20261005120100_profiles_role_not_self_assignable were skipped, the old
-  // grants let any authenticated client UPDATE or INSERT their own
-  // `profiles.role` — so a client makes themselves an underwriter, and both
-  // this function and `er_underwriter_select` believe them: approval capability
-  // and cross-client request access. A hard-coded table name could not see
-  // that; the body scan can, because the trust is written in the SQL.
-  // Codex #256 round 9.
+  // ⚠️ IT USED TO BE DERIVED FROM THE RPC BODIES, AND THAT ANCHOR IS GONE WITH
+  // THE RPCs. Re-anchoring on `.from(...)` is not a loosening — it is strictly
+  // closer to the thing that matters, because it reads what this handler
+  // actually touches rather than what a function it calls happens to mention.
+  // It also keeps round 9's finding covered for the same reason that one was
+  // missed: `profiles` is in the set because THIS FILE reads it to authorize the
+  // approved path, so 20261005120100 is still required. A hard-coded table list
+  // could not see that; this does.
+  //
+  // ⚠️ THE CLAIM TABLE'S OWN MIGRATION IS DELIBERATELY NOT IN THIS SET WHILE IT
+  // IS UNAPPLIED — it lives in proposed/ and has no applied version to name. The
+  // gate above requires it to be declared deploy-blocking in proposed/README.md
+  // instead. When it is applied and moves to migrations/, it revokes on a
+  // touched table (`revoke all ... from anon, authenticated`), so this
+  // derivation picks it up automatically and set equality then REQUIRES it on
+  // the line. Nothing has to remember to add it.
   //
   // Equality, not containment — so a version left behind after its migration is
   // renamed or dropped fails too, the same inversion lesson as BACK_ELIGIBLE.
   // Comments are stripped before the revoke scan: this file has already been
   // bitten twice by a migration's prose documenting the statement it must not
-  // contain. `on function` is excluded — an EXECUTE revoke is the functions'
-  // own hygiene, not a table boundary.
+  // contain. `on function` is excluded — an EXECUTE revoke is the functions' own
+  // hygiene, not a table boundary.
   const migDir = join(here, "..", "..", "migrations");
   const migs = readdirSync(migDir)
     .filter((f) => f.endsWith(".sql"))
     .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8") }));
 
+  const trusted = new Set(touched);
   const required = new Set();
-  const trusted = new Set();
-  for (const name of called) {
-    const defRe = new RegExp(
-      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
-    );
-    const hits = migs.filter((m) => defRe.test(m.sql));
-    assert.ok(hits.length > 0, `no migration defines public.${name}, so nothing can be required for it`);
-    for (const m of hits) {
-      required.add(m.version);
-      // Every public.<thing> the function body names, minus the RPCs
-      // themselves, is a table it reads or writes — i.e. trusts.
-      for (const t of m.sql.match(defRe)[0].matchAll(/public\.(\w+)/g)) {
-        if (!called.includes(t[1])) trusted.add(t[1]);
-      }
-    }
-  }
-  assert.ok(trusted.size > 0, "no trusted tables derived from the RPC bodies — did the body scan lose them?");
-
   const revokers = migs.filter((m) => {
     const sql = m.sql.replace(/^\s*--.*$/gm, "");
     return [...sql.matchAll(/revoke\s+[a-z, ()\w]*?\s+on\s+(?:table\s+)?public\.(\w+)/gi)]
@@ -496,7 +537,7 @@ test("the deploy header names every RPC the code calls", () => {
   });
   assert.ok(
     revokers.length > 0,
-    `no migration revokes on any of the tables these RPCs trust (${[...trusted].sort().join(", ")}) — the privilege narrowing that makes them a boundary is gone`,
+    `no migration revokes on any table this handler touches (${[...trusted].sort().join(", ")}) — the privilege narrowing that makes the claim a boundary is gone`,
   );
   for (const m of revokers) required.add(m.version);
 
@@ -506,7 +547,7 @@ test("the deploy header names every RPC the code calls", () => {
   assert.deepEqual(
     [...listed].sort(), [...required].sort(),
     "the deploy header's CONFIRM APPLIED list does not match the migrations this function actually depends on " +
-    `(defining its RPCs, or revoking on a table those RPCs trust: ${[...trusted].sort().join(", ")}): ` +
+    `(revoking on a table it touches: ${[...trusted].sort().join(", ")}): ` +
     `listed ${[...listed].sort().join(", ") || "none"}, required ${[...required].sort().join(", ")}`,
   );
 });
@@ -579,7 +620,7 @@ function carries(stmt, priv) {
   return stmt.privs.get(priv) ?? stmt.privs.get("all") ?? null;
 }
 
-test("every table these RPCs trust has its client write surface narrowed IN SOURCE", () => {
+test("every table this handler touches has its client write surface narrowed IN SOURCE", () => {
   // ⚠️ WRITTEN BECAUSE A MUTATION SURVIVED. The deploy-set gate above requires
   // the MIGRATION to be named; it does not require the STATEMENT to exist.
   // Deleting `revoke update on public.profiles from authenticated` left that
@@ -612,19 +653,22 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
     .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, "") }))
     .sort((a, b) => a.version.localeCompare(b.version));
 
-  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
-  const trusted = new Set();
-  for (const name of called) {
-    const defRe = new RegExp(
-      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
-    );
-    for (const m of migs.filter((x) => defRe.test(x.sql))) {
-      for (const t of m.sql.match(defRe)[0].matchAll(/public\.(\w+)/g)) {
-        if (!called.includes(t[1])) trusted.add(t[1]);
-      }
-    }
-  }
-  assert.ok(trusted.size > 0, "no trusted tables derived from the RPC bodies — did the body scan lose them?");
+  // ⚠️ DERIVED FROM `.from(...)`, NOT FROM RPC BODIES. The RPC anchor went with
+  // the RPCs when the claim moved to its own table; this reads the tables THIS
+  // handler actually touches, which is strictly closer to the property. Round
+  // 9's finding stays covered for the same reason it was originally missed:
+  // `profiles` is in the set because this file reads it to authorize the
+  // approved path, so its narrowing is still required here.
+  //
+  // ⚠️ THE CLAIM TABLE IS EXCLUDED, and not for convenience. Its fence is
+  // `revoke ALL from authenticated` plus zero policies — asserted in full by the
+  // claim-table gate above — whereas this test asserts the OTHER shape: a table
+  // the client legitimately writes, narrowed to specific columns. Running the
+  // "no table-wide UPDATE/INSERT" rule against a table the client may not touch
+  // at all would be checking the wrong invariant, and it would pass vacuously
+  // once the migration is applied, which is worse than not running it.
+  const trusted = new Set([...new Set(tableAccesses().map((a) => a.target))].filter((t) => t !== CLAIM_TABLE));
+  assert.ok(trusted.size > 0, "no client tables derived from the handler's .from() calls — did the scan lose them?");
 
   for (const table of trusted) {
     for (const priv of ["update", "insert"]) {
@@ -702,8 +746,8 @@ test("EVERY recipient is resolved and validated before either claim", () => {
   // BROKER_EMAIL on either branch, and a requested-event caller whose JWT
   // carries no email). A per-instance assertion would have passed all three.
   const gates = [
-    { name: "requested", from: 'if (event === "requested")', claim: 'rpc("stamp_requested_notified"' },
-    { name: "approved", from: 'if (row.status !== "underwriting"', claim: 'rpc("stamp_approved_notified"' },
+    { name: "requested", from: 'if (event === "requested")', claim: 'claimNotification(requestId, "requested")' },
+    { name: "approved", from: 'if (row.status !== "underwriting"', claim: 'claimNotification(requestId, "approved")' },
   ];
 
   assert.ok(
@@ -768,7 +812,7 @@ test("EVERY recipient is resolved and validated before either claim", () => {
   const approved = code.slice(code.indexOf('if (row.status !== "underwriting"'));
   assert.ok(
     approved.indexOf("auth.admin.getUserById") >= 0 &&
-    approved.indexOf("auth.admin.getUserById") < approved.indexOf('rpc("stamp_approved_notified"'),
+    approved.indexOf("auth.admin.getUserById") < approved.indexOf('claimNotification(requestId, "approved")'),
     "the owner lookup must run BEFORE the claim, or a lookup failure burns a claim that can never be retaken",
   );
   assert.ok(

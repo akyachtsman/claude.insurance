@@ -1,5 +1,34 @@
 # supabase/proposed/ — written, NOT applied
 
+## ⛔ 20261013_enhancement_notifications.sql — **BLOCKS THE notify-enhancement DEPLOY**
+
+**Apply this before deploying `notify-enhancement`.** The function writes
+`public.enhancement_notifications` on every invocation, so until this is applied
+every claim returns 42501, the handler answers `claim_failed`, and **nothing is
+sent**. Fail-closed — a dead endpoint, not a wrong email — and no regression,
+since the deployed function 404s on every call today.
+
+**What it does, and why it is a redesign rather than another guard.** It moves
+the notification dedup claim off the client-writable row and into a server-only
+table: `authenticated` and `anon` hold **nothing** on it, there are no policies,
+and only `service_role` has an explicit `select, insert`. Codex found a bypass of
+the old column-based claim in **four consecutive rounds** on PR #256 (staff reset
+→ write-once's open first write → the INSERT path → calling the RPC directly),
+and every one had the same root: the claim lived somewhere the client can write.
+`global.md` → *Review Rounds Have to Terminate* says the answer to that is a
+redesign, not a fifth patch.
+
+It also **revokes EXECUTE on both stamp functions from `authenticated`**, which
+closes round 6's direct-RPC bypass outright, and leaves the two stamp columns in
+place but vestigial — nothing writes them afterwards.
+
+⚠️ **Applying it is an owner decision** (it creates a table and grants on it), and
+it is deliberately NOT applied from a session. The post-apply probes are in the
+file's footer; run the write ones inside `begin; … rollback;`, because the
+Supabase MCP hangs 60s on a DELETE and applies nothing — an insert-then-delete
+probe leaves a row nobody can remove from here, which already cost the owner two
+manual statements on 2026-10-13.
+
 ## ~~20261013_notified_stamps_write_once.sql~~ — APPLIED 2026-10-13
 
 **Now `migrations/20261013013743_notified_stamps_write_once.sql`.** Applied on

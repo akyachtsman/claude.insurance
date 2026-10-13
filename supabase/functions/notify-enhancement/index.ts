@@ -44,33 +44,35 @@
 // privilege reason above. Removing it is what lets this function deploy with
 // verify_jwt ON; see supabase/config.toml.
 //
-// ⚠️⚠️ WHAT THE NOTIFICATION STAMPS DO AND DO NOT PROMISE — read before
-// trusting either column, and before adding a fifth guard to this file.
+// ⚠️⚠️ WHERE THE NOTIFICATION CLAIM LIVES, AND WHY IT MOVED.
 //
-// They record that a CLAIM WAS TAKEN. They do **not** establish that a
-// notification was attempted, let alone delivered. EXECUTE on both stamp
-// functions is granted to `authenticated`, so the grantee can call
-// `/rest/v1/rpc/stamp_requested_notified` (or the approved one) DIRECTLY,
-// without this function running and without any email being sent — after which
-// the legitimate notification answers `already_notified` and stays silent.
-// ⚠️ The post-apply probe in migrations/20261013005250 demonstrates exactly this
-// and was read as a passing test: calling the function as the owner IS the
-// bypass.
+// It is a row in `public.enhancement_notifications`, keyed (request_id, event),
+// taken before any email is sent. `authenticated` holds NOTHING on that table —
+// no select, insert, update or delete — and it has no policies, so the client
+// has no write path to its own claim at all.
 //
-// WHAT THAT IS AND IS NOT WORTH WORRYING ABOUT. A client calling the requested
-// stamp suppresses their OWN email — self-harm, negligible. An UNDERWRITER
-// calling the approved stamp suppresses the CLIENT's approval notice, silently.
-// That one is real, and it is by a trusted staff account that can already
-// approve or decline arbitrarily. Neither causes unbounded SENDING, which is
-// what the claim was introduced to stop and does stop.
+// It used to be two columns on `enhancement_requests`
+// (`requested_notified_at`, `approved_notified_at`) written by two SECURITY
+// DEFINER functions. Codex found a bypass in FOUR consecutive rounds on PR #256:
 //
-// FOUR ROUNDS, ONE MECHANISM (Codex #256 rounds 3-6): staff resetting the stamp;
-// a write-once trigger that left the first write open; the INSERT path; and now
-// the grantee calling the RPC directly. Each fix was right for its round and the
-// mechanism kept failing, which per global.md -> *Review Rounds Have to
-// Terminate* is a redesign decision rather than a fifth patch. The two candidate
-// designs and the trade-offs are written up in CLAUDE.md; it is an owner call,
-// deliberately not taken here.
+//   round 3  staff reset the stamp to null              -> unbounded resend
+//   round 4  write-once trigger leaves the FIRST write open -> forged pre-claim
+//   round 5  the INSERT path — create the row pre-stamped
+//   round 6  the grantee calls the RPC DIRECTLY — no function, no email
+//
+// Every one of those has the same root: the claim lived on a row the client can
+// write, so each fix could only narrow HOW they write it. global.md -> *Review
+// Rounds Have to Terminate* says the answer to that is a redesign, not a fifth
+// guard, so the root is gone rather than narrowed. There is no round 7 of that
+// mechanism to find, because there is no client write path left.
+//
+// ⚠️ THE TWO OLD COLUMNS ARE NOW VESTIGIAL. Nothing in this file writes them,
+// and the migration revokes EXECUTE on both stamp functions from
+// `authenticated`, which closes round 6's bypass outright. Do not read either
+// column as evidence that a notification happened; `enhancement_notifications`
+// is the record, and even that records only that a CLAIM WAS TAKEN — not that
+// an email was attempted, let alone delivered (a configured-but-erroring
+// provider leaves a claim with nothing sent, logged as `*_send`).
 //
 // Email is sent via Resend. Secrets (set in the Supabase dashboard):
 //   RESEND_API_KEY  — provider API key (required for email to actually send)
@@ -83,41 +85,40 @@
 // response from here is not evidence that mail left the building.
 //
 // ⚠️⚠️ BEFORE DEPLOYING THIS FUNCTION — the one check CI cannot make.
-// Every `.rpc(...)` below resolves against a migration, and `privilege.test.mjs`
-// gates that the definition EXISTS and is shaped correctly. It cannot gate that
-// the migration is APPLIED: it reads directories, and a file sitting in
+// Every table this file touches is created and fenced by a migration, and
+// `privilege.test.mjs` gates that those migrations SAY the right thing. It
+// cannot gate that they are APPLIED: it reads directories, and a file sitting in
 // supabase/migrations/ whose remote apply was skipped or failed looks identical
 // to one that is live. A test that could tell would need production credentials,
 // which this repo's Safety Rules forbid. So the authoritative check is a deploy
 // step, and it is this:
 //
-//   1. list the RPCs this file calls:
-//        grep -o '\.rpc("[^"]*"' index.ts | sort -u
-//      today: stamp_requested_notified, stamp_approved_notified
-//   2. run the Supabase MCP `list_migrations` and confirm the migration defining
-//      each one is present — 20261013005250 and 20261013013743 respectively
-//   2b. AND confirm every migration that REVOKES on a table these RPCs TRUST is
-//      present. These are the boundary, not housekeeping — the stamp functions
-//      are decorative without them, and ⚠️ unlike the RPC case this is NOT
-//      fail-closed: the function works and the boundary is simply absent, which
-//      is the worse direction.
+//   1. list the tables this file touches:
+//        grep -o '\.from("[^"]*"' index.ts | sort -u
+//      today: enhancement_requests, profiles, enhancement_notifications
+//   2. run the Supabase MCP `list_migrations` and confirm, for each of them,
+//      every migration that CREATES it or REVOKES on it is present. These are
+//      the boundary, not housekeeping:
+//        <the claim table> — creates enhancement_notifications and grants
+//          service_role select+insert on it. Skipped: every claim returns 42501,
+//          the function answers `claim_failed`, nothing is sent. FAIL-CLOSED —
+//          a dead endpoint, not a wrong email.
 //        20261013013743 — revoke update on enhancement_requests. Skipped: staff
-//          can reset either stamp and re-send without bound.
+//          can rewrite a client's request text and lifecycle columns.
 //        20261013014854 — revoke insert on enhancement_requests. Skipped: the
-//          table-wide INSERT grant stands, so a client creates a request with a
-//          stamp already populated and the handler then answers
-//          `already_notified` and emails nobody.
+//          table-wide INSERT grant stands.
 //        20261005120100 — revoke update/insert on profiles. Skipped: any client
-//          can set their own `profiles.role` to 'underwriter', and
-//          stamp_approved_notified AUTHORIZES THE CALLER BY READING THAT COLUMN
-//          — so they gain approval capability, and er_underwriter_select gives
-//          them every client's requests. Codex #256 round 9; the first two
-//          versions of this header missed it because the derivation was
-//          hard-coded to one table.
-//      `privilege.test.mjs` DERIVES this list in two hops — the migrations
-//      defining the called RPCs, then the migrations revoking on any table those
-//      function BODIES name — and compares the next line by set equality, so it
-//      can neither go stale nor keep a version whose migration is gone.
+//          can set their own `profiles.role` to 'underwriter', which THIS
+//          HANDLER READS to authorize the approved path — so they gain approval
+//          capability, and er_underwriter_select gives them every client's
+//          requests. Codex #256 round 9.
+//      ⚠️ Unlike the claim table, the three REVOKE migrations are NOT
+//      fail-closed: the function works and the boundary is simply absent, which
+//      is the worse direction. That asymmetry is why both kinds are listed.
+//      `privilege.test.mjs` DERIVES this list in two hops — the tables this file
+//      names in `.from(...)`, then the migrations that create or revoke on any
+//      of them — and compares the next line by set equality, so it can neither
+//      go stale nor keep a version whose migration is gone.
 //
 //   ⚠️ THE MACHINE-CHECKED LIST IS THE NEXT LINE, and it is the only part of
 //   this header `privilege.test.mjs` compares against the migrations. Keeping it
@@ -125,7 +126,14 @@
 //   version ANYWHERE in the header, and a mutation deleting 20261013014854 from
 //   the checklist PASSED because the prose above still mentioned it. An
 //   assertion over a wider text than the property belongs to cannot fail.
-//   CONFIRM APPLIED: 20261005120100 20261013005250 20261013013743 20261013014854
+//   CONFIRM APPLIED: 20261005120100 20261013013743 20261013014854
+//   PLUS the claim table's own migration, which is NOT on that line because it
+//   is not applied yet — it is supabase/proposed/20261013_enhancement_notifications.sql
+//   and proposed/README.md names it as blocking this deploy. When it is applied
+//   and moves to migrations/, its version joins the line above and the test
+//   requires it there.
+//   ⚠️ 20261013005250 came OFF this line when the claim moved: it defines
+//   stamp_requested_notified, which nothing calls any more.
 //
 //   3. only then deploy. A missing RPC migration is FAIL-CLOSED (the rpc errors and
 //      the branch returns `claim_failed` with nothing sent), so the cost is a
@@ -187,6 +195,43 @@ function missingRecipients(parts: Record<string, string>): Response | null {
   if (missing.length === 0) return null;
   console.error(JSON.stringify({ where: "recipients", missing }));
   return json({ error: "no_recipient", missing }, 502);
+}
+
+// THE CLAIM CLIENT — service-role, and it touches EXACTLY ONE table:
+// `enhancement_notifications`, the server-only dedup log. It must never read or
+// write a CLIENT table; `privilege.test.mjs` fails on any other `.from()` under
+// this client, the same way it already pins `authAdmin` to the Auth admin API.
+//
+// Why a service-role client is correct here and nowhere else in this file: the
+// point of the table is that `authenticated` holds NOTHING on it, so the caller
+// cannot write its own claim. That is the whole fix — it is what removes the
+// root the four bypasses grew from (see the migration). Everything about the
+// client's own records still goes through `caller` under RLS.
+const claims = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+// Takes the notification claim for one (request, event) pair, atomically.
+//
+// `ignoreDuplicates: true` compiles to `ON CONFLICT DO NOTHING`, so a second
+// simultaneous invocation blocks on the primary key and then comes back with
+// ZERO rows rather than an error. That is the refusal, and it is decided by the
+// database rather than by a read-then-write in this handler.
+//
+// ⚠️ FAIL CLOSED, AND THE TWO OUTCOMES ARE NOT THE SAME. Zero rows means
+// "someone else holds this claim" -> `already_notified`, nothing sent, correct.
+// An ERROR means the claim could not be evaluated at all — the table is not
+// applied yet, the grant is missing, the database is unreachable — and the
+// caller gets `claim_failed` with nothing sent. Treating an error as "already
+// claimed" would silently swallow every notification the moment the migration
+// or the grant went missing, which is exactly how this function spent its whole
+// deployed life before PR #256.
+async function claimNotification(requestId: string, event: "requested" | "approved") {
+  const { data, error } = await claims
+    .from("enhancement_notifications")
+    .upsert({ request_id: requestId, event }, { onConflict: "request_id,event", ignoreDuplicates: true })
+    .select("claimed_at")
+    .maybeSingle();
+  if (error) return { claimed: null as string | null, error };
+  return { claimed: (data?.claimed_at as string | undefined) ?? null, error: null };
 }
 
 async function sendEmail(to: string, subject: string, html: string) {
@@ -322,22 +367,20 @@ Deno.serve(async (req: Request) => {
     const badRecipients = missingRecipients({ broker: BROKER_EMAIL, client: clientEmail });
     if (badRecipients) return badRecipients;
 
-    // 4. THE CLAIM — atomic, and the actual gate. `update ... where
-    //    requested_notified_at is null and status = 'requested'` is evaluated
-    //    under a row lock: a second concurrent invocation blocks, re-evaluates
-    //    the WHERE against the committed new version, matches nothing and gets
-    //    null. So two simultaneous POSTs produce one claim and one refusal, not
-    //    two emails — which is the half a pre-read check alone cannot give.
-    const { data: claim, error: claimErr } = await caller
-      .rpc("stamp_requested_notified", { p_request: requestId });
+    // 4. THE CLAIM — atomic, and the actual gate. The primary key on
+    //    (request_id, event) IS the concurrency design: a second simultaneous
+    //    invocation blocks on that unique index and then returns ZERO rows. One
+    //    claim, one refusal, never two emails — the same guarantee the old
+    //    `update ... where <stamp> is null` gave under a row lock, with no
+    //    predicate left to get wrong.
+    const { claimed, error: claimErr } = await claimNotification(requestId, "requested");
     if (claimErr) {
-      console.error(JSON.stringify({ where: "stamp_requested", code: claimErr.code, message: claimErr.message }));
+      console.error(JSON.stringify({ where: "claim_requested", code: claimErr.code, message: claimErr.message }));
       return json({ error: "claim_failed" }, 500);
     }
-    const stamped = (claim as string | null) ?? null;
-    if (!stamped) {
-      // Lost the race, or the row moved between the read and the claim. Nothing
-      // was sent, which is the correct outcome rather than a failure.
+    if (!claimed) {
+      // Lost the race, or this (request, event) was already claimed. Nothing was
+      // sent, which is the correct outcome rather than a failure.
       return json({ error: "already_notified" }, 409);
     }
 
@@ -380,11 +423,13 @@ Deno.serve(async (req: Request) => {
     // could not fail.
     if (!brokerMail.sent || !clientMail.sent) {
       console.error(JSON.stringify({
-        where: "requested_send", claimed: stamped,
+        where: "requested_send", claimed,
         broker: brokerMail.reason, client: clientMail.reason,
       }));
     }
-    return json({ ok: true, event, broker: brokerMail, client: clientMail, stamped });
+    // `stamped` keeps its wire name: the field has always meant "when this
+    // notification was claimed", which is still exactly what it carries.
+    return json({ ok: true, event, broker: brokerMail, client: clientMail, stamped: claimed });
   }
 
   // event === "approved" — the UNDERWRITER's decision.
@@ -537,18 +582,23 @@ Deno.serve(async (req: Request) => {
   const badRecipients = missingRecipients({ broker: BROKER_EMAIL, client: clientEmail });
   if (badRecipients) return badRecipients;
 
-  const { data: claim, error: claimErr } = await caller
-    .rpc("stamp_approved_notified", { p_request: requestId });
+  // THE CLAIM. Same primary-key atomicity as the requested branch.
+  // ⚠️ WHO MAY DO THIS IS STILL ENFORCED BY THE DATABASE, just not inside this
+  // statement any more. The old SECURITY DEFINER function carried the
+  // underwriter check in its own WHERE clause; the claim table knows nothing
+  // about roles. What replaces it is not a handler assertion: the row was READ
+  // as the caller under `er_underwriter_select`, the role came from the caller's
+  // OWN `profiles` row, and the status transition below is an UPDATE as the
+  // caller under `er_underwriter_update`. A caller who is not the underwriter
+  // cannot reach this line, and could not move the row if they did.
+  const { claimed, error: claimErr } = await claimNotification(requestId, "approved");
   if (claimErr) {
-    console.error(JSON.stringify({ where: "stamp_approved", code: claimErr.code, message: claimErr.message }));
+    console.error(JSON.stringify({ where: "claim_approved", code: claimErr.code, message: claimErr.message }));
     return json({ error: "claim_failed" }, 500);
   }
-  const claimed = (claim as string | null) ?? null;
   if (!claimed) {
-    // Lost the race, already notified, the row moved, or the caller is not the
-    // underwriter — the function returns a bare NULL for all of them on
-    // purpose, so this endpoint cannot be used to tell them apart. Nothing
-    // sent, which is the correct outcome rather than a failure.
+    // Lost the race, or this (request, event) was already claimed. Nothing sent,
+    // which is the correct outcome rather than a failure.
     return json({ error: "already_notified" }, 409);
   }
 
