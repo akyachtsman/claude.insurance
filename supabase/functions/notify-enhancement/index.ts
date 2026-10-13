@@ -154,8 +154,15 @@
 //   select 'owner', pg_get_userbyid(c.relowner), case when c.relrowsecurity then 'rls on' else 'RLS OFF' end
 //     from pg_class c join pg_namespace n on n.oid = c.relnamespace
 //    where n.nspname = 'public' and c.relname = 'enhancement_notifications'
-//   union all
-//   select 'policy', polname, '' from pg_policies_compat;   -- see (c)
+//   ;
+//   -- ⚠️ THIS UNION ARM USED TO READ A RELATION NAMED `pg_policies_compat`,
+//   -- WHICH DOES NOT
+//   -- EXIST — not in PostgreSQL and not in this repo. Query (a) would have
+//   -- stopped with `relation "pg_policies_compat" does not exist` and returned
+//   -- none of the end state it promises. Codex round 24. Presenting an
+//   -- unrunnable query as "runnable" is the same overclaiming defect this file
+//   -- keeps recording; the policy check is (c), which is real, and it is
+//   -- REQUIRED SEPARATELY rather than folded in here.
 //   -- EXPECT: grantee service_role only (select, insert); owner NOT
 //   -- authenticated/anon; 'rls on'. Any other grantee, or an owner that a
 //   -- client can authenticate as, is the hole — a table owner is not subject
@@ -172,15 +179,47 @@
 //   select polname, polcmd, polroles::regrole[] from pg_policy
 //     where polrelid = 'public.enhancement_notifications'::regclass;
 //
-//   -- d. EVERY function that can write the claim table (expect exactly one)
+//   -- d. ⚠️ THE CLIENT-CALLABLE SECURITY DEFINER SURFACE — not "every function
+//   -- that can write the claim table", which is what this said and could not
+//   -- deliver. Codex round 24, answering the exact question put to it: a
+//   -- PUBLIC-executable definer helper can CALL claim_notification without
+//   -- naming the table, so a `prosrc` substring search returns one row while a
+//   -- client can still pre-consume a claim. Views, triggers and dynamically
+//   -- assembled names have the same gap. A substring search over source is
+//   -- the unsoundness just retracted for privilege.test.mjs, and repeating it
+//   -- here would have been the same mistake one layer out.
+//   --
+//   -- What IS exact is the ACL: the set of functions a client role may execute
+//   -- AS THEIR DEFINER is enumerable from the catalog, independent of any
+//   -- source text. It is small. Every row must be one you can account for.
+//   select n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) as args,
+//          p.prosecdef, p.proconfig, p.proacl,
+//          has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_can,
+//          has_function_privilege('anon',          p.oid, 'EXECUTE') as anon_can
+//     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+//    where n.nspname = 'public' and p.prosecdef
+//      and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+//        or has_function_privilege('anon', p.oid, 'EXECUTE'));
+//   -- EXPECT: the stamp functions only if their EXECUTE has not yet been
+//   -- revoked, and NOTHING that touches enhancement_notifications. A row here
+//   -- you cannot account for is a privilege-escalation path by construction —
+//   -- a definer function runs as its owner, so what it can do is not bounded
+//   -- by what the caller can do.
+//   -- Then, as a NARROWER aid and not a proof, the substring search:
 //   select p.proname, p.prosecdef, p.proacl
 //     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-//    where n.nspname = 'public'
-//      and p.prosrc ilike '%enhancement_notifications%';
-//   -- EXPECT: claim_notification and nothing else. A second SECURITY DEFINER
-//   -- function here is a second write path, executable by PUBLIC by default.
+//    where n.nspname = 'public' and p.prosrc ilike '%enhancement_notifications%';
+//   -- It finds direct writers. It does NOT find indirect ones, and must not be
+//   -- read as exhaustive.
 //
-// (a) and (d) are the ones no source scan can replace, and they are cheap.
+// ⚠️ WHAT THESE CHECKS ARE: (a)-(c) measure the claim table's own end state and
+// the RPC's ACL exactly, from the catalog — those are sound, and they are what
+// no source scan can replace. (d) bounds the REVIEWABLE SURFACE rather than
+// proving it empty: it enumerates every definer function a client can call, so
+// an escalation path must appear as a row, but deciding what a given row's body
+// does is back to reading code. Stated here rather than called authoritative,
+// because calling an incomplete check authoritative is the defect this whole
+// section exists to correct.
 //   PLUS the claim table's own migration, which is NOT on that line because it
 //   is not applied yet — it is supabase/proposed/20261013_enhancement_notifications.sql
 //   and proposed/README.md names it as blocking this deploy. When it is applied

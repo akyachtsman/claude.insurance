@@ -1233,7 +1233,16 @@ function statementKind(head, text = head) {
     // search_path and EXECUTE ACL are each asserted elsewhere.
     const touches = PROTECTED_TABLES.some((t) => new RegExp(`\\bpublic\\.${t}\\b`, "i").test(text));
     if (!touches) return "benign";
-    const isClaimRpc = new RegExp(`function\\s+public\\.${CLAIM_RPC}\\s*\\(`, "i").test(text);
+    // ⚠️ THE IDENTITY COMES FROM THE STATEMENT HEADER, NOT THE WHOLE TEXT.
+    // Codex round 24: this searched the entire statement, so a different
+    // helper could put the inert string `function public.claim_notification(`
+    // anywhere in its BODY — a literal, say — and be waved through as the
+    // allowed RPC while inserting into the claim table. Reproduced at 21/21.
+    // The header is everything before the AS clause's body, so a body cannot
+    // contribute to the name.
+    const at = asClauseBody(text);
+    const header = at && at.tagAt !== undefined ? text.slice(0, at.tagAt) : text;
+    const isClaimRpc = new RegExp(`function\\s+public\\.${CLAIM_RPC}\\s*\\(`, "i").test(header);
     return isClaimRpc ? "benign" : "function-writes-protected";
   }
   if (BENIGN_STATEMENT.test(head)) return "benign";
@@ -2036,6 +2045,11 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
     ["alter table public.open_notifications rename to enhancement_notifications", "rename"],
     ["create function public.preclaim(p uuid) returns void language sql security definer as $f$ insert into public.enhancement_notifications (request_id) values (p) $f$", "function-writes-protected"],
     ["create function public.peek() returns int language sql as $f$ select count(*) from public.help_queries $f$", "function-writes-protected"],
+    // ⚠️ THE IDENTITY EXCEPTION IS HEADER-ONLY (Codex round 24). A helper whose
+    // BODY merely contains the text `function public.claim_notification(` is
+    // NOT the claim RPC, and must not inherit its exemption.
+    ["create function public.helper(p uuid, e text) returns void language sql security definer as $h$ insert into public.enhancement_notifications (request_id, event) select p, e where 'function public.claim_notification(uuid, text)' <> '' $h$", "function-writes-protected"],
+    ["create function public.helper2() returns void language sql as 'select 1 -- function public.claim_notification(uuid, text)'", "benign"],
     // the claim RPC itself is allowed to touch it — its body, security mode,
     // search_path and EXECUTE ACL are each asserted elsewhere
     ["create or replace function public.claim_notification(p_request uuid, p_event text) returns timestamptz language sql security definer as $$ insert into public.enhancement_notifications (request_id, event) select 1 $$", "benign"],
@@ -2093,4 +2107,73 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
       `a literal naming a grant must be reported wherever it sits, outside a COMMENT: ${JSON.stringify(lit.slice(0, 60))}`,
     );
   }
+});
+
+test("the deploy header's catalog queries name only real relations", () => {
+  // ⚠️ WRITTEN BECAUSE I SHIPPED AN UNRUNNABLE ONE. The header's query (a)
+  // referenced `pg_policies_compat`, which exists in neither PostgreSQL nor
+  // this repo, so the query an operator was told to run would have stopped at
+  // `relation "..." does not exist` and returned none of the end state it
+  // promises. Codex round 24. Presenting an unrunnable query as runnable is the
+  // same overclaiming defect the header itself exists to correct, so the check
+  // is mechanical now rather than a promise to proofread.
+  const src = readFileSync(join(here, "index.ts"), "utf8");
+  const from = src.indexOf("BEFORE DEPLOYING THIS FUNCTION");
+  assert.ok(from !== -1, "index.ts has no deploy header");
+  // ⚠️ BOUNDED TO THE COMMENT BLOCK. Slicing to end-of-file swept in prose from
+  // the rest of the module — including an HTML email template — and reported
+  // `the`, `a` and `authenticated` as missing relations. Measured, not guessed:
+  // one console.log named the lines. The header ends at the first line that is
+  // not a `//` comment.
+  const header = src.slice(from).split("\n")
+    .slice(0, (() => {
+      const lines = src.slice(from).split("\n");
+      const end = lines.findIndex((l, i) => i > 0 && !/^\s*\/\//.test(l) && l.trim() !== "");
+      return end === -1 ? lines.length : end;
+    })())
+    .join("\n");
+  assert.ok(
+    /select/i.test(header),
+    "the deploy header no longer contains the catalog queries — they are the authoritative half of this check",
+  );
+
+  // Relations the deploy queries are allowed to read: the catalog and
+  // information_schema, nothing invented. `public.<table>` references are the
+  // project's own and are covered by the migration gates above.
+  const KNOWN = new Set([
+    "pg_proc", "pg_namespace", "pg_class", "pg_policy", "pg_roles", "pg_authid",
+    "information_schema.table_privileges", "information_schema.column_privileges",
+    "information_schema.role_table_grants",
+  ]);
+  // ⚠️ THE CHECK IS INVERTED, AFTER TWO ATTEMPTS AT CLASSIFYING PROSE FAILED.
+  // Scanning every `from X` flagged `the`, `a` and `authenticated` — words
+  // following "from" in the header's own English — and an indented-line
+  // heuristic did not help, because one prose line literally begins "from a
+  // session, see above". Matching across the joined text made it worse, since
+  // `\s` spans newlines.
+  //
+  // So instead of deciding which lines are SQL, this validates only names that
+  // are CATALOG-SHAPED (`pg_*` or `information_schema.*`) — which is exactly
+  // the mistake that happened: I invented `pg_policies_compat`. An invented
+  // relation with some other shape would be missed, and that limit is stated
+  // rather than hidden; what is covered is the failure mode this gate exists
+  // for, with no prose to misclassify.
+  const bad = [];
+  for (const m of header.matchAll(/\bfrom\s+(pg_[\w.]*|information_schema\.[\w.]*)/gi)) {
+    const rel = m[1].toLowerCase().replace(/[^\w.]+$/, "");
+    if (!KNOWN.has(rel)) bad.push(rel);
+  }
+  assert.deepEqual(
+    [...new Set(bad)], [],
+    "the deploy header tells an operator to run a query against a relation that is not a known catalog view — " +
+    `it will error instead of answering, which is worse than having no check: ${[...new Set(bad)].join(", ")}`,
+  );
+
+  // And the header must not call the function-surface query exhaustive, which
+  // is the claim Codex round 24 disproved: a PUBLIC-executable definer helper
+  // can CALL the claim RPC without naming the table.
+  assert.ok(
+    /not\s+(?:be\s+read\s+as\s+)?exhaustive|NOT find indirect/i.test(header),
+    "the deploy header must state that the prosrc substring search is not exhaustive — calling an incomplete check authoritative is the defect this header exists to correct",
+  );
 });

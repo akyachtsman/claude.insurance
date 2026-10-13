@@ -2234,6 +2234,66 @@ failure mode — compare the round-20 version, which lost its `return 0` and
 printed six names with silence under each. **Make the applied-check loud, never
 inferential.**
 
+### ⚠️ ROUND 24 — I SHIPPED AN UNRUNNABLE QUERY AND CALLED IT RUNNABLE
+
+Three P2s, and the first is the one to keep: **the round-23 deploy header, written
+specifically to replace an overclaiming scanner with an authoritative check,
+referenced `pg_policies_compat` — a relation that exists in neither PostgreSQL
+nor this repo.** Query (a) would have stopped with *relation does not exist* and
+returned none of the end state it promises. The overclaiming defect, reproduced
+one layer out, inside the section written to correct it, in the same commit.
+
+It is now gated mechanically rather than by a promise to proofread: a test reads
+the header, and any `from pg_*` / `from information_schema.*` naming something
+outside a known set **fails by name**.
+⚠️ **That gate took three attempts, and the first two are the lesson.** Scanning
+every `from X` flagged `the`, `a` and `authenticated` — the words after "from"
+in the header's own English. An indented-line heuristic did not help either,
+because one prose line literally begins *"from a session, see above"*, and
+joining the lines made it worse since `\s` spans newlines. Bounding the slice to
+the comment block was also needed: it had run to end-of-file and was reading an
+HTML email template. What settled it was **inverting the check** — validate only
+names that are CATALOG-SHAPED, which is exactly the mistake that happened. An
+invented relation of some other shape is missed, and that limit is stated rather
+than hidden. (Found by one `console.log` printing the offending lines, after two
+rounds of guessing at the classifier.)
+
+**The second finding answers the question I had put to the round:** the `prosrc`
+substring query does **not** list every function that can write the claim table.
+A PUBLIC-executable SECURITY DEFINER helper can **call** `claim_notification`
+without ever naming the table, so (b) still reports the RPC as service-role-only
+and the substring search still returns one row while a client pre-consumes a
+claim. Views, triggers and dynamically assembled names have the same gap. So the
+deploy step had inherited the unsoundness just retracted for the scanner.
+**Fixed by changing what is measured, not by widening a regex:** the set of
+functions a client role may execute *as their definer* is **exact from the ACL**,
+independent of any source text, and small —
+`where p.prosecdef and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+or has_function_privilege('anon', …))`. Every row must be one you can account
+for, because a definer function runs as its owner and so is not bounded by what
+the caller can do. The substring search is kept as a narrower aid and **labelled
+not exhaustive**; a test asserts that label is present, so the word
+"authoritative" cannot quietly come back.
+**What (d) now claims, precisely:** it bounds the *reviewable surface* rather
+than proving it empty. An escalation path must appear as a row; deciding what a
+given row's body does is back to reading code. (a)–(c) remain exact.
+
+**The third:** `isClaimRpc` searched the whole CREATE statement, so a different
+helper could carry the inert text `function public.claim_notification(` in its
+**body** — a string literal, say — and inherit the allowed RPC's exemption while
+inserting into the claim table. Reproduced at 21/21. The identity now comes from
+the statement **header** (everything before the `AS` clause's body), so a body
+cannot contribute to the name.
+⚠️ My first repro put that string in a `--` comment, which `stripSqlComments`
+removes, so it failed for the wrong reason — the same "a repro that fails for a
+different reason than the attack is not a repro" trap as round 23, one round
+later.
+
+**Measured, 6 mutations, all caught:** the body-text impersonation and its
+quoted-string variant; reverting `isClaimRpc` to the whole text; restoring the
+invented relation; and deleting the not-exhaustive label. A legitimate
+replacement of the real claim RPC stays clean.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it
