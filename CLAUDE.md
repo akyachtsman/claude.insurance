@@ -1653,29 +1653,72 @@ PR #256's rework is what turns `notify-enhancement` from a dead endpoint (42501 
 same moment the feature does. A hole that ships with the thing that enables it is
 not a follow-up.
 
-**Written as `supabase/proposed/20261013_notified_stamps_write_once.sql`**, and
-it takes the **BEFORE UPDATE trigger** rather than the privilege narrowing above:
-- a rejection trigger **cannot break what works** — nothing in this project
-  legitimately resets a notification stamp, so it refuses only calls that are
-  already defects. A `revoke` silently breaks any writer touching a column
-  nobody remembered, and the staff lifecycle it governs had never been exercised
-  by anybody until 2026-10-09 (the broker and underwriter logins returned HTTP
-  500 for their entire existence), so "nothing else writes these" rests on a
-  reading of the code rather than on traffic.
-- **it is provable from a session and the revoke is not.** A trigger fires for
-  every writer regardless of RLS — which is exactly the property the
-  in-database probe harness lacks. Shipping an unverified revocation against a
-  lifecycle nobody has exercised is the riskier of the two.
-The two are not exclusive; applying both is strictly better, and the revoke is
-the one to prefer if narrowing capability is wanted over refusing misuse.
-⚠️ Neither fix touches the wider pre-existing gap recorded above: staff can still
-rewrite `owner`, `subject` and `body` on any client's request.
+### ⚠️ AND THE FIRST FIX FOR IT TRADED ONE HARM FOR A QUIETER ONE (round 4)
 
-⚠️ **One consequence for this repo's own habits.** The probe in
-`migrations/20261013120000_stamp_requested_notified.sql` finishes by restoring
-the demo row's `requested_notified_at` to null. Once the trigger is applied that
-statement is **refused** — correctly. Use the documented disable/enable pair, or
-leave the demo row stamped.
+Worth its own heading, because the mistake is more instructive than the fix.
+The first attempt was a BEFORE UPDATE trigger making both stamps **write-once**,
+chosen over narrowing privileges on the argument that a rejection trigger cannot
+break what works and is provable from a session. Codex round 4 showed that
+design is not merely weaker:
+
+> write-once closes BACKWARD writes (`t → null`, `t → t'`) and deliberately
+> leaves the FIRST write open. So staff can **pre-claim** a stamp on a request
+> that has not been approved — the handler then reads it populated, returns
+> `already_notified`, and **emails nobody** — and the trigger makes the forged
+> stamp **immutable**, so it can never be corrected.
+
+So it converted *"staff can resend without bound"* into *"staff can permanently
+suppress a client's approval notice"*. The second is harder to notice, because
+nothing happens. Three reviews pointed at narrowing privileges before it was
+accepted — an automated security review, then Codex rounds 3 and 4 — and
+`global.md` → *Review Rounds Have to Terminate* applies to one's own design
+choices, not only to the code.
+
+**What was wrong with the objection to narrowing: it was never measured.** The
+worry was that a REVOKE breaks a writer nobody remembered. So the writer set was
+enumerated. Every touch of this table from `js/`: an INSERT (unaffected by an
+UPDATE revoke), a SELECT, and `advanceRequest`, which builds its patch as exactly
+`{ status }` plus `approved_at` when approving. That **is** the column grant.
+Nothing else writes the table. The narrowing was a guess no longer.
+
+**The design that shipped** (`supabase/proposed/20261013_notified_stamps_write_once.sql`,
+written **not applied**):
+1. `stamp_approved_notified(uuid)` — SECURITY DEFINER, authorizes **caller**
+   (underwriter, read from `profiles`), **status** (`approved`) and **direction**
+   (null → now), mirroring `stamp_requested_notified`.
+2. `revoke update on public.enhancement_requests from authenticated;` then
+   `grant update (status, approved_at) …`. **This is the boundary** — without it
+   both stamp functions are decorative, because the same caller writes the
+   columns directly.
+3. The write-once trigger, kept but **relabelled as belt**: it does not stop a
+   pre-claim, only step 2 does. Its one specific justification is that this repo
+   has already been bitten by a later migration restating a grant table-wide,
+   which is why `20261006120000_help_queries.sql` refuses UPDATE at both the
+   grant and policy layers.
+
+⚠️ **The code and the migration ship as a pair.** `index.ts` calls
+`stamp_approved_notified`, which exists only in `proposed/`. Until it is applied
+the rpc fails and the branch returns `claim_failed` with nothing sent —
+fail-closed, and no regression, since the endpoint 404s on every call today.
+`privilege.test.mjs` enforces the coupling rather than trusting a PR thread: an
+RPC defined only in `proposed/` is allowed, **but that file must be listed in
+`proposed/README.md` as blocking the deploy.**
+
+⚠️ **TWO MUTATION SURVIVORS HERE, AND THE FIRST IS THE WORST OF THE PR.**
+Deleting the `revoke` — the single load-bearing statement — left **every** test
+green while making both stamp functions decorative. The suite was checking the
+lock and not the door. Now asserted, along with the shape of the re-grant:
+table-wide, or including a `notified_at` column, or dropping `approved_at`, each
+fail. The second survivor was the SQL scan matching the file's **own INVERSE
+block** — a `--` comment documenting the table-wide grant as the reversal —
+which is the comment-stripping trap already handled for the TypeScript scan, met
+again on a second surface.
+
+⚠️ One consequence for this repo's own habits: the probe in
+`migrations/20261013120000_stamp_requested_notified.sql` ends by restoring the
+demo row's `requested_notified_at` to null. Once this is applied that statement
+is **refused**, correctly. Use the documented disable/enable pair, or leave the
+demo row stamped.
 
 **Context for weighing it:** staff are already able to rewrite `owner`,
 `subject` and `body` on any client's request, recorded above and accepted. An

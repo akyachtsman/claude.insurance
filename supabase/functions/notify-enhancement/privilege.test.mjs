@@ -104,55 +104,127 @@ test("the requested stamp goes through the RPC, not a direct update", () => {
   assert.equal(directStamp, false, "requested_notified_at is being written by a direct .update(), which RLS refuses");
 });
 
-test("the RPC the code calls exists in an applied migration, under that exact name", () => {
+test("every RPC the code calls is defined, and an unapplied one is declared as blocking", () => {
   // Cross-file drift gate. The code and the migration are two halves of one
-  // contract; renaming the function in one place would leave the stamp silently
+  // contract; renaming the function in one place would leave the claim silently
   // returning an error nobody reads.
-  const migDir = join(here, "..", "..", "migrations");
-  const sql = readdirSync(migDir)
+  //
+  // ⚠️ `proposed/` IS SEARCHED TOO, AND THAT IS NOT A LOOSENING. This repo keeps
+  // written-but-unapplied migrations in supabase/proposed/ precisely because
+  // `migrations/` must mean "live" (see that directory's README). An RPC defined
+  // only there is a REAL state — the code ships before the migration is
+  // approved — and the honest check is not "does it exist in migrations" but
+  // "is it defined, and if it is not applied, is that declared where an
+  // operator will see it". So an unapplied RPC must be named in
+  // proposed/README.md as blocking the deploy. That turns the coupling into
+  // something enforced rather than a sentence in a PR thread.
+  const root = join(here, "..", "..");
+  const read = (dir) => readdirSync(join(root, dir))
     .filter((f) => f.endsWith(".sql"))
-    .map((f) => readFileSync(join(migDir, f), "utf8"))
-    .join("\n");
+    .map((f) => ({ file: `${dir}/${f}`, sql: readFileSync(join(root, dir, f), "utf8") }));
+  const applied = read("migrations");
+  const proposed = read("proposed");
+  const readme = readFileSync(join(root, "proposed", "README.md"), "utf8");
 
-  const called = [...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]);
+  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
   assert.ok(called.length > 0, "no rpc calls found — did the scan lose them?");
 
   for (const name of called) {
-    // ⚠️ SCOPED TO THIS FUNCTION'S OWN BODY, not the concatenated migrations.
-    // The first version of this test asserted /owner = auth.uid()/ against ALL
-    // migrations joined together, and a mutation deleting the gate from THIS
-    // function PASSED — because a dozen unrelated RLS policies in this repo
-    // contain that same string. An assertion that cannot fail is not a check;
-    // it was found by deleting the guard and re-running, which is the only way
-    // it ever gets found.
     const defRe = new RegExp(
       `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
     );
-    const def = sql.match(defRe);
-    assert.ok(def, `index.ts calls rpc("${name}") but no migration defines public.${name}( ... $$;`);
-    const body = def[0];
+    const hit = [...applied, ...proposed].find((m) => defRe.test(m.sql));
+    assert.ok(hit, `index.ts calls rpc("${name}") but no migration defines public.${name}( ... $$;`);
+    const body = hit.sql.match(defRe)[0];
 
-    // The authorisation IS the WHERE clause on a SECURITY DEFINER function, so
-    // its loss is the finding the migration names explicitly.
-    assert.ok(
-      /owner\s*=\s*auth\.uid\(\)/.test(body),
-      `public.${name} must still gate on owner = auth.uid() inside its own body`,
-    );
+    // ⚠️ SCOPED TO THIS FUNCTION'S OWN BODY, not the concatenated migrations.
+    // The first version asserted /owner = auth.uid()/ against ALL migrations
+    // joined together, and a mutation deleting the gate from THIS function
+    // PASSED — a dozen unrelated RLS policies contain that string. An assertion
+    // that cannot fail is not a check; found only by deleting the guard.
     assert.ok(
       /security\s+definer/i.test(body),
-      `public.${name} must stay SECURITY DEFINER, or the missing owner UPDATE policy refuses every call`,
+      `public.${name} must stay SECURITY DEFINER, or the narrowed privileges refuse every call`,
     );
     assert.ok(
       /set\s+search_path\s*=\s*''/.test(body),
       `public.${name} must pin search_path (advisor 0011, and SECURITY DEFINER hygiene)`,
     );
+    // Each stamp function authorizes its own caller. The requested one gates on
+    // ownership; the approved one on the underwriter role. Losing either makes
+    // the function a hole with a narrow name.
     assert.ok(
-      new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+authenticated`, "i").test(sql),
-      `public.${name} must be granted EXECUTE to authenticated, or the owner cannot stamp`,
+      /owner\s*=\s*auth\.uid\(\)/.test(body) || /role\s*=\s*'underwriter'/.test(body),
+      `public.${name} must authorize its caller (owner = auth.uid(), or the underwriter role)`,
     );
     assert.ok(
-      !new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+[^;]*\\banon\\b`, "i").test(sql),
+      new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+authenticated`, "i").test(hit.sql),
+      `public.${name} must be granted EXECUTE to authenticated, or the caller cannot stamp`,
+    );
+    assert.ok(
+      !new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${name}\\([^)]*\\)\\s+to\\s+[^;]*\\banon\\b`, "i").test(hit.sql),
       `public.${name} must not be granted EXECUTE to anon`,
+    );
+
+    if (hit.file.startsWith("proposed/")) {
+      const base = hit.file.slice("proposed/".length);
+      assert.ok(
+        readme.includes(base),
+        `public.${name} is defined only in ${hit.file}, which is NOT applied — so ${base} must be listed in proposed/README.md`,
+      );
+      assert.ok(
+        /BLOCKS THE .*DEPLOY|blocking the deploy|blocks the deploy/i.test(readme),
+        `${base} is unapplied and the code calls it; proposed/README.md must say it blocks the deploy`,
+      );
+    }
+  }
+});
+
+
+test("the privilege narrowing that makes the stamp functions a boundary is present", () => {
+  // ⚠️ THIS IS THE LOAD-BEARING STATEMENT OF THE WHOLE DESIGN, AND NOTHING
+  // ASSERTED IT UNTIL A MUTATION SAID SO. Deleting
+  // `revoke update on public.enhancement_requests from authenticated` left every
+  // other test in this file green — while making both stamp functions
+  // decorative, because the same caller can then write the columns directly.
+  // That is the exact failure the functions exist to prevent (staff resetting a
+  // stamp to force a re-send, or pre-claiming one to suppress the email), so an
+  // assertion suite that misses it is checking the lock and not the door.
+  const root = join(here, "..", "..");
+  const sql = [...readdirSync(join(root, "migrations")).map((f) => ["migrations", f]),
+               ...readdirSync(join(root, "proposed")).map((f) => ["proposed", f])]
+    .filter(([, f]) => f.endsWith(".sql"))
+    .map(([d, f]) => readFileSync(join(root, d, f), "utf8"))
+    .join("\n")
+    // ⚠️ STRIP `--` COMMENTS FIRST. These files document the very statements
+    // they must not contain — the INVERSE block spells out the table-wide
+    // `grant update ... to authenticated` as the documented reversal — so a
+    // scan over raw text fails on the file's own explanation. Exactly the trap
+    // already handled for the TypeScript scan above, met again on a second
+    // surface; found because this assertion failed on a correct migration.
+    .replace(/^[ \t]*--.*$/gm, "")
+    .replace(/([^-])--.*$/gm, "$1");
+
+  assert.ok(
+    /revoke\s+update\s+on\s+public\.enhancement_requests\s+from\s+[^;]*\bauthenticated\b/i.test(sql),
+    "no `revoke update on public.enhancement_requests from authenticated` — without it the stamp functions are decorative",
+  );
+  // And the re-grant must be COLUMN-SCOPED. A bare `grant update ... to
+  // authenticated` after the revoke would restore the hole while looking like
+  // part of the fix.
+  const regrants = [...sql.matchAll(/grant\s+update\s*(\([^)]*\))?\s*on\s+public\.enhancement_requests\s+to\s+([^;]*);/gi)];
+  assert.ok(regrants.length > 0, "the lifecycle columns are never granted back — advanceRequest would 42501");
+  for (const g of regrants) {
+    const cols = g[1];
+    if (!/\bauthenticated\b/.test(g[2])) continue;
+    assert.ok(cols, `a table-wide \`grant update on enhancement_requests to authenticated\` undoes the revoke: ${g[0].trim()}`);
+    assert.ok(
+      /\bstatus\b/.test(cols) && /\bapproved_at\b/.test(cols),
+      `the re-grant must cover status and approved_at (advanceRequest writes exactly those): ${cols}`,
+    );
+    assert.ok(
+      !/notified_at/.test(cols),
+      `a notified_at column is granted back to authenticated, which reopens the reset and pre-claim: ${cols}`,
     );
   }
 });
@@ -183,7 +255,7 @@ const BRANCHES = [
     name: "approved",
     from: 'if (row.status !== "underwriting" && row.status !== "approved")',
     to: null, // to end of file
-    claim: '.is("approved_notified_at", null)',
+    claim: 'rpc("stamp_approved_notified"',
     refusal: "already_notified",
     // `.select(` is load-bearing, not style: without it PostgREST returns no
     // body, `claimed` is empty on success as well as on a lost race, and the
@@ -196,10 +268,16 @@ const BRANCHES = [
     // `if (!moved ...)` is the other half: the underwriting->approved
     // transition must PROVE it matched, since PostgREST does not error when an
     // update matches zero rows.
+    // ⚠️ The claim moved from a plain conditional update to an authorizing
+    // SECURITY DEFINER function (Codex #256 round 4): `authenticated` held
+    // UPDATE on every column, so staff could reset a stamp to force a re-send
+    // OR pre-claim one to suppress the email entirely. `.eq("status",
+    // "approved")` and the role check are now belt; the boundary is in the
+    // function, which authorizes caller, status and direction.
+    // `if (!moved ...)` stays: the underwriting->approved transition must still
+    // prove it matched, because PostgREST does not error on a zero-row update.
     requires: [
-      '.select(',
-      "if (!claimed || claimed.length === 0)",
-      '.eq("status", "approved")',
+      "if (!claimed)",
       "if (!moved || moved.length === 0)",
     ],
   },

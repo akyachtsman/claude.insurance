@@ -355,57 +355,46 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 4. THE CLAIM — atomic, and the gate AGAINST RETRIES AND RACES ONLY.
-  //    ⚠️ IT IS NOT A GATE AGAINST A DELIBERATE UNDERWRITER, and saying so here
-  //    rather than letting the word "gate" carry more than it earns. Measured
-  //    2026-10-13: `authenticated` holds UPDATE on EVERY column of this table,
-  //    including both notified stamps, and `er_underwriter_update`'s `with
-  //    check` constrains only `status`. So an underwriter can
-  //    `update enhancement_requests set approved_notified_at = null` on an
-  //    approved row — status unchanged, so the check passes — and then re-POST,
-  //    resending both emails. Staff can do the same to `requested_notified_at`
-  //    on any client's row, so the RPC-backed claim on the other branch is
-  //    resettable by staff too (not by the owner, who has no UPDATE policy).
-  //    Closing that needs a privilege change, not more handler code: revoke
-  //    table-wide UPDATE from `authenticated` and grant `update (status,
-  //    approved_at)` — the whole of what staff legitimately writes — then stamp
-  //    both notified columns through SECURITY DEFINER functions. Recorded as an
-  //    owner decision in CLAUDE.md rather than smuggled in here, because it
-  //    narrows staff privileges and cannot be verified end-to-end from a session
-  //    (no egress; the in-database harness does not enforce RLS).
-  //    What this claim DOES buy, and it is worth having: a retry, a double
-  //    submit and two concurrent invocations each produce one email, not two.
-  //    ⚠️ NO RPC IS NEEDED ON THIS PATH, and
-  //    the asymmetry with the requested branch is the point: the OWNER has no
-  //    UPDATE policy on this table, which is why the requested stamp needs a
-  //    SECURITY DEFINER function; the UNDERWRITER has `er_underwriter_update`,
-  //    whose `with check` admits a row at 'approved', so a plain conditional
-  //    update is available and is the narrower tool. `.is(..., null)` makes it a
-  //    claim: evaluated under a row lock, so a second concurrent invocation
-  //    blocks, re-reads the committed row and matches nothing. `.select("id")`
-  //    is what lets us SEE that it matched nothing — without it PostgREST
-  //    returns no body and a lost race is indistinguishable from a win.
-  //    ⚠️ AND IT BINDS TO THE CURRENT STATUS, not just the stamp (Codex #256
-  //    round 3, P1). Filtering on `approved_notified_at is null` alone, this
-  //    claim still matched a row another underwriter had moved to `declined`
-  //    after the stage read — `er_underwriter_update` admits a resulting
-  //    `declined` row, so the write succeeded, `.select("id")` reported one row,
-  //    and the client was emailed "your request has final approval" about a
-  //    request that had just been declined. `.eq("status", "approved")` makes the
-  //    claim and the thing being announced the same fact.
-  const { data: claimed, error: claimErr } = await caller.from("enhancement_requests")
-    .update({ approved_notified_at: new Date().toISOString() })
-    .eq("id", requestId)
-    .eq("status", "approved")
-    .is("approved_notified_at", null)
-    .select("id");
+  // 4. THE CLAIM — through an authorizing SECURITY DEFINER function, so the
+  //    handler is not the thing being trusted.
+  //
+  //    ⚠️ THIS WAS A PLAIN CONDITIONAL UPDATE UNTIL Codex #256 round 4, and the
+  //    history is worth keeping because the update looked sufficient twice.
+  //    `authenticated` held UPDATE on every column of this table, so:
+  //      - staff could reset either stamp to null and make this function
+  //        re-send without bound (round 3 / an automated security review), and
+  //      - staff could PRE-CLAIM a stamp on an unapproved request, after which
+  //        this function reads it populated, answers `already_notified`, and
+  //        emails NOBODY (round 4). A write-once trigger alone made that
+  //        second one permanent, which is why the trigger-only design was
+  //        withdrawn.
+  //    The fix is in the database, not here: `revoke update on
+  //    enhancement_requests from authenticated` + `grant update (status,
+  //    approved_at)`, with both stamps written only through functions that
+  //    authorize caller, status and direction. `stamp_approved_notified`
+  //    requires the caller to be the underwriter (read from `profiles`, not
+  //    from the request), the row to be at `approved`, and the column to be
+  //    null — so the role check above and the `.eq("status","approved")` this
+  //    replaces are now belt, with the boundary in the function.
+  //
+  //    ⚠️ THE MIGRATION AND THIS CALL SHIP AS A PAIR.
+  //    supabase/proposed/20261013_notified_stamps_write_once.sql defines this
+  //    function and is NOT applied. Until it is, this rpc fails and the branch
+  //    returns `claim_failed` with nothing sent — fail-closed, and no
+  //    regression, because the function returns 404 on every call today and is
+  //    explicitly not deployable before that migration lands.
+  const { data: claim, error: claimErr } = await caller
+    .rpc("stamp_approved_notified", { p_request: requestId });
   if (claimErr) {
     console.error(JSON.stringify({ where: "stamp_approved", code: claimErr.code, message: claimErr.message }));
     return json({ error: "claim_failed" }, 500);
   }
-  if (!claimed || claimed.length === 0) {
-    // Lost the race, or it was already notified between the read and here.
-    // Nothing sent, which is the correct outcome rather than a failure.
+  const claimed = (claim as string | null) ?? null;
+  if (!claimed) {
+    // Lost the race, already notified, the row moved, or the caller is not the
+    // underwriter — the function returns a bare NULL for all of them on
+    // purpose, so this endpoint cannot be used to tell them apart. Nothing
+    // sent, which is the correct outcome rather than a failure.
     return json({ error: "already_notified" }, 409);
   }
 
