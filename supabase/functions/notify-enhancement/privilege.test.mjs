@@ -821,3 +821,50 @@ test("EVERY recipient is resolved and validated before either claim", () => {
   );
 
 });
+
+test("the claim FAILS CLOSED: an error is never read as 'already claimed'", () => {
+  // ⚠️ WRITTEN BECAUSE A MUTATION SURVIVED. Changing claimNotification's error
+  // branch to `return { claimed: null, error: null }` passed every other test in
+  // this file — while converting the single most dangerous failure mode into a
+  // silent one. The comment above that helper claimed "FAIL CLOSED, and the two
+  // outcomes are not the same"; nothing checked it. Same class as the other
+  // comment-overclaims-code findings this pair has produced all evening, and
+  // found the same way.
+  //
+  // WHY IT MATTERS MORE THAN IT LOOKS. Zero rows means someone else holds the
+  // claim -> `already_notified`, nothing sent, correct. An ERROR means the claim
+  // could not be evaluated AT ALL — the migration is not applied, the grant is
+  // missing, the database is unreachable. Collapsing the second into the first
+  // makes every notification vanish quietly the moment the table or the grant
+  // goes missing, which is precisely how this function spent its entire deployed
+  // life before PR #256: a 42501 folded into a 404 that looked like a bad id.
+  const m = code.match(/async function claimNotification\([\s\S]*?\n\}/);
+  assert.ok(m, "claimNotification is gone or has been reshaped beyond this scan");
+  const body = m[0];   // scoped to the helper: the smallest unit owning this property
+
+  assert.ok(
+    /if\s*\(error\)\s*return\s*\{[^}]*\berror\b\s*\}/.test(body),
+    "claimNotification's error branch must return the error itself (shorthand `{ ..., error }`), so the caller can tell a failed claim from a taken one",
+  );
+  assert.equal(
+    /if\s*\(error\)\s*return\s*\{[^}]*error\s*:\s*null/.test(body), false,
+    "claimNotification nulls its error on the failure path — a missing table, a missing grant or an unreachable database would then read as 'already claimed' and silently send nothing",
+  );
+
+  // And both call sites must act on it: an error is `claim_failed` (500), never
+  // the 409 that means someone else holds the claim.
+  const sites = [...code.matchAll(/claimNotification\(requestId,\s*"(requested|approved)"\)/g)];
+  assert.equal(sites.length, 2, `expected both branches to claim; found ${sites.length}`);
+  for (const [, event] of sites) {
+    const at = code.indexOf(`claimNotification(requestId, "${event}")`);
+    const after = code.slice(at, at + 600);
+    assert.ok(
+      /if\s*\(claimErr\)/.test(after) && /claim_failed/.test(after),
+      `the ${event} branch does not turn a claim error into claim_failed`,
+    );
+    assert.ok(
+      /already_notified/.test(after),
+      `the ${event} branch does not turn a zero-row claim into already_notified`,
+    );
+  }
+});
