@@ -69,6 +69,88 @@ const CLAIM_RPC = "claim_notification";
 // The CLIENT tables this handler touches — `.from(...)` only, and never the
 // claim table. Used by the gates that ask "what must be narrowed for the client",
 // which is a different question from "what must the service role reach".
+// ── ONE ORDERING, ONE EFFECTIVE-STATE READER, USED BY EVERY GATE BELOW ──────
+//
+// ⚠️ THIS EXISTS BECAUSE THE SAME DEFECT APPEARED THREE TIMES, each caught by
+// Codex, each in a gate I had just written:
+//
+//   1. the stamp-RPC gate took the FIRST matching definition (`.find()`), so a
+//      later CREATE OR REPLACE dropping `owner = auth.uid()` would be ignored;
+//   2. the claim-TABLE fence was scoped to the migration that creates the table,
+//      so a later grant to `authenticated` would be ignored;
+//   3. the claim-FUNCTION gate, written to fix a P1, reintroduced BOTH — first
+//      definition, and EXECUTE grants scoped to the defining migration.
+//
+// global.md -> *Review Rounds Have to Terminate*: the third occurrence of one
+// mechanism is a redesign, not a third patch. The mechanism was "each gate does
+// its own lookup", so there is now one lookup. Postgres applies migrations in
+// order and the LAST statement wins; any gate that reads a single file is
+// asserting about a version that may never run.
+function orderedMigrations() {
+  const root = join(here, "..", "..");
+  const read = (dir) => readdirSync(join(root, dir))
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => ({ file: `${dir}/${f}`, version: f, sql: readFileSync(join(root, dir, f), "utf8") }));
+  // APPLIED FIRST, in version order; then PROPOSED, in filename order.
+  //
+  // ⚠️ I CHANGED THIS TO A SINGLE VERSION SORT AND IT WAS WRONG — caught by a
+  // real assertion failing, not by reasoning. `migrations/` is what HAS run, in
+  // the order it ran. `proposed/` has not run, so whenever it does, it runs
+  // after all of those. A single version sort put
+  // `proposed/20261013_enhancement_notifications.sql` BEFORE
+  // `migrations/20261013005250_...` (punctuation collates before digits), so its
+  // `revoke execute` was replayed before the grant it is meant to cancel, and
+  // the stamp functions read as still executable by `authenticated`.
+  //
+  // What misled me was my own mutation: a probe migration in `migrations/` dated
+  // 29990101 that grants the claim table to `authenticated`. That state cannot
+  // exist — a file in `migrations/` is one that has ALREADY been applied, so it
+  // cannot also be waiting to run after something unapplied. The realistic
+  // version of that scenario is a second file in `proposed/` sorting after the
+  // claim migration, which this ordering does catch. A mutation that encodes an
+  // impossible state is worse than no mutation: it argues for a wrong fix.
+  return [
+    ...read("migrations").sort((a, b) => a.version.localeCompare(b.version)),
+    ...read("proposed").sort((a, b) => a.version.localeCompare(b.version)),
+  ];
+}
+
+// The definition Postgres would actually be running: the LAST create-or-replace
+// of this function, across every migration in order — and the last one within a
+// file, since one file may replace it twice.
+function effectiveFunction(name) {
+  const src = `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`;
+  let found = null;
+  for (const m of orderedMigrations()) {
+    const sql = m.sql.replace(/^\s*--.*$/gm, "");   // this repo documents what it must not contain
+    let last = null;
+    for (const hit of sql.matchAll(new RegExp(src, "ig"))) last = hit[0];
+    if (last) found = { file: m.file, body: last, sql };
+  }
+  return found;
+}
+
+// Net EXECUTE state for a function, per grantee channel, after replaying every
+// migration in order. `null` means nobody granted it, or a later REVOKE closed
+// it; a filename means that migration left it OPEN.
+function effectiveExecute(name) {
+  const state = { authenticated: null, anon: null, public: null, service_role: null };
+  const re = new RegExp(
+    `\\b(grant|revoke)\\s+execute\\s+on\\s+function\\s+public\\.${name}\\s*\\([^)]*\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
+  );
+  for (const m of orderedMigrations()) {
+    const sql = m.sql.replace(/^\s*--.*$/gm, "");
+    for (const stmt of sql.matchAll(re)) {
+      const [, verb, roles] = stmt;
+      for (const ch of Object.keys(state)) {
+        if (!new RegExp(`\\b${ch}\\b`, "i").test(roles)) continue;
+        state[ch] = verb.toLowerCase() === "revoke" ? null : m.file;
+      }
+    }
+  }
+  return state;
+}
+
 function clientTables() {
   return [...new Set(tableAccesses()
     .filter((a) => a.kind === "from" && a.target !== CLAIM_TABLE)
@@ -243,10 +325,14 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
   // with `authenticated` would leave round 6's bypass open for no reason: the
   // grantee calls the stamp RPC directly, no email is sent, and a reader who
   // still trusts those columns is misled.
+  // ⚠️ NET STATE AGAIN, not "a revoke appears in this file". A later migration
+  // re-granting either stamp function to `authenticated` reopens round 6, and a
+  // scan of the creating migration alone would never see it.
   for (const fn of ["stamp_requested_notified", "stamp_approved_notified"]) {
-    assert.ok(
-      new RegExp(`revoke\\s+execute\\s+on\\s+function\\s+public\\.${fn}\\([^)]*\\)\\s+from\\s+[^;]*\\bauthenticated\\b`, "i").test(sql),
-      `${hit.file} must revoke EXECUTE on public.${fn} from authenticated, or round 6's direct-RPC bypass stays open`,
+    const ex = effectiveExecute(fn);
+    assert.equal(
+      ex.authenticated, null,
+      `EXECUTE on public.${fn} ends up held by authenticated (granted by ${ex.authenticated}) — that is round 6's direct-RPC bypass, reopened`,
     );
   }
 
@@ -262,19 +348,10 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
   // interesting part, and the same "migration ORDER decides" lesson round 12
   // taught on the other replay. Applied there, not here, until now.
   //
-  // So: replay every migration in order and assert the END STATE.
-  //
-  // ⚠️ ORDERED BY VERSION ACROSS BOTH DIRECTORIES, and the first version of this
-  // sorted `proposed` LAST — which a mutation immediately defeated. A probe
-  // migration granting the claim table to `authenticated` with a later version
-  // (29990101…) PASSED, because the proposed file's `revoke all` was replayed
-  // after it and cancelled it. That ordering is a fiction: once the proposed
-  // file is applied it takes its own version (20261013…), so a migration dated
-  // after it really does land after it. Sorting everything by its version
-  // prefix is the only ordering that matches what Postgres will see.
-  const ordered = [...applied, ...proposed]
-    .map((m) => ({ ...m, version: m.file.replace(/^.*\//, "") }))
-    .sort((a, b) => a.version.localeCompare(b.version));
+  // So: replay every migration in order and assert the END STATE, through the
+  // one shared ordering — see orderedMigrations() for why that ordering is
+  // applied-then-proposed, and for the mutation that argued me into a wrong one.
+  const ordered = orderedMigrations();
   const endState = {};   // channel -> priv -> file that last opened it
   for (const m of ordered) {
     for (const stmt of privilegeStatements(m.sql.replace(/^\s*--.*$/gm, ""), CLAIM_TABLE)) {
@@ -961,18 +1038,15 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
   // column-based claim did this one thing right — `and status = 'approved'` in
   // the same statement — and the redesign dropped it while fixing everything
   // around it.
-  const root = join(here, "..", "..");
-  const read = (dir) => readdirSync(join(root, dir))
-    .filter((f) => f.endsWith(".sql"))
-    .map((f) => ({ file: `${dir}/${f}`, sql: readFileSync(join(root, dir, f), "utf8") }));
-
-  const defRe = new RegExp(
-    `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${CLAIM_RPC}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
-  );
-  const hit = [...read("migrations"), ...read("proposed")].find((m) => defRe.test(m.sql));
+  // ⚠️ THE EFFECTIVE DEFINITION, NOT THE FIRST ONE. A later CREATE OR REPLACE
+  // that drops either status predicate is what Postgres would run, and the first
+  // version of this gate took the first match — the same defect Codex had
+  // already found on the stamp-RPC gate, reintroduced in its replacement. Third
+  // occurrence of that class; see orderedMigrations() for why it is now one
+  // shared lookup rather than a third patch.
+  const hit = effectiveFunction(CLAIM_RPC);
   assert.ok(hit, `the handler calls ${CLAIM_RPC} but no migration defines public.${CLAIM_RPC}`);
-  const sql = hit.sql.replace(/^\s*--.*$/gm, "");
-  const body = sql.match(defRe)[0];   // scoped to the function's own body
+  const body = hit.body;   // scoped to the function's own body
 
   // The predicate, both directions. A claim for an event may only be taken while
   // the request is at the status that event announces.
@@ -995,17 +1069,22 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
   // ⚠️ AND IT MUST NOT BE CALLABLE BY THE CLIENT. This is the whole difference
   // between this function and the stamp functions round 6 bypassed: those were
   // granted EXECUTE to `authenticated`.
+  // ⚠️ THE NET EXECUTE STATE AFTER EVERY MIGRATION, not the grants in the file
+  // that happens to define the function. A later `grant execute ... to
+  // authenticated` would otherwise pass unseen — and that is round 6 exactly:
+  // the client taking its own claim and permanently suppressing the real
+  // notification. Codex raised this as its own finding, in the same review that
+  // caught the first-definition half.
+  const exec = effectiveExecute(CLAIM_RPC);
+  for (const ch of ["authenticated", "anon", "public"]) {
+    assert.equal(
+      exec[ch], null,
+      `EXECUTE on public.${CLAIM_RPC} ends up held by ${ch.toUpperCase()} (granted by ${exec[ch]}) — the client can then take its own claim and suppress the real notification, which is round 6 again`,
+    );
+  }
   assert.ok(
-    new RegExp(`revoke\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+from\\s+[^;]*\\bauthenticated\\b`, "i").test(sql),
-    `EXECUTE on public.${CLAIM_RPC} must be revoked from authenticated, or the client can take its own claim — which is round 6 again`,
-  );
-  assert.equal(
-    new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+to\\s+[^;]*\\b(authenticated|anon|public)\\b`, "i").test(sql), false,
-    `EXECUTE on public.${CLAIM_RPC} must not be granted to authenticated, anon or PUBLIC — service_role only`,
-  );
-  assert.ok(
-    new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+to\\s+service_role`, "i").test(sql),
-    `EXECUTE on public.${CLAIM_RPC} must be granted to service_role, or every claim fails and nothing is ever sent`,
+    exec.service_role,
+    `EXECUTE on public.${CLAIM_RPC} must end up granted to service_role, or every claim fails and nothing is ever sent`,
   );
   assert.ok(
     /security\s+definer/i.test(body) && /set\s+search_path\s*=\s*''/.test(body),
