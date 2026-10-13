@@ -665,10 +665,20 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
       const open = Object.entries(openedBy).filter(([, f]) => f);
       assert.deepEqual(
         open, [],
+        // ⚠️ "STILL IN FORCE", not "after the revoke" — the first wording was
+        // wrong for the case that matters most. A `grant ... to public` placed
+        // BEFORE the revokes is still open at the end, because
+        // `revoke ... from authenticated` does not touch the PUBLIC channel.
+        // Order does not launder a PUBLIC grant, and a message saying "after
+        // the revoke" would send a reader looking for a late migration that
+        // does not exist.
         open.map(([ch, f]) =>
-          `${f} grants table-wide ${priv.toUpperCase()} on public.${table} to ${ch.toUpperCase()}` +
+          `${f} leaves table-wide ${priv.toUpperCase()} on public.${table} granted to ` +
+          `${ch.toUpperCase()}` +
           (ch === "public" ? " (which every role inherits, authenticated included)" : "") +
-          " after the revoke, undoing the narrowing the stamp functions depend on").join("; "),
+          ` and still in force at the end of the replay — no later revoke closes the ` +
+          `${ch.toUpperCase()} channel, so the narrowing the stamp functions depend on is absent`)
+          .join("; "),
       );
     }
   }
