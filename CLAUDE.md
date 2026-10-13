@@ -1911,7 +1911,7 @@ check the grant for each. Narrowing one is not narrowing the column. The same
 applies to a default: a column the client cannot name is still set, so the
 default has to be the safe value.
 
-### ⚠️ TWO WAYS A MUTATION TEST LIES, both hit on 2026-10-13
+### ⚠️ THREE WAYS A MUTATION TEST LIES, all hit on 2026-10-13
 
 Found while gating the `notify-enhancement` rewrite. Neither is about the code
 under test — both are about the *harness* — and each one produced a confident
@@ -1945,6 +1945,21 @@ unscoped version could never have expressed (SECURITY INVOKER, unpinned
 **The rule: scope a source assertion to the smallest unit that owns the
 property.** Same class as the `.k-h1` visibility assertion and the inverted
 `contract.test.mjs` finding already recorded above.
+
+**3. A MUTATION THAT NEVER APPLIED READS EXACTLY LIKE A SURVIVOR.** Hit on the
+round-10 fix, and it is the quietest of the three. The mutation was "move the
+owner lookup back below the claim", scripted as a slice between two `s.index`
+anchors — and the second anchor, `const { data: claim, error: claimErr }`,
+matches the **requested** branch first, which appears EARLIER in the file. So
+the slice ran backwards, came out empty, `s.replace("", "")` was the identity,
+and the test passed. Reported as a survivor on the one fix the whole round was
+about.
+What caught it: `git diff` was **empty** after the mutation. So the rule is to
+**prove the mutation applied before grading it** — a non-empty diff, or an
+assertion inside the script (`assert out != s`), and for an ordering mutation,
+re-grep the two line numbers and check they actually swapped. A green run on an
+unmutated file is not evidence of anything, and it is indistinguishable from the
+guard holding.
 
 ### ⚠️ HTTPS EGRESS TO THE SUPABASE PROJECT IS BLOCKED FROM A SESSION (measured 2026-10-13)
 
