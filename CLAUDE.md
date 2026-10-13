@@ -2394,6 +2394,36 @@ mis-graded because the script replaced the **first** occurrence in the file,
 which for both of these words lay outside the list under test. Mutating "the
 word" is not the same as mutating "the word where it carries the claim".
 
+### ✅ PR #256 REVIEW CHAIN TERMINATED CLEAN AT ROUND 28 (2026-10-13)
+
+Twenty-eight Codex rounds, ending *"Didn't find any major issues"* on `b03b571`.
+Recorded because the shape of those rounds is the useful part, and because a
+reader meeting the sections below needs to know they describe a chain that
+**finished** rather than one still running.
+
+| rounds | what the findings were about |
+|---|---|
+| 1–16 | the handler, the claim mechanism, RLS and grants — **real behaviour** |
+| 17–22 | the source scanner's completeness — five rounds, one mechanism, ending in a redesign |
+| 23–27 | **the CLAIMS**: ten findings, nine of them documentation asserting more than its queries deliver |
+| 28 | clean |
+
+**The single most useful thing learned here:** from round 23 on, the code stopped
+being the defect and the *write-up* became it. The function, the proposed
+migration and the suite's behaviour were unchanged from `da86e83` to `b03b571`;
+every finding in that stretch was a sentence claiming more than it could. Three
+of those were in sections written specifically to correct an earlier overclaim.
+**Prose that nothing checks is the least reliable artefact in the repo**, and the
+answer that finally worked was to gate the claims mechanically — the header's
+queries must name only real relations, must carry their own non-exhaustiveness
+disclaimer, must name every known gap, and must not state an `EXPECT` that the
+migrations contradict.
+
+⚠️ **What is NOT closed, and must not be read as closed:** the owner gate below.
+`supabase/proposed/20261013_enhancement_notifications.sql` is still **written and
+not applied**, and `notify-enhancement` is still **not deployed**. A clean review
+is a statement about the diff, not about production.
+
 ### ⚠️ ROUND 27 — A WRONG `EXPECT` IS WORSE THAN A MISSING ONE
 
 One P2, and it is a factual error in the deploy checklist rather than a bypass.
