@@ -86,6 +86,62 @@ grant select, insert on public.enhancement_notifications to service_role;
 comment on table public.enhancement_notifications is
   'Server-only notification dedup for notify-enhancement. One row per (request_id, event) claimed before any email is sent. authenticated/anon hold nothing; service_role holds select+insert by explicit grant. Replaces the requested_notified_at/approved_notified_at claim, which lived on a client-writable row and was bypassed in four consecutive review rounds (PR #256).';
 
+-- ── THE CLAIM IS BOUND TO THE REQUEST'S STATUS, ATOMICALLY ──────────────────
+-- ⚠️ ADDED AFTER THE FIRST VERSION OF THIS MIGRATION, ON A P1. The first draft
+-- had the Edge Function insert into the table directly, so the claim carried no
+-- status predicate at all. Codex: if another underwriter sets the request to
+-- `declined` after this handler's guarded transition, the insert still claims
+-- the `approved` event and the client is sent a FALSE FINAL-APPROVAL EMAIL. The
+-- primary key bounds that to one email; it does not prevent it.
+--
+-- I had written that window up as "one possibly-stale email" and that was the
+-- wrong reading: on the requested path a late email is merely stale, on the
+-- approved path it asserts something that is not true about the client's policy.
+-- The OLD design did this one thing right — its claim carried
+-- `and status = 'approved'` in the same statement — and the redesign dropped it
+-- while fixing everything around it.
+--
+-- So the claim goes through a function that re-checks the status in the SAME
+-- statement that takes it. `insert ... select ... where` evaluates the predicate
+-- and the conflict together, so there is no window between the check and the
+-- claim.
+--
+-- ⚠️ WHY THIS IS NOT A RETURN TO THE THING ROUND 6 BROKE. That bypass existed
+-- because EXECUTE was granted to `authenticated`, so the client could call the
+-- stamp function itself. This one is granted to `service_role` ONLY — the client
+-- cannot call it, and `authenticated` still holds nothing on the table. It also
+-- takes no identity from `auth.uid()`: the caller was already authorized by the
+-- RLS-scoped reads and the status transition in the handler, so this function
+-- does not need to know who is calling, and could not be fooled about it if it
+-- did.
+create or replace function public.claim_notification(p_request uuid, p_event text)
+returns timestamptz
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.enhancement_notifications (request_id, event)
+  select p_request, p_event
+    from public.enhancement_requests r
+   where r.id = p_request
+     and (
+       (p_event = 'requested' and r.status = 'requested') or
+       (p_event = 'approved'  and r.status = 'approved')
+     )
+  on conflict (request_id, event) do nothing
+  returning claimed_at;
+$$;
+
+-- EXECUTE to the notification sender and nobody else. PUBLIC is revoked first
+-- because Postgres grants EXECUTE there by default — the same hygiene as
+-- 20260624160234_harden_rls_auto_enable_revoke_execute.sql, and the omission
+-- that would quietly hand this to every role.
+revoke execute on function public.claim_notification(uuid, text) from public, anon, authenticated;
+grant  execute on function public.claim_notification(uuid, text) to service_role;
+
+comment on function public.claim_notification(uuid, text) is
+  'Takes the notification claim for one (request_id, event), atomically with a re-check that the request is still at the matching status. service_role only: the client cannot call it and holds nothing on enhancement_notifications. Returns the claim time, or NULL when the claim is already held or the status no longer matches.';
+
 -- ── THE OLD CLAIM PATH IS CLOSED IN THE SAME CHANGE ─────────────────────────
 -- Nothing calls these two functions once the handler moves to the table above,
 -- and leaving them executable by `authenticated` would leave round 6's bypass

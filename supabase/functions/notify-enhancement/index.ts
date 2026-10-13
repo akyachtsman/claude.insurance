@@ -93,16 +93,19 @@
 // which this repo's Safety Rules forbid. So the authoritative check is a deploy
 // step, and it is this:
 //
-//   1. list the tables this file touches:
-//        grep -o '\.from("[^"]*"' index.ts | sort -u
-//      today: enhancement_requests, profiles, enhancement_notifications
+//   1. list what this file touches:
+//        grep -oE '\.(from|rpc)\("[^"]*"' index.ts | sort -u
+//      client tables, through the caller under RLS: enhancement_requests, profiles
+//      the service-role surface, and the whole of it: claim_notification, which
+//      is the only writer of enhancement_notifications
 //   2. run the Supabase MCP `list_migrations` and confirm, for each of them,
 //      every migration that CREATES it or REVOKES on it is present. These are
 //      the boundary, not housekeeping:
-//        <the claim table> — creates enhancement_notifications and grants
-//          service_role select+insert on it. Skipped: every claim returns 42501,
-//          the function answers `claim_failed`, nothing is sent. FAIL-CLOSED —
-//          a dead endpoint, not a wrong email.
+//        <the claim migration> — creates enhancement_notifications, grants
+//          service_role select+insert on it, and defines claim_notification with
+//          EXECUTE to service_role only. Skipped: every claim returns 42501 or
+//          "function does not exist", the handler answers `claim_failed`, nothing
+//          is sent. FAIL-CLOSED — a dead endpoint, not a wrong email.
 //        20261013013743 — revoke update on enhancement_requests. Skipped: staff
 //          can rewrite a client's request text and lifecycle columns.
 //        20261013014854 — revoke insert on enhancement_requests. Skipped: the
@@ -197,10 +200,11 @@ function missingRecipients(parts: Record<string, string>): Response | null {
   return json({ error: "no_recipient", missing }, 502);
 }
 
-// THE CLAIM CLIENT — service-role, and it touches EXACTLY ONE table:
-// `enhancement_notifications`, the server-only dedup log. It must never read or
-// write a CLIENT table; `privilege.test.mjs` fails on any other `.from()` under
-// this client, the same way it already pins `authAdmin` to the Auth admin API.
+// THE CLAIM CLIENT — service-role, and its whole surface is ONE call:
+// `claim_notification`, which writes only the server-only dedup log. It must
+// never read or write a CLIENT table; `privilege.test.mjs` fails on any other
+// `.from()` or `.rpc()` under this client, the same way it already pins
+// `authAdmin` to the Auth admin API.
 //
 // Why a service-role client is correct here and nowhere else in this file: the
 // point of the table is that `authenticated` holds NOTHING on it, so the caller
@@ -211,10 +215,20 @@ const claims = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession:
 
 // Takes the notification claim for one (request, event) pair, atomically.
 //
-// `ignoreDuplicates: true` compiles to `ON CONFLICT DO NOTHING`, so a second
-// simultaneous invocation blocks on the primary key and then comes back with
-// ZERO rows rather than an error. That is the refusal, and it is decided by the
-// database rather than by a read-then-write in this handler.
+// The function's `insert ... select ... where <status matches> on conflict do
+// nothing returning` does two things in ONE statement: a second simultaneous
+// invocation blocks on the primary key and comes back with NULL, and the
+// request's status is re-checked at the instant the claim is taken.
+//
+// ⚠️ THE STATUS RE-CHECK IS NOT BELT. Without it, an underwriter who declines
+// the request after this handler's guarded transition would still get the
+// `approved` claim, and the client would be sent a FALSE final-approval email —
+// the primary key bounds that to one email, it does not prevent it. Codex
+// raised it as a P1 on the redesign commit, and it is the one thing the OLD
+// column-based claim did right: it carried `and status = 'approved'` in the
+// same statement. Restoring that is not a return to the bypassable design —
+// EXECUTE here is `service_role` only, so the client cannot call it, and it
+// reads no identity from `auth.uid()`.
 //
 // ⚠️ FAIL CLOSED, AND THE TWO OUTCOMES ARE NOT THE SAME. Zero rows means
 // "someone else holds this claim" -> `already_notified`, nothing sent, correct.
@@ -225,13 +239,9 @@ const claims = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession:
 // or the grant went missing, which is exactly how this function spent its whole
 // deployed life before PR #256.
 async function claimNotification(requestId: string, event: "requested" | "approved") {
-  const { data, error } = await claims
-    .from("enhancement_notifications")
-    .upsert({ request_id: requestId, event }, { onConflict: "request_id,event", ignoreDuplicates: true })
-    .select("claimed_at")
-    .maybeSingle();
+  const { data, error } = await claims.rpc("claim_notification", { p_request: requestId, p_event: event });
   if (error) return { claimed: null as string | null, error };
-  return { claimed: (data?.claimed_at as string | undefined) ?? null, error: null };
+  return { claimed: (data as string | null) ?? null, error: null };
 }
 
 async function sendEmail(to: string, subject: string, html: string) {
@@ -295,7 +305,16 @@ Deno.serve(async (req: Request) => {
   // used to probe which request ids exist.
   const { data: row, error: rowErr } = await caller
     .from("enhancement_requests")
-    .select("id, owner, subject, message, context, status, requested_notified_at, approved_notified_at")
+    // ⚠️ THE TWO STAMP COLUMNS ARE NOT SELECTED, DELIBERATELY. They are vestigial
+    // after the claim moved to its own table, and two prechecks used to gate on
+    // them — so for any row whose old stamp had been set (including by round 6's
+    // direct-RPC bypass, and including this repo's own probe rows, whose values
+    // are write-once and which the new migration neither clears nor imports)
+    // this handler answered `already_notified` BEFORE consulting the claim
+    // table. The suppression bypass survived the redesign for exactly those
+    // rows. Codex #256, on the redesign commit. Not selecting them is the
+    // cheapest way to make a relapse impossible rather than merely absent.
+    .select("id, owner, subject, message, context, status")
     .eq("id", requestId)
     .maybeSingle();
   if (rowErr || !row) return json({ error: "not_found" }, 404);
@@ -350,9 +369,6 @@ Deno.serve(async (req: Request) => {
     //    RACES, and is therefore not relied on.
     if (row.status !== "requested") {
       return json({ error: "bad_stage", status: row.status, expected: "requested" }, 409);
-    }
-    if (row.requested_notified_at) {
-      return json({ error: "already_notified", at: row.requested_notified_at }, 409);
     }
 
     // 3. EVERY RECIPIENT, BEFORE THE CLAIM. The caller's own address comes from
@@ -496,9 +512,6 @@ Deno.serve(async (req: Request) => {
   }
 
   // 2. Pre-read check, for a useful error only. It races; the claim is the gate.
-  if (row.approved_notified_at) {
-    return json({ error: "already_notified", at: row.approved_notified_at }, 409);
-  }
 
   // 3. The status transition, now guarded on the status we actually read. Two
   //    concurrent invocations both saw 'underwriting' before; both wrote, and the

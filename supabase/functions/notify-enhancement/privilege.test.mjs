@@ -59,10 +59,21 @@ function tableAccesses() {
     .map((m) => ({ client: m[1], kind: m[2], target: m[3] }));
 }
 
-// The ONE table a service-role client may touch: the server-only dedup log,
-// where `authenticated` holds nothing. Everything about a CLIENT's own records
-// goes through `caller` under RLS.
+// The server-only dedup log, where `authenticated` holds nothing, and the ONE
+// function permitted to write it. Everything about a CLIENT's own records goes
+// through `caller` under RLS; these two are the service-role surface and the
+// whole of it.
 const CLAIM_TABLE = "enhancement_notifications";
+const CLAIM_RPC = "claim_notification";
+
+// The CLIENT tables this handler touches — `.from(...)` only, and never the
+// claim table. Used by the gates that ask "what must be narrowed for the client",
+// which is a different question from "what must the service role reach".
+function clientTables() {
+  return [...new Set(tableAccesses()
+    .filter((a) => a.kind === "from" && a.target !== CLAIM_TABLE)
+    .map((a) => a.target))];
+}
 
 test("every CLIENT table goes through the caller's client, and the claim table only through `claims`", () => {
   // The invariant, in one place: a service-role client must never reach a table
@@ -79,8 +90,9 @@ test("every CLIENT table goes through the caller's client, and the claim table o
   const accesses = tableAccesses();
   assert.ok(accesses.length >= 4, `expected at least 4 table/RPC accesses, found ${accesses.length}`);
 
+  const claimTargets = new Set([CLAIM_TABLE, CLAIM_RPC]);
   const wrong = accesses.filter((a) =>
-    a.target === CLAIM_TABLE ? a.client !== "claims" : a.client !== "caller");
+    claimTargets.has(a.target) ? a.client !== "claims" : a.client !== "caller");
   assert.deepEqual(
     wrong, [],
     `wrong client: ${wrong.map((w) => `${w.client}.${w.kind}("${w.target}")`).join(", ")} ` +
@@ -92,8 +104,8 @@ test("every CLIENT table goes through the caller's client, and the claim table o
   // touches exactly one table" is the claim a reader needs to be able to trust.
   const claimsTargets = [...new Set(accesses.filter((a) => a.client === "claims").map((a) => a.target))];
   assert.deepEqual(
-    claimsTargets, [CLAIM_TABLE],
-    `the \`claims\` service-role client must touch ${CLAIM_TABLE} and nothing else; found: ${claimsTargets.join(", ")}`,
+    claimsTargets, [CLAIM_RPC],
+    `the \`claims\` service-role client must call ${CLAIM_RPC} and nothing else — not even ${CLAIM_TABLE} directly, because a direct insert carries no status predicate and that is the P1 this design exists to close; found: ${claimsTargets.join(", ")}`,
   );
 });
 
@@ -526,8 +538,8 @@ test("the deploy header names every RPC the code calls", () => {
   assert.ok(end > start, "could not find the end of the comment header");
   const header = src.slice(start, end);
 
-  const touched = [...new Set(tableAccesses().map((a) => a.target))];
-  assert.ok(touched.length > 0, "no table access found — did the scan lose it?");
+  const touched = [...clientTables(), CLAIM_TABLE, CLAIM_RPC];
+  assert.ok(touched.length > 2, "no client table access found — did the scan lose it?");
   for (const name of touched) {
     assert.ok(
       header.includes(name),
@@ -586,7 +598,7 @@ test("the deploy header names every RPC the code calls", () => {
     .filter((f) => f.endsWith(".sql"))
     .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8") }));
 
-  const trusted = new Set(touched);
+  const trusted = new Set(clientTables());
   const required = new Set();
   const revokers = migs.filter((m) => {
     const sql = m.sql.replace(/^\s*--.*$/gm, "");
@@ -726,7 +738,7 @@ test("every table this handler touches has its client write surface narrowed IN 
   // "no table-wide UPDATE/INSERT" rule against a table the client may not touch
   // at all would be checking the wrong invariant, and it would pass vacuously
   // once the migration is applied, which is worse than not running it.
-  const trusted = new Set([...new Set(tableAccesses().map((a) => a.target))].filter((t) => t !== CLAIM_TABLE));
+  const trusted = new Set(clientTables());
   assert.ok(trusted.size > 0, "no client tables derived from the handler's .from() calls — did the scan lose them?");
 
   for (const table of trusted) {
@@ -930,6 +942,96 @@ test("the claim FAILS CLOSED: an error is never read as 'already claimed'", () =
     assert.ok(
       /already_notified/.test(after),
       `the ${event} branch does not turn a zero-row claim into already_notified`,
+    );
+  }
+});
+
+test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => {
+  // ⚠️ CODEX P1 ON THE REDESIGN COMMIT, and the sharpest finding of the pair.
+  // The first version of this redesign had the handler insert into the claim
+  // table directly, so the claim carried no status predicate at all. If another
+  // underwriter sets the request to `declined` after this handler's guarded
+  // transition, that insert still claims the `approved` event and the client is
+  // sent a FALSE FINAL-APPROVAL EMAIL. The primary key bounds it to one email;
+  // it does not prevent it.
+  //
+  // I had written that window up as "one possibly-stale email", which was the
+  // wrong reading: on the requested path a late email is merely stale, on the
+  // approved path it asserts something untrue about the client's policy. The OLD
+  // column-based claim did this one thing right — `and status = 'approved'` in
+  // the same statement — and the redesign dropped it while fixing everything
+  // around it.
+  const root = join(here, "..", "..");
+  const read = (dir) => readdirSync(join(root, dir))
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => ({ file: `${dir}/${f}`, sql: readFileSync(join(root, dir, f), "utf8") }));
+
+  const defRe = new RegExp(
+    `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${CLAIM_RPC}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
+  );
+  const hit = [...read("migrations"), ...read("proposed")].find((m) => defRe.test(m.sql));
+  assert.ok(hit, `the handler calls ${CLAIM_RPC} but no migration defines public.${CLAIM_RPC}`);
+  const sql = hit.sql.replace(/^\s*--.*$/gm, "");
+  const body = sql.match(defRe)[0];   // scoped to the function's own body
+
+  // The predicate, both directions. A claim for an event may only be taken while
+  // the request is at the status that event announces.
+  for (const [event, status] of [["requested", "requested"], ["approved", "approved"]]) {
+    assert.ok(
+      new RegExp(`p_event\\s*=\\s*'${event}'[\\s\\S]{0,80}?r\\.status\\s*=\\s*'${status}'`, "i").test(body),
+      `public.${CLAIM_RPC} must refuse a '${event}' claim unless the request is still at status '${status}' — without it a declined request can still be announced as approved`,
+    );
+  }
+  // It has to be ONE statement. A read-then-insert reopens the window it closes.
+  assert.ok(
+    /insert\s+into[\s\S]*?select[\s\S]*?from\s+public\.enhancement_requests[\s\S]*?where/i.test(body),
+    `public.${CLAIM_RPC} must take the claim and check the status in ONE statement (insert ... select ... where); a separate read reopens the race`,
+  );
+  assert.ok(
+    /on\s+conflict[\s\S]*?do\s+nothing[\s\S]*?returning/i.test(body),
+    `public.${CLAIM_RPC} must keep its ON CONFLICT DO NOTHING ... RETURNING — that is what makes a concurrent second claim return NULL rather than raise`,
+  );
+
+  // ⚠️ AND IT MUST NOT BE CALLABLE BY THE CLIENT. This is the whole difference
+  // between this function and the stamp functions round 6 bypassed: those were
+  // granted EXECUTE to `authenticated`.
+  assert.ok(
+    new RegExp(`revoke\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+from\\s+[^;]*\\bauthenticated\\b`, "i").test(sql),
+    `EXECUTE on public.${CLAIM_RPC} must be revoked from authenticated, or the client can take its own claim — which is round 6 again`,
+  );
+  assert.equal(
+    new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+to\\s+[^;]*\\b(authenticated|anon|public)\\b`, "i").test(sql), false,
+    `EXECUTE on public.${CLAIM_RPC} must not be granted to authenticated, anon or PUBLIC — service_role only`,
+  );
+  assert.ok(
+    new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.${CLAIM_RPC}\\s*\\([^)]*\\)\\s+to\\s+service_role`, "i").test(sql),
+    `EXECUTE on public.${CLAIM_RPC} must be granted to service_role, or every claim fails and nothing is ever sent`,
+  );
+  assert.ok(
+    /security\s+definer/i.test(body) && /set\s+search_path\s*=\s*''/.test(body),
+    `public.${CLAIM_RPC} must be SECURITY DEFINER with a pinned search_path (advisor 0011)`,
+  );
+});
+
+test("the retired stamp columns are not read back as a gate", () => {
+  // ⚠️ CODEX P2, same review. Two prechecks still gated on
+  // `row.requested_notified_at` / `row.approved_notified_at`, so for any row
+  // whose OLD stamp had been set — including by round 6's direct-RPC bypass, and
+  // including this repo's own probe rows, whose values are write-once and which
+  // the migration neither clears nor imports — the handler answered
+  // `already_notified` BEFORE consulting the claim table. The suppression bypass
+  // survived the redesign for exactly those rows.
+  //
+  // The columns are not even SELECTed now, which makes a relapse impossible
+  // rather than merely absent.
+  for (const col of ["requested_notified_at", "approved_notified_at"]) {
+    assert.equal(
+      new RegExp(`row\\.${col}`).test(code), false,
+      `the handler reads row.${col}; that column is vestigial and gating on it reinstates the suppression bypass for already-stamped rows`,
+    );
+    assert.equal(
+      new RegExp(`select\\(["'][^"']*${col}`).test(code), false,
+      `the handler still selects ${col} — don't fetch what must not be trusted`,
     );
   }
 });
