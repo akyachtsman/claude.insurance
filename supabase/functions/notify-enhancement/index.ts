@@ -96,7 +96,20 @@
 //      today: stamp_requested_notified, stamp_approved_notified
 //   2. run the Supabase MCP `list_migrations` and confirm the migration defining
 //      each one is present — 20261013005250 and 20261013013743 respectively
-//   3. only then deploy. A missing migration is FAIL-CLOSED (the rpc errors and
+//   2b. AND confirm every migration that REVOKES on public.enhancement_requests
+//      is present: 20261013013743 (revoke update) and 20261013014854 (revoke
+//      insert). These are the boundary, not housekeeping. The stamp functions
+//      are decorative without them — a skipped 20261013013743 leaves staff able
+//      to reset either stamp and re-send without bound, and a skipped
+//      20261013014854 leaves the table-wide INSERT grant, so a client can
+//      create a request with a stamp already populated and the legitimate
+//      handler then answers `already_notified` and emails nobody. ⚠️ Unlike the
+//      RPC case this is NOT fail-closed: the function works and the boundary is
+//      simply absent, which is the worse direction. Codex #256 round 8; the
+//      header's first version checked only the two RPC migrations.
+//      `privilege.test.mjs` DERIVES this list (any migration revoking on that
+//      table) and fails if one is missing here, so it cannot go stale.
+//   3. only then deploy. A missing RPC migration is FAIL-CLOSED (the rpc errors and
 //      the branch returns `claim_failed` with nothing sent), so the cost is a
 //      silent dead endpoint rather than a wrong email — which is exactly the
 //      failure mode that let this function read ACTIVE while sending nothing for
@@ -225,12 +238,20 @@ Deno.serve(async (req: Request) => {
     // stopped nothing, which is the comment-overclaims-code defect this PR has
     // now produced twice.
     //
-    // 1. NO PROVIDER KEY -> RETURN BEFORE CLAIMING. With RESEND_API_KEY unset
-    //    nothing can be sent, so there is nothing to record; claiming here would
-    //    stamp every request as notified while sending none, which is exactly
-    //    the lie the "only stamp when something went out" rule exists to
-    //    prevent. This is also the state the repo cannot currently verify, so it
-    //    is the likely one.
+    // 1. NO PROVIDER KEY -> RETURN BEFORE CLAIMING, TO PRESERVE RETRYABILITY.
+    //    With RESEND_API_KEY unset nothing can be sent and nothing ever will be
+    //    on this invocation, so claiming would burn the one claim the row has:
+    //    the request would be unclaimable afterwards, and once the key IS set
+    //    the notification could never be sent, by design. Returning first keeps
+    //    the row claimable for the invocation that can actually do something.
+    //    ⚠️ Deliberately NOT justified as "only stamp when something went out",
+    //    which is what this said — that phrasing reads the stamp as evidence of
+    //    a send, and the header above disclaims exactly that: the claim is taken
+    //    BEFORE either provider call, a provider failure leaves it populated,
+    //    and a direct RPC call populates it with no send at all. The reason is
+    //    retryability, not bookkeeping about mail. (Codex #256 round 8.)
+    //    This is also the state the repo cannot currently verify, so it is the
+    //    likely one.
     if (!RESEND_API_KEY) {
       return json({ ok: true, event, broker: { sent: false, reason: "no_provider_key" },
                     client: { sent: false, reason: "no_provider_key" }, stamped: null });

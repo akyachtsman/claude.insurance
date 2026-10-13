@@ -103,8 +103,14 @@
 -- that reason.
 --
 -- `requested_notified_at is null` makes it IDEMPOTENT and keeps the FIRST
--- notification's time. A second call returns NULL and changes nothing, so a
--- client cannot walk the timestamp forward by re-invoking the endpoint.
+-- CLAIM's time — not the first notification's, which is what this said and
+-- which the header above disclaims in terms: a direct RPC call populates the
+-- column with no function and no provider call, and a claim taken before a
+-- send that then fails stays populated. So the column answers "when was this
+-- first claimed", and nothing stronger. A second call returns NULL and changes
+-- nothing, so a client cannot walk the timestamp forward by re-invoking the
+-- endpoint. (Codex #256 round 8 — the delivery inference surviving three lines
+-- below the paragraph that removes it.)
 --
 -- `set search_path = ''` is not decoration: without it a SECURITY DEFINER
 -- function resolves unqualified names against the caller's search_path, which is

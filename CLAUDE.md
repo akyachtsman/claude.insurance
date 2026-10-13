@@ -1616,15 +1616,28 @@ contents** — the exact string, twice, on two projects — and the filter is
 verified against that exact string. Both ends are measured; the middle is the
 one CI already executed.
 
-### ⚠️ OPEN (owner decision) — STAFF CAN RESET EITHER NOTIFIED STAMP, so the claim gates retries but not intent
+### ✅ CLOSED 2026-10-13 (was OPEN, owner decision) — STAFF COULD RESET EITHER NOTIFIED STAMP
+
+⚠️ **This heading read "⚠️ OPEN (owner decision)" for three commits after the fix
+was applied, which in the canonical security constraints means a reader concludes
+the reset-and-resend hole is live.** Codex round 8. The fix is
+`migrations/20261013013743_notified_stamps_write_once.sql`, applied 2026-10-13:
+`revoke update on public.enhancement_requests from authenticated` then
+`grant update (status, approved_at)`. **Measured after apply:** `authenticated`
+may UPDATE **2 of 13 columns**, neither of them a notified stamp, so no staff
+account can reset either one — and `20261013014854` closed the INSERT path to
+the same columns the next day. The section is kept because the SHAPE of the hole
+is why the fix is a column REVOKE rather than a policy; everything below it,
+including the measurement, describes the **pre-migration** state.
 
 Raised by an automated security review of the round-2 commit on PR #256, and it
 also corrects a piece of reasoning in this repo's own migration.
 
-**Measured 2026-10-13:** `authenticated` holds UPDATE on **every column** of
-`enhancement_requests`, both notified stamps included
+**Measured 2026-10-13, BEFORE the migration below was applied** (the privileges
+are no longer these — see the paragraph above): `authenticated` held UPDATE on
+**every column** of `enhancement_requests`, both notified stamps included
 (`information_schema.column_privileges`), while `er_broker_update` and
-`er_underwriter_update` constrain only `status` in their `with check`. So:
+`er_underwriter_update` constrain only `status` in their `with check`. So, then:
 
 | who | can do what |
 |---|---|
@@ -1638,17 +1651,19 @@ a gate against a deliberate staff account. The code says exactly that now; it
 previously said "the gate", which is the fourth comment-overclaims-code instance
 on this branch pair.
 
-**The fix is a privilege change, not more handler code**, and it is the owner's
-call because it narrows staff:
+**The fix is a privilege change, not more handler code** — it was the owner's
+call because it narrows staff, it was put to them, and it is **applied**
+(`20261013013743`). The statements, as they ran:
 ```sql
 revoke update on public.enhancement_requests from authenticated;
 grant  update (status, approved_at) on public.enhancement_requests to authenticated;
 ```
 plus a second SECURITY DEFINER function for the approved stamp, mirroring
-`stamp_requested_notified`. `(status, approved_at)` is the whole of what any
-legitimate writer touches — `js/` only ever writes `status` (via
-`advanceRequest`), the function writes `approved_at`, and the client needs no
-UPDATE whatsoever — so the narrowing breaks nothing that works today.
+`stamp_requested_notified` — also applied, in the same migration.
+`(status, approved_at)` is the whole of what any legitimate writer touches —
+`js/` only ever writes `status` (via `advanceRequest`), the function writes
+`approved_at`, and the client needs no UPDATE whatsoever — so the narrowing
+broke nothing that works, which was enumerated rather than assumed before it ran.
 
 ⚠️ **This also corrects the migration's own reasoning.**
 `20261013005250_stamp_requested_notified.sql` said a column grant was "the
@@ -1659,8 +1674,8 @@ half. The owner still needs the SECURITY DEFINER function regardless, because
 the owner has no UPDATE **policy**, which is a different question from which
 **columns** the role holds. Both halves are now stated in the file.
 
-⚠️ **CODEX ESCALATED THIS TO BLOCKING-BEFORE-DEPLOY (round 3, P1), and that is
-the right call** — it was also the direct answer to a question put to it, namely
+⚠️ **CODEX ESCALATED THIS TO BLOCKING-BEFORE-DEPLOY (round 3, P1), and that was
+the right call — the gate is now cleared, by the apply recorded above.** — it was also the direct answer to a question put to it, namely
 whether recording this was sufficient for a security finding. The reasoning:
 PR #256's rework is what turns `notify-enhancement` from a dead endpoint (42501 →
 404 on every call) into a working one, so the abuse becomes *reachable* at the

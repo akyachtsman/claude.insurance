@@ -426,4 +426,38 @@ test("the deploy header names every RPC the code calls", () => {
     /list_migrations/.test(header),
     "the deploy header no longer names list_migrations, which is the only authoritative applied-migration check available here",
   );
+
+  // ⚠️ AND THE RPC MIGRATIONS ARE NOT THE WHOLE DEPENDENCY. The notification
+  // boundary is the PRIVILEGE NARROWING: without it the stamp functions are
+  // decorative, because the same caller writes the columns directly. A skipped
+  // apply there is WORSE than a skipped RPC migration — the RPC case is
+  // fail-closed (the claim errors, nothing is sent), while a missing revoke
+  // leaves a working function with no boundary. Codex #256 round 8; the
+  // header's first version listed only the two RPC migrations.
+  //
+  // DERIVED, not a second hand-maintained list: any migration that REVOKES on
+  // public.enhancement_requests is part of that boundary, so adding one forces
+  // the deploy step to name it. Comments are stripped first — this file has
+  // already been bitten twice by a scan matching a migration's own prose
+  // documenting the statement it must not contain.
+  // `root` is local to the drift-gate test above, deliberately not hoisted —
+  // each test resolves its own paths so neither can be moved and leave the
+  // other reading a stale directory.
+  const migDir = join(here, "..", "..", "migrations");
+  const boundary = readdirSync(migDir)
+    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => /revoke[^;]*\bon\s+public\.enhancement_requests/i.test(
+      readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, ""),
+    ));
+  assert.ok(
+    boundary.length > 0,
+    "no migration revokes on public.enhancement_requests — the privilege narrowing that makes the stamp functions a boundary is gone",
+  );
+  for (const f of boundary) {
+    const version = f.split("_")[0];
+    assert.ok(
+      header.includes(version),
+      `${f} narrows privileges on enhancement_requests but the deploy header does not name ${version}, so a skipped apply would leave the boundary absent with the function still working`,
+    );
+  }
 });
