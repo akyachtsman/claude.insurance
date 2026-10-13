@@ -1,5 +1,60 @@
 # supabase/proposed/ — written, NOT applied
 
+## ⛔ 20261013_enhancement_notifications.sql — **BLOCKS THE notify-enhancement DEPLOY**
+
+**Apply this before deploying `notify-enhancement`.** The function writes
+`public.enhancement_notifications` on every invocation, so until this is applied
+every claim returns 42501, the handler answers `claim_failed`, and **nothing is
+sent**. Fail-closed — a dead endpoint, not a wrong email — and no regression,
+since the deployed function 404s on every call today.
+
+**What it does, and why it is a redesign rather than another guard.** It moves
+the notification dedup claim off the client-writable row and into a server-only
+table: `authenticated` and `anon` hold **nothing** on it, there are no policies,
+and only `service_role` has an explicit `select, insert`. Codex found a bypass of
+the old column-based claim in **four consecutive rounds** on PR #256 (staff reset
+→ write-once's open first write → the INSERT path → calling the RPC directly),
+and every one had the same root: the claim lived somewhere the client can write.
+`global.md` → *Review Rounds Have to Terminate* says the answer to that is a
+redesign, not a fifth patch.
+
+It also **revokes EXECUTE on both stamp functions from `authenticated`**, which
+closes round 6's direct-RPC bypass outright, and leaves the two stamp columns in
+place but vestigial — nothing writes them afterwards.
+
+⚠️ **Applying it is an owner decision** (it creates a table and grants on it), and
+it is deliberately NOT applied from a session. The post-apply probes are in the
+file's footer; run the write ones inside `begin; … rollback;`, because the
+Supabase MCP hangs 60s on a DELETE and applies nothing — an insert-then-delete
+probe leaves a row nobody can remove from here, which already cost the owner two
+manual statements on 2026-10-13.
+
+## ~~20261013_notified_stamps_write_once.sql~~ — APPLIED 2026-10-13
+
+**Now `migrations/20261013013743_notified_stamps_write_once.sql`.** Applied on
+the owner's explicit approval, with the full probe run and recorded in the file.
+It narrows `authenticated`'s UPDATE on `enhancement_requests` from all 13
+columns to `(status, approved_at)` and routes both notification stamps through
+authorizing SECURITY DEFINER functions, which is what makes
+`notify-enhancement` deployable. One statement was omitted on apply — the
+`drop trigger if exists`, which the MCP hangs on and which is a no-op on a
+first apply.
+
+⚠️ **The write-once trigger in that file is BELT, not the boundary** — an earlier
+draft of this entry presented the trigger as the chosen design over privilege
+narrowing, which that migration explicitly withdraws. The boundary is the
+`revoke update` plus the column grant; the trigger does not stop a pre-claim.
+Flagged by Codex on PR #256 precisely because this README is the operator-facing
+warning, so a stale rationale here would point whoever applies it at the design
+the migration rejects.
+
+⚠️ **And it needed a follow-on the same day:**
+`migrations/20261013014854_enhancement_requests_insert_column_scope.sql`.
+Narrowing UPDATE left the table-wide **INSERT** grant live, so a client could
+create a request with a notification stamp already populated — the same
+pre-claim, through the other write path. **A column is only as protected as its
+weakest write path.**
+
 `supabase/migrations/` mirrors the schema that is **actually provisioned** (its
 versions match `list_migrations`). Anything in this directory is a migration that
 has been **written but deliberately not applied**, because CLAUDE.md requires

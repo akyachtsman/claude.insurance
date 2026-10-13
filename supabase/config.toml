@@ -27,9 +27,21 @@
 # a redeploy flipping anything, and the default it was overriding was the safe one.
 project_id = "bdsegmjcgfmgzuxwiplj"
 
-# notify-enhancement genuinely is verify_jwt = false live (confirmed via
-# list_edge_functions), because it accepts a service-role caller as well as a
-# signed-in one and implements both checks itself. Recorded so a CLI deploy does
-# not flip it.
-[functions.notify-enhancement]
-verify_jwt = false
+# ⚠️ THE [functions.notify-enhancement] BLOCK WAS REMOVED 2026-10-13, so this
+# function now takes the DEFAULT — verify_jwt = true — like help-ask above.
+#
+# It used to pin `verify_jwt = false`, and the stated reason was that the
+# function "accepts a service-role caller as well as a signed-in one and
+# implements both checks itself". THAT REASON HAS BEEN RETIRED: the rewrite
+# dropped the service-role caller path. Nothing used it (the only callers are
+# js/keep/views/policies-view.js and approveEnhancement() in js/supabase.js, both
+# browser-side with the user's JWT), and it could never have worked anyway —
+# `service_role` holds no table privileges in this project, so a service-role
+# invocation failed on its first query like every other one. Every real caller is
+# a signed-in client, so the gateway flag now costs nothing and kills junk
+# traffic before it is a billable invocation.
+#
+# ⚠️ AND IT IS STILL `false` ON THE LIVE DEPLOYMENT until the function is
+# redeployed. Removing a block from this file changes nothing by itself: only the
+# CLI reads it, and this project deploys through the Supabase MCP, which takes
+# verify_jwt as an explicit parameter. Deploy with verify_jwt: true.

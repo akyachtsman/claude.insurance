@@ -76,8 +76,10 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   `pages-retry.yml`. `.github/actions/` holds the shared composite actions
   (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
   `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
-  and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013005250_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+  and ACTIVE — ⚠️ **but was NON-FUNCTIONAL from the day it shipped until the
+  2026-10-13 rewrite, and "ACTIVE" is what hid that.** See the `service_role`
+  constraint below for the measurement and the fix. The `notify-lead` /
   `notify-renewal` functions are still to come.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
     endpoint. **Deploy with the DEFAULT — `verify_jwt` ON.**
@@ -157,8 +159,14 @@ This is the one to follow; the others defer to it.
    published *client* credential: that one reaches its own rows only, because
    every other table keys on `owner = auth.uid()` with no role escape, whereas
    `er_broker_select` / `er_underwriter_select` read **every** client's
-   enhancement requests and the update policies write them (status-constrained
-   since `20261009210000`, still unconstrained on `owner`/`subject`/`body`).
+   enhancement requests. ⚠️ The WRITE half of that exposure is narrower since
+   2026-10-13: `20261013013743_notified_stamps_write_once` leaves
+   `authenticated` able to UPDATE only `(status, approved_at)`, so a leaked staff
+   credential can move a request's stage but can no longer rewrite its `owner`,
+   `subject`, `message` or `context`. INSERT was narrowed the same day
+   (`20261013014854`) to the seven creation columns, so neither notification
+   stamp can be supplied at creation either. The READ exposure is unchanged and
+   is still the reason to rotate.
    Accepted today on a **measured** precondition — `auth.users` holds exactly
    three rows, all `@example.com`, and `enhancement_requests` holds one row owned
    by the demo client, so there is no real client data to expose — and that
@@ -254,12 +262,21 @@ these, so they were applied with `execute_sql` and the
 statements), which is what `apply_migration` does. Versions match the filenames
 in `supabase/migrations/`, so `list_migrations` still agrees with the directory.
 
-⚠️ **One piece of litter, and it needs one line from the owner.** A table
-`public._mcp_write_probe` exists in `public` — it was the single-statement probe
-that established the above (CREATE worked, so writes were possible at all), and
-`drop table` then hung, which is exactly the finding. It has no grants, no RLS, no
-rows and nothing references it. It carries a `COMMENT` saying all of this. Remove
-it in the Dashboard SQL editor: `drop table public._mcp_write_probe;`
+✅ **The litter is GONE — dropped by the owner in the Dashboard SQL editor on
+2026-10-13, verified from a session (`to_regclass('public._mcp_write_probe')` is
+null).** Kept as a record because the table was the probe that established the
+finding above: `create table` worked, so writes were possible at all, and
+`drop table` then hung — which is the finding, and is also why the owner had to
+remove it by hand.
+⚠️ **Its own `COMMENT` said "no grants, no RLS, no rows" and two of those three
+were wrong**, measured before the drop: RLS **was** enabled (this repo's
+auto-enable event trigger did it) and the standard Supabase role grants existed.
+The conclusion held for a different reason than the comment gave — **0 policies**
+meant default-deny, and the only data privileges belonged to `postgres`, with
+`anon`/`authenticated`/`service_role` holding just `REFERENCES/TRIGGER/TRUNCATE`.
+Recorded because "nothing could read it" being true by accident rather than by
+the stated reason is the same comment-overclaims-code defect this file keeps
+paying for.
 
 ⚠️ **Verification comes AFTER the merge, and that ordering is forced, not a
 preference.** This list had them the other way round — verify at 7, merge at 8 —
@@ -573,9 +590,16 @@ profile**, never by listing a directory.
   the denial would miss); `insert into profiles` → **403 / 42501**;
   `select id, role` → **200, one row**.
   **What the fix did NOT close, and is still live:** `er_broker_update` has no
-  `with check` on `owner`/`subject`/`body`, so a *genuine* broker or underwriter
-  can still rewrite those columns on any client's enhancement request, not just
-  the status. Narrower than before (no client can become one), and recorded in
+  `with check` on `owner`/`subject`/`body`. ⚠️ **That gap is CLOSED as of
+  2026-10-13, by privilege rather than by policy** —
+  `migrations/20261013013743_notified_stamps_write_once.sql` revoked table-wide
+  UPDATE from `authenticated` and re-granted `(status, approved_at)` only, so a
+  genuine broker or underwriter can no longer write `owner`, `subject`,
+  `message` or `context` at all. Measured after apply: `authenticated` may
+  UPDATE **2 of 13 columns**. The missing `with check` is now belt rather than
+  the only thing standing between staff and a client's request text, and it
+  would matter again if the grant were ever widened — which is why the migration
+  also carries a write-once trigger. Recorded in
   `supabase/migrations/20261005120000_enhancement_request_stage_guard.sql`.
 - **⚠️ `service_role` HAS NO TABLE PRIVILEGES IN THIS PROJECT (live, measured
   2026-10-06).** Not a trade-off — a fact that invalidates the obvious way to
@@ -593,8 +617,9 @@ profile**, never by listing a directory.
   JWT), where `authenticated` does hold SELECT and RLS scopes rows to
   `owner = auth.uid()` — which is also stronger, since RLS cannot be removed by
   editing a `.eq()` out of the handler. `service_role` is used for `help_queries`
-  alone, and that works only because `supabase/proposed/20261006_help_queries.sql`
-  grants it explicitly.
+  alone, and that works only because `migrations/20261006120000_help_queries.sql`
+  grants it explicitly. (This cited the `proposed/` path long after that file was
+  applied — the same stale-pointer defect Codex round 7 found two sections down.)
   **⚠️ NOW MEASURED, AND WORSE THAN "VERIFY BEFORE RELYING":** this said *"the
   deployed `notify-enhancement` reads `enhancement_requests` under the same key,
   so it has the same denial. Verify before relying on its emails."* Verified
@@ -614,15 +639,45 @@ profile**, never by listing a directory.
   is not "unverified" — it is **non-functional**, and this file lists it as
   "deployed and ACTIVE", which reads as working. No enhancement-request email has
   ever been sent.
-  **The remedy is one statement**, and it is deliberately NOT applied here:
-  `grant select, update on public.enhancement_requests to service_role;`
-  Widening `service_role`'s reach over a client table is a security decision, not
-  a bug fix — and feature 003 deliberately went the other way, reading client
-  records through the **caller's own** client so RLS still scopes them. The same
-  question applies here and should be answered on purpose: whether this function
-  needs cross-client reach at all, or should take the caller's JWT like
-  `help-ask` does. Outside feature 003's scope; recorded so it is a decision
-  rather than a surprise.
+  **✅ FIXED 2026-10-13 — and NOT with the one-statement grant.** The decision
+  this paragraph asked to be made on purpose was put to the owner as two options
+  and they chose the narrow one. For the record, the rejected remedy was
+  `grant select, update on public.enhancement_requests to service_role;` —
+  widening a service key's reach over a client table, which is a security
+  decision rather than a bug fix.
+  **What shipped instead:** every table access in `notify-enhancement` now goes
+  through the **caller's own client** (anon key + their JWT), so RLS scopes it —
+  the same shape feature 003 chose for `help-ask`, and stronger than the grant
+  because RLS cannot be removed by editing a `.eq()` out of the handler. The
+  underwriter's role is read from their **own** `profiles` row, so a caller can
+  only assert their own role; and on the `requested` path the client's email now
+  comes from their own JWT, removing a cross-user Auth Admin call outright.
+  **One service-key use remains and it is deliberately not a table:**
+  `auth.admin.getUserById`, to resolve the client's address on the `approved`
+  path, where the caller is the underwriter and `profiles` has no email column
+  (checked: `id, full_name, role, created_at, reminder_email,
+  reminder_schedule`). That is the **GoTrue admin API** — authorised by the
+  service-role JWT and unaffected by Postgres table grants, which is exactly why
+  it still works where the table reads did not. `privilege.test.mjs` pins it to
+  that one call and fails on any `authAdmin.from(`.
+  ⚠️ **The service-role CALLER path was removed too.** The function used to
+  accept the service-role key in the `Authorization` header as an alternative to
+  a signed-in underwriter. Nothing used it — the only callers are
+  `js/keep/views/policies-view.js` (`requested`, as the client) and
+  `approveEnhancement()` in `js/supabase.js` (`approved`, as the underwriter),
+  both browser-side with a user JWT — and it could never have worked for the
+  privilege reason above. That retired the stated reason for `verify_jwt =
+  false`, so `supabase/config.toml` no longer pins it. ⚠️ **It is still `false`
+  on the LIVE deployment until the function is redeployed** — only the CLI reads
+  that file, and this project deploys through the MCP, which takes `verify_jwt`
+  as an explicit parameter.
+  ⚠️ **STILL NOT PROVEN TO SEND EMAIL, and the rework does not change that.**
+  Whether `RESEND_API_KEY`, `BROKER_EMAIL` and `FROM_EMAIL` are set is unknown —
+  there is no MCP tool to list Edge Function secrets and HTTPS egress to the
+  project is blocked from a session (see below), so it could not be checked.
+  With the key unset `sendEmail` returns `{sent:false,
+  reason:"no_provider_key"}` and the function answers 200, so **a green response
+  from this endpoint is not evidence that mail left the building.**
 - **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
   (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
   `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.
@@ -1569,6 +1624,1008 @@ cannot reach. What closes the loop is that **CI handed over the actual array
 contents** — the exact string, twice, on two projects — and the filter is
 verified against that exact string. Both ends are measured; the middle is the
 one CI already executed.
+
+### ✅ CLOSED 2026-10-13 (was OPEN, owner decision) — STAFF COULD RESET EITHER NOTIFIED STAMP
+
+⚠️ **This heading read "⚠️ OPEN (owner decision)" for three commits after the fix
+was applied, which in the canonical security constraints means a reader concludes
+the reset-and-resend hole is live.** Codex round 8. The fix is
+`migrations/20261013013743_notified_stamps_write_once.sql`, applied 2026-10-13:
+`revoke update on public.enhancement_requests from authenticated` then
+`grant update (status, approved_at)`. **Measured after apply:** `authenticated`
+may UPDATE **2 of 13 columns**, neither of them a notified stamp, so no staff
+account can reset either one — and `20261013014854` closed the INSERT path to
+the same columns the next day. The section is kept because the SHAPE of the hole
+is why the fix is a column REVOKE rather than a policy; everything below it,
+including the measurement, describes the **pre-migration** state.
+
+Raised by an automated security review of the round-2 commit on PR #256, and it
+also corrects a piece of reasoning in this repo's own migration.
+
+**Measured 2026-10-13, BEFORE the migration below was applied** (the privileges
+are no longer these — see the paragraph above): `authenticated` held UPDATE on
+**every column** of `enhancement_requests`, both notified stamps included
+(`information_schema.column_privileges`), while `er_broker_update` and
+`er_underwriter_update` constrain only `status` in their `with check`. So, then:
+
+| who | can do what |
+|---|---|
+| underwriter | `set approved_notified_at = null` on an approved row (status unchanged, so the check passes) → re-POST → both approval emails resend |
+| broker or underwriter | the same to `requested_notified_at` on **any** client's row |
+| the client / owner | **nothing** — there is no owner UPDATE policy at all |
+
+So `notify-enhancement`'s claim-before-send gate is real against **retries,
+double submits and concurrent invocations** — one email, not two — and is **not**
+a gate against a deliberate staff account. The code says exactly that now; it
+previously said "the gate", which is the fourth comment-overclaims-code instance
+on this branch pair.
+
+**The fix is a privilege change, not more handler code** — it was the owner's
+call because it narrows staff, it was put to them, and it is **applied**
+(`20261013013743`). The statements, as they ran:
+```sql
+revoke update on public.enhancement_requests from authenticated;
+grant  update (status, approved_at) on public.enhancement_requests to authenticated;
+```
+plus a second SECURITY DEFINER function for the approved stamp, mirroring
+`stamp_requested_notified` — also applied, in the same migration.
+`(status, approved_at)` is the whole of what any legitimate writer touches —
+`js/` only ever writes `status` (via `advanceRequest`), the function writes
+`approved_at`, and the client needs no UPDATE whatsoever — so the narrowing
+broke nothing that works, which was enumerated rather than assumed before it ran.
+
+⚠️ **This also corrects the migration's own reasoning.**
+`20261013005250_stamp_requested_notified.sql` said a column grant was "the
+obvious answer and is wrong here" and stopped there. Wrong *for that one
+column* — granting only `requested_notified_at` would leave it the only writable
+column for everyone — but a column grant is precisely the right tool for this
+half. The owner still needs the SECURITY DEFINER function regardless, because
+the owner has no UPDATE **policy**, which is a different question from which
+**columns** the role holds. Both halves are now stated in the file.
+
+⚠️ **CODEX ESCALATED THIS TO BLOCKING-BEFORE-DEPLOY (round 3, P1), and that was
+the right call — the gate is now cleared, by the apply recorded above.** — it was also the direct answer to a question put to it, namely
+whether recording this was sufficient for a security finding. The reasoning:
+PR #256's rework is what turns `notify-enhancement` from a dead endpoint (42501 →
+404 on every call) into a working one, so the abuse becomes *reachable* at the
+same moment the feature does. A hole that ships with the thing that enables it is
+not a follow-up.
+
+### ⚠️ AND THE FIRST FIX FOR IT TRADED ONE HARM FOR A QUIETER ONE (round 4)
+
+Worth its own heading, because the mistake is more instructive than the fix.
+The first attempt was a BEFORE UPDATE trigger making both stamps **write-once**,
+chosen over narrowing privileges on the argument that a rejection trigger cannot
+break what works and is provable from a session. Codex round 4 showed that
+design is not merely weaker:
+
+> write-once closes BACKWARD writes (`t → null`, `t → t'`) and deliberately
+> leaves the FIRST write open. So staff can **pre-claim** a stamp on a request
+> that has not been approved — the handler then reads it populated, returns
+> `already_notified`, and **emails nobody** — and the trigger makes the forged
+> stamp **immutable**, so it can never be corrected.
+
+So it converted *"staff can resend without bound"* into *"staff can permanently
+suppress a client's approval notice"*. The second is harder to notice, because
+nothing happens. Three reviews pointed at narrowing privileges before it was
+accepted — an automated security review, then Codex rounds 3 and 4 — and
+`global.md` → *Review Rounds Have to Terminate* applies to one's own design
+choices, not only to the code.
+
+**What was wrong with the objection to narrowing: it was never measured.** The
+worry was that a REVOKE breaks a writer nobody remembered. So the writer set was
+enumerated. Every touch of this table from `js/`: an INSERT (unaffected by an
+UPDATE revoke), a SELECT, and `advanceRequest`, which builds its patch as exactly
+`{ status }` plus `approved_at` when approving. That **is** the column grant.
+Nothing else writes the table. The narrowing was a guess no longer.
+
+**The design that shipped** — ⚠️ **and this said `supabase/proposed/…`,
+"written **not applied**", for two commits after it went live.** It is
+`migrations/20261013013743_notified_stamps_write_once.sql`, **APPLIED
+2026-10-13**, and the stale pointer mattered: the paragraph below then told an
+operator the rpc would fail and the deploy was blocked, which is the same
+staleness already corrected in `index.ts`. Found by Codex, round 7:
+1. `stamp_approved_notified(uuid)` — SECURITY DEFINER, authorizes **caller**
+   (underwriter, read from `profiles`), **status** (`approved`) and **direction**
+   (null → now), mirroring `stamp_requested_notified`.
+2. `revoke update on public.enhancement_requests from authenticated;` then
+   `grant update (status, approved_at) …`. **This is the boundary** — without it
+   both stamp functions are decorative, because the same caller writes the
+   columns directly.
+3. The write-once trigger, kept but **relabelled as belt**: it does not stop a
+   pre-claim, only step 2 does. Its one specific justification is that this repo
+   has already been bitten by a later migration restating a grant table-wide,
+   which is why `20261006120000_help_queries.sql` refuses UPDATE at both the
+   grant and policy layers.
+
+⚠️ **The code and the migration ship as a pair, and that pair is now BOTH
+live.** `index.ts` calls `stamp_approved_notified`; it resolves against
+`migrations/20261013013743`, applied 2026-10-13, so nothing about this branch is
+deploy-blocked on a migration any more. What the earlier text described —
+"exists only in `proposed/`, the rpc fails, the branch returns `claim_failed`
+with nothing sent" — was the fail-closed state *before* the apply, and is kept
+here only as the shape the coupling has to hold for the next such pair.
+`privilege.test.mjs` enforces it rather than trusting a PR thread: an RPC defined
+only in `proposed/` is allowed, **but that file must be listed in
+`proposed/README.md` as blocking the deploy.**
+⚠️ **That gate proves SOURCE consistency, not that a migration is applied** —
+it reads directories, and a file sitting in `migrations/` whose remote apply was
+skipped or failed classifies as applied and passes. Codex raised this in the
+same round. It is not fixable in CI by design: a test that could tell would need
+production credentials, which this repo's Safety Rules forbid. So the claim is
+narrowed in the test's own name and comment, and the authoritative check —
+`list_migrations` against the names the code's RPCs resolve to — is a **deploy
+step**, recorded in `index.ts`'s deploy header, not a CI assertion.
+
+⚠️ **TWO MUTATION SURVIVORS HERE, AND THE FIRST IS THE WORST OF THE PR.**
+Deleting the `revoke` — the single load-bearing statement — left **every** test
+green while making both stamp functions decorative. The suite was checking the
+lock and not the door. Now asserted, along with the shape of the re-grant:
+table-wide, or including a `notified_at` column, or dropping `approved_at`, each
+fail. The second survivor was the SQL scan matching the file's **own INVERSE
+block** — a `--` comment documenting the table-wide grant as the reversal —
+which is the comment-stripping trap already handled for the TypeScript scan, met
+again on a second surface.
+
+⚠️ One consequence for this repo's own habits: the probe in
+`migrations/20261013005250_stamp_requested_notified.sql` ends by restoring the
+demo row's `requested_notified_at` to null. Once this is applied that statement
+is **refused**, correctly. Use the documented disable/enable pair, or leave the
+demo row stamped.
+
+**Context for weighing it:** staff are already able to rewrite `owner`,
+`subject` and `body` on any client's request, recorded above and accepted. An
+underwriter resending an approval email is a smaller harm than that, which is
+why this is a decision rather than a stop-ship.
+
+### ⚠️ A GATE THAT RUNS AFTER THE SIDE EFFECT IS NOT A GATE (notify-enhancement, 2026-10-13)
+
+Codex #256 round 1, P1, and it is the same shape as the `help_queries`
+reservation lesson arrived at from the other side.
+
+`notify-enhancement`'s requested path sent the broker email and the client email
+and **then** called `stamp_requested_notified`, whose
+`status = 'requested' and requested_notified_at is null` clauses were meant to be
+the stage/idempotency gate. They ran after the side effect, so they gated
+nothing: any signed-in owner could POST `event: "requested"` for their own row
+indefinitely — including after it had advanced to **approved or declined**, where
+the client email still read *"we've received your request and sent it to your
+broker for review"*. Unbounded broker email, unbounded provider spend, and a
+re-announcement that is actively misleading about the request's state.
+
+⚠️ **And the migration's own comment asserted the protection it did not have** —
+"what it stops is re-announcing a request that has since moved to broker_review
+or beyond". That is the comment-overclaims-code defect this repo keeps paying
+for; it is now the **third** instance recorded (the two `pageErrors` filters on
+PR #255 were the others).
+
+**The fix is an ordering, not a stronger clause.** The stamp became a CLAIM taken
+before the sends, which also makes it atomic: `update … where
+requested_notified_at is null` is evaluated under a row lock, so a second
+concurrent invocation blocks, re-reads the committed row, matches nothing and
+gets null — one claim, one refusal, never two emails. A pre-read check on
+`status`/`requested_notified_at` is kept **only** for a useful error message and
+is explicitly not the gate, because it races.
+
+**One guard had to come before the claim:** with `RESEND_API_KEY` unset nothing
+can be sent, so the function returns before claiming. Without that, a keyless
+deployment — the state this repo cannot currently verify, and so the likely one —
+would stamp every request as notified while sending none, which is the exact lie
+the "only stamp when something went out" rule exists to prevent.
+
+**Residual, stated rather than hidden:** a provider that is *configured but
+erroring* leaves the row claimed with nothing delivered. That is the deliberate
+direction, the same trade `help-ask` makes for its reservations ("billing unknown
+resolves as billed"), because releasing the claim on failure needs an
+owner-callable un-stamp — and an owner-callable un-stamp reopens the unbounded
+re-send this gate closes. Logged as `where: "requested_send"` so it is findable;
+a real retry mechanism is the product answer, not a weaker gate.
+
+**The guarantee belongs to the PAIR**, so a future caller that sends first would
+silently lose it. `privilege.test.mjs` asserts the ordering (claim before any
+`sendEmail`, provider-key return before the claim) and the two refusals.
+Mutation-tested: claim moved back after the sends, provider-key return deleted,
+null claim allowed to fall through, `bad_stage` refusal dropped — 4/4 caught.
+
+### ✅ RESOLVED by redesign (option B) — FOUR ROUNDS ON ONE MECHANISM: the notification stamps did not establish that a notification happened
+
+`global.md` → *Review Rounds Have to Terminate* says a mechanism that keeps
+failing across rounds gets reverted or redesigned, not patched again. This one
+failed four consecutive times on PR #256, so the fifth patch was **not** written.
+
+| round | the bypass | the fix |
+|---|---|---|
+| 3 | staff reset the stamp to null → unbounded resend | revoke table-wide UPDATE, column-grant `(status, approved_at)` |
+| 4 | a write-once trigger closes backward writes but leaves the FIRST write open → **pre-claim**, made immutable | withdrew the trigger-only design; authorizing SECURITY DEFINER functions |
+| 5 | the **INSERT** path — create the request already stamped | narrow INSERT to the seven creation columns |
+| 6 | the grantee calls the **RPC directly** — no Edge Function, no email | **not patched. This section.** |
+
+**What the stamps actually promise:** that a claim was taken. **Not** that a
+notification was attempted. `EXECUTE` on both functions is granted to
+`authenticated`, so an owner can call `/rest/v1/rpc/stamp_requested_notified`
+directly and the legitimate notification then answers `already_notified` and
+stays silent.
+⚠️ **The post-apply probe in `migrations/20261013005250` is that exploit**, and
+it was read as a passing test — calling the function as the owner *is* the
+bypass. A probe can demonstrate a hole and be recorded as proof of a fix.
+
+**Residual harm, stated precisely rather than as "a bypass exists":** a client
+suppressing their own email is self-harm and negligible. An **underwriter**
+suppressing a *client's* approval notice is real, silent, and by an account that
+can already approve or decline arbitrarily. Neither produces unbounded
+**sending**, which is what the claim was introduced to stop and does stop. So
+this is a suppression residual on an endpoint that is **not deployed**, not a
+live incident.
+
+**The two candidate designs, for the owner to choose between:**
+
+**(A) Move the stamps' writer off `authenticated`.** Grant `EXECUTE` on both
+functions to `service_role` only and have the Edge Function call them with a
+service-role client — the functions are SECURITY DEFINER, so they still need no
+table privileges. Caller identity stays RLS-backed because the handler reads the
+row as the caller *before* stamping; only the stamp moves. Smallest change that
+makes the notification sender the sole writer.
+*Cost:* reintroduces a service-role client in the function for one call, and the
+identity half becomes "the handler verified it" rather than "the database
+enforced it" — though the verification is still an RLS-scoped read.
+
+**(B) Stop using the row, and count in a table the caller cannot touch.** The
+`help_queries` model this repo already settled on for exactly this class: a
+server-only table where `authenticated` holds **nothing** and only
+`service_role` has an explicit grant. Dedup becomes a row keyed on
+`(request_id, event)`, written by the function. Immune to every one of the four
+bypasses above, because the client has no write path at all.
+*Cost:* a new table and migration, and the stamps on `enhancement_requests`
+become what they always honestly were — operational markers, not a gate.
+
+**(B) WAS CHOSEN AND IS BUILT** (owner delegated the call, 2026-10-13). The claim
+is now a row in `public.enhancement_notifications`, keyed `(request_id, event)`:
+`authenticated` and `anon` hold **nothing** on it, there are no policies, and
+only `service_role` has an explicit `select, insert`. The client has no write
+path, so none of the four bypasses has an analogue. The migration also **revokes
+EXECUTE on both stamp functions from `authenticated`**, closing round 6 outright,
+and leaves the two stamp columns in place but **vestigial** — nothing writes them.
+⚠️ **The migration is WRITTEN, NOT APPLIED** (`supabase/proposed/20261013_enhancement_notifications.sql`):
+it creates a table and grants, which is an owner decision. Until it is applied the
+function fails closed — `claim_failed`, nothing sent — which is no regression on
+an endpoint that 404s today. `proposed/README.md` declares it deploy-blocking and
+`privilege.test.mjs` enforces that declaration.
+
+⚠️ **(A) WAS NOT MERELY THE LESSER OPTION — IT DOES NOT WORK, and the write-up
+above said otherwise for a day.** Both stamp functions authorize on
+`auth.uid()` (`owner = auth.uid()`, and `profiles.id = auth.uid()` for the
+underwriter check). A service-role client carries no user JWT, so `auth.uid()` is
+**NULL** and both predicates match zero rows: granting EXECUTE to `service_role`
+and calling them that way would make every claim return null, the handler answer
+`claim_failed`, and no email ever send again. (A) was therefore never a grant
+change — it was a rewrite of the functions' authorization, moving the identity
+check out of the database and into the handler, which is the expensive half of
+the option with none of its stated benefit. Measured by reading both function
+bodies when the choice was actually being made, not when it was being written up.
+
+**What (B) does NOT move into the handler**, since that was the stated cost of
+(A) and deserves the same scrutiny: authorization. The row is still READ as the
+caller under RLS (`er_select_own` / `er_underwriter_select`), the role still comes
+from the caller's OWN `profiles` row, and the status transition is still an UPDATE
+as the caller under `er_underwriter_update`. What changed is only that the claim
+STATEMENT stopped being the place that also checks identity — a caller who is not
+entitled cannot reach the claim, and could not move the row if they did.
+
+⚠️ **WHAT I CALLED "the one honest loss" WAS A BAD READING, AND CODEX CAUGHT IT
+ON THE REDESIGN COMMIT (P1).** This paragraph used to say the stage pre-read now
+races the claim, costing at most "one possibly-stale email", and present that as
+the accepted trade. Two things were wrong with it. First, it **averaged two
+different defects into one sentence**: on the requested path a late email is
+merely stale; on the **approved** path the handler asserts something untrue about
+the client's policy — if another underwriter declines the request after the
+guarded transition, the claim still succeeds and a **false final-approval email**
+goes out. The primary key bounds that to one email; it does not prevent it.
+Second, **the old design did this one thing right** — its claim carried `and
+status = 'approved'` in the same statement — so the redesign lost a property the
+thing it replaced had, while fixing four bypasses around it. A redesign can do
+that, and the write-up argued the loss away instead of flagging it.
+**Closed by `public.claim_notification(uuid, text)`:** `insert … select … where
+<status matches> on conflict do nothing returning`, so the predicate and the
+conflict are evaluated in one statement and there is no window. It is **not** a
+return to the shape round 6 bypassed — EXECUTE is `service_role` only (revoked
+from `public, anon, authenticated`), so the client cannot call it, and it reads
+no identity from `auth.uid()`: the caller is already authorized by the RLS-scoped
+reads and the guarded transition.
+
+⚠️ **AND THE RETIRED COLUMNS WERE STILL BEING READ AS A GATE (P2, same review).**
+Two prechecks gated on `row.requested_notified_at` / `row.approved_notified_at`,
+so for any row whose OLD stamp had been set — including by round 6's direct-RPC
+bypass, and including this repo's own probe rows — the handler answered
+`already_notified` **before** consulting the claim table. Because those values
+are write-once and the migration neither clears nor imports them, the suppression
+bypass survived the redesign *permanently* for exactly those rows. Both prechecks
+are gone and the columns are **no longer selected at all**, which makes a relapse
+impossible rather than merely absent. The stage precheck on `row.status` stays —
+that one is about the lifecycle, is still true, and is still not the gate.
+
+### ⛔ REDESIGNED, ROUND 20 — a source scanner that enumerates spellings cannot terminate
+
+**Three consecutive rounds on one mechanism**, all on `privilege.test.mjs`, all
+found by Codex and never by this suite, every one of them SILENT (the statement
+was skipped and every gate stayed green while the privilege was live):
+
+| round | the spelling that walked past | what it would have allowed |
+|---|---|---|
+| 17 | `all [privileges]` where the regex wanted the word `execute` | the client calls the claim RPC |
+| 19 | `anon` — not a channel at all, so the statement was **skipped** | an anon-key insert pre-consumes the claim |
+| 20 | `on routine f(…)`, and `on all tables in schema public` | both of the above, by another spelling |
+
+`global.md` → *Review Rounds Have to Terminate* says the third failure gets a
+redesign, not a fourth patch. **Adding `ROUTINE` to the regex is the fourth
+patch.** The defect is not that `ROUTINE` was missing; it is that the suite
+could not tell it was missing.
+
+**So the question is inverted**, exactly as `BACK_ELIGIBLE` and
+`check-keep-back-routes.js` were inverted after their second failures. Every
+`GRANT`/`REVOKE` in every migration is parsed and its TARGET classified, and
+anything unclassifiable **fails the suite by name** with the file and the
+statement. A spelling nobody thought of now costs a loud failure instead of a
+hole. Four target kinds feed the replays (`table`, `all-tables`, `function`,
+`all-funcs`); a documented set that cannot carry a table or routine privilege
+(sequences, schemas, types, languages, large objects, databases, …) is ignored
+*explicitly*; everything else is `unknown`.
+
+**Measured, 13 mutations.** 9 bypasses caught — the two Codex reported plus
+seven nobody did: `on procedure`, `all procedures in schema public`,
+`all tables … to PUBLIC`, a two-target statement with the claim table second, an
+**unqualified** table name (refused rather than guessed as `public`),
+`ALTER DEFAULT PRIVILEGES`, and a grant built inside a `DO` body. 4 controls
+stay clean, including a `COMMENT … IS '… explicit grant …'` whose prose contains
+the word.
+
+⚠️ **THE HEADLINE MUTATION IS THE ONE THAT PROVES THE REDESIGN RATHER THAN THE
+FIX:** delete the `routine|procedure` arm *and* leave the `ON ROUTINE` grant in
+place, and it is **still caught** — by the completeness gate, naming the
+statement. That exact state was 19/19 green before.
+
+⚠️ **TWO THINGS THE REDESIGN GOT WRONG FIRST, both found by mutation.**
+1. **The completeness gate cried wolf on prose.** Its first run failed on the
+   claim migration's own `comment on table … is '… by explicit grant. …'`. A
+   gate that fails on a comment is a gate that gets deleted, so the statement
+   splitter now blanks the CONTENTS of quoted regions before anything is
+   classified — and treats the two quoting forms differently on purpose: `'…'`
+   is data, blanked and forgotten; `$tag$…$tag$` is an executable body, blanked
+   for parsing but **reported as unreadable if it contains grant/revoke**,
+   because a privilege change built inside a body is real and is not modelled.
+   (CLAUDE.md already forbids routing DDL through a `DO` block past a
+   classifier, so a hit there is a finding either way.)
+2. **Classifying a target is NOT the same as feeding it to a replay, and only
+   one of those was tested.** A mutation stopping `effectiveExecute` from
+   consuming schema-wide routine grants **SURVIVED** — the end-state gates prove
+   the end state of what they are FED, and what feeds them is a separate claim.
+   `effectiveExecute` now takes its migrations as an injectable parameter purely
+   so that claim can be tested at all (it read `orderedMigrations()` directly,
+   so the only way to exercise it was to drop a file into the repo). Both
+   wirings are now pinned, with a control assertion so the positive cases cannot
+   pass vacuously.
+   ⚠️ Relatedly: the schema-wide **table** wiring is caught ONLY by its own
+   direct assertion, not by the end-state replay — measured. Do not read a green
+   replay as proof that the thing feeding it is correct.
+
+⚠️ **And two harness errors in this one round, both of the kind already recorded
+below.** A `python3` splice with `replace(..., 1)` landed on
+`effectiveFunction` instead of `effectiveExecute` — the edit applied, to the
+wrong function, caught by `migs is not defined` rather than by reading the diff.
+And a mutation loop printed **no grades at all** because the helper lost its
+explicit `return 0`, so `git diff --quiet`'s exit code (1 = changes present)
+suppressed every grade through an `&&`. Nothing looked wrong: five mutation
+names printed with silence under each. **An applied-check that can swallow the
+grade is worse than no applied-check** — read the output, not the exit status.
+
+### ⚠️ ROUND 21 — AN INVERSION COVERS THE SURFACE YOU INVERT, AND NOT ITS NEIGHBOURS
+
+The round-20 redesign above was right and **incomplete in a way worth more than
+either bug it missed.** It inverted the **target** of a `GRANT`/`REVOKE` — fail
+closed on anything unclassifiable — and left the two surfaces either side of it
+enumerated. Codex found both in the very next round, and neither is a new class:
+
+| surface | the bypass | 20/20 green? |
+|---|---|---|
+| the **grantee** | `\bpublic\b` on the grantee text read a quoted custom role as the PUBLIC pseudo-role: grant EXECUTE to PUBLIC, then `revoke … from "public-reader"`, and the replay recorded the revoke as closing PUBLIC while the real grant stood | yes |
+| the **literal's context** | a `DO` body may be a plain string literal — `do 'begin grant execute on function public.claim_notification(uuid, text) to authenticated; end'` executes that grant, and round 20 blanked every `'…'` as inert data and forgot it | yes |
+
+Both reproduced before fixing. **The lesson is the shape, not the two fixes:**
+when a mechanism is redesigned to fail closed, the *boundary* of that redesign
+is the new attack surface. "I inverted the parser" was not true — one field of
+it was inverted.
+
+**Both surfaces are now inverted the same way**, and deliberately as
+allow-lists of the *safe* case with a fail-closed default:
+- **Grantees are parsed as SQL identifiers**, not matched as substrings.
+  Unquoted folds to lower case, quoted is verbatim, and the mapping to the four
+  channels is EXACT — so `"public-reader"`, `"Authenticated"` and
+  `some_other_role` are simply not channels. An **unrecognised grantee is
+  reported**, because a custom role can be `GRANTED TO authenticated` and role
+  membership is not modelled. (Measured: the only grantees this repo names are
+  PUBLIC/public/anon/authenticated/service_role, so failing closed costs
+  nothing today.) `WITH GRANT OPTION` and `GRANTED BY` are stripped as the
+  clause suffixes they are — the first also contains the word `grant`.
+- **A quoted literal is code or data by its STATEMENT HEAD.** `DO` and a
+  function definition's `AS '…'` are code; a documented inert set (COMMENT,
+  INSERT, SELECT, CREATE TABLE/POLICY/…, …) is data; **anything else whose
+  literal contains grant/revoke is reported**. Enumerating the *executable*
+  side is what failed, so the enumeration is on the inert side.
+- `REVOKE GRANT OPTION FOR <priv>` is **reported rather than modelled**: it
+  removes the right to re-grant and leaves the privilege, so reading it as a
+  revoke would record the privilege as closed — wrong in the unsafe direction.
+
+**17 mutations across both rounds.** Round 21: 7 bypasses caught (the two
+reported plus `as '<literal body>'`, a grant to a custom role, a quoted
+`"authenticated"`, `REVOKE GRANT OPTION FOR`, and `WITH GRANT OPTION`), 3
+controls clean, and the fail-closed default proven load-bearing — a `CALL`
+whose literal is a GRANT is caught, and flipping the default to fail-open lets
+it through.
+
+⚠️ **WHERE THE GATE ACTUALLY SITS, stated because a reader will assume
+otherwise.** Reverting `parseGrantees` to the round-20 substring version *with
+the bypass present* is caught by the **unit pin** on `parseGrantees`, not by the
+end-state replay — the replay cannot see it unless that bypass migration is in
+the repo. Same for `WITH GRANT OPTION`. So the pins are the gate on parser
+semantics, and deleting one is not cosmetic. This is the third time on this PR
+that the thing catching a regression was not the thing it looked like: see also
+the schema-wide table wiring, and S22's console-log assertion.
+
+### ⛔ ROUND 22 — every STATEMENT, not every GRANT (⚠️ CALLED "TERMINATING" AND IT WAS NOT — see round 23 below)
+
+**Five rounds, one shape.** Each one found a construct that changes what a client
+can do and that the scanner was not looking at. Rounds 20 and 21 were already
+redesigns, and they are the reason this entry exists: **both inverted a FIELD of
+a GRANT statement**, and the next round walked in through the field next door,
+then through something that is not a GRANT at all.
+
+| round | construct | where it lived |
+|---|---|---|
+| 17 | `all [privileges]` | a FIELD of a GRANT (the privilege) |
+| 19 | `anon` | a FIELD of a GRANT (the grantee) |
+| 20 | `on routine` / `on all tables in schema public` | a FIELD of a GRANT (the target) |
+| 21 | `"public-reader"`, `do '…'` | a FIELD, and the literal's context |
+| 22 | **`alter table … owner to authenticated`** | **not a GRANT at all** |
+
+**Why field-by-field inversion could never terminate:** the set of things that
+affect privileges is not a set of GRANT fields. Ownership transfer, `ALTER
+DEFAULT PRIVILEGES`, role membership (`grant <role> to authenticated`), a
+SECURITY DEFINER body, dynamic SQL, and `FORCE ROW LEVEL SECURITY` are all
+outside it. A gate that only reads GRANTs is unsound however carefully its
+fields are parsed.
+
+**So the question is now asked about the STATEMENT — the last boundary there
+is.** Nothing in a migration sits outside one, so there is no further level to
+be pushed out to; that is the sense in which this ends the regress structurally
+rather than by promising to be more careful next time. Every statement must be a
+kind this suite has reasoned about, and anything else **fails by name** with the
+file and the statement. The allow-list is of **benign** kinds, measured against
+the 87 statements this repo actually contains (every head enumerated before the
+list was written) — not a deny-list of dangerous ones, because a deny-list is
+exactly how rounds 17–22 happened.
+
+⚠️ **AND THE GATE DOES NOT DEPEND ON HAVING ANTICIPATED THE FINDING.** Measured:
+with the named `owner` arm **and both its pins** deleted, the sweep still
+reports `alter table … owner to authenticated` as *"unrecognised statement
+kind"*. The named arm only improves the message. That is the property that
+makes this different from the four previous fixes.
+
+**The three round-22 findings, all reproduced at 20/20 green before fixing:**
+
+| # | finding | why it was invisible |
+|---|---|---|
+| 1 | `select public.run_sql('GRANT … TO authenticated')` | the literal classifier asked whether the statement's HEAD was executable, and `select` was on the inert list |
+| 2 | a later `create or replace … as $body$ … $body$` | `effectiveFunction` closed the body on a literal `$$;`, so the replacement was skipped and every gate kept validating the OLDER definition — a version with no status predicate and no `for update` passed |
+| 3 | `alter table … owner to authenticated` | not a GRANT, so the privilege replay saw no event at all; a table owner also bypasses RLS unless FORCE is set |
+
+**The head was never the right question for a literal.** A literal either parses
+as a GRANT statement or it does not, and that is decidable without knowing who
+executes it — so the test is anchored at a statement start (the literal's
+beginning, after an optional `BEGIN`, or just after a `;`). Head-independent,
+with no inert list left to be incomplete. That anchor is what separates
+`'GRANT EXECUTE ON … TO authenticated'` from this repo's own
+`'… holds select+insert by explicit grant. Replaces …'`.
+⚠️ **My own pin table disagreed with the implementation on first run** and the
+pin was the thing that was wrong: I had marked *"we grant nothing on this table
+to anyone"* as reportable. It contains `grant`, `on` and `to` and is still
+prose — which is the anchor's whole job, since an executed literal must *begin*
+a statement.
+
+**`effectiveFunction` now matches PAIRED dollar tags and fails closed.** `$$` is
+just the empty tag, so a tagged body was never an exotic spelling; and a
+definition whose body cannot be delimited is **reported** rather than skipped,
+through one shared `requireFunction()` so the reason reaches the reader instead
+of surfacing as an unrelated failure on `hit.body` being undefined.
+
+**Measured, 15 mutations.** 8 bypasses caught — the three reported plus five
+nobody reported: `no force row level security`, `create role` + `grant <role> to
+authenticated`, `alter role authenticated bypassrls`, an `insert` whose row value
+is a grant statement, and an event trigger. The control (a benign DDL+DML mix,
+including a `COMMENT` whose prose contains both words and a legitimate RPC call)
+stays clean. Every fix is proven load-bearing: deleting the sweep reopens the
+owner hole, flattening `BENIGN_STATEMENT` to "benign" fails the pins, removing
+the literal anchor lets the `run_sql` grant through, and reverting the dollar-tag
+match restores finding 2.
+
+⚠️ **One deliberate false positive.** An `insert` whose row value happens to be a
+grant statement is reported. No such table exists here; if a legitimate
+job-queue table ever does, the reported-not-silent direction is still the right
+one and the fix is to model that table, not to loosen the anchor.
+
+### ⛔ ROUND 23 — THE RETRACTION: a text scan over SQL cannot decide who can write a table
+
+⚠️ **THE ROUND-22 ENTRY ABOVE CLAIMS IT "ends the regress structurally rather
+than postponing it". THAT CLAIM IS FALSE AND THIS SECTION RETRACTS IT.** Codex
+round 23 found four more, all at 21/21 green, and **all four were items I had
+explicitly asked to have challenged** in the round-23 request — the benign list,
+the `alter table … alter|rename` arm, the literal anchor, and the first-dollar-tag
+assumption. Every line I flagged as uncertain was in fact wrong.
+
+| # | the bypass | why it was invisible |
+|---|---|---|
+| A | a decoy body in a function OPTION: `set app.audit = $safe$ <correct-looking> $safe$ as $real$ <unsafe> $real$` | `effectiveFunction` took the FIRST dollar tag after the parameter list, so the predicate and `for update` assertions inspected the SET value |
+| B | create an open table, grant it to `authenticated`, `rename` the protected table away and the open one in | the replay is keyed on the table NAME, so every grant it recorded moved to a different object |
+| C | a later SECURITY DEFINER helper that inserts straight into the claim table | `create function` was blanket-benign, and a new function is EXECUTABLE BY PUBLIC unless revoked |
+| D | `'BEGIN IF true THEN GRANT … ; END IF; END'` | round 22's anchor required the GRANT at a statement start; PL/pgSQL permits it after arbitrary control flow |
+
+**What the six rounds actually establish.** The statement boundary was the right
+*level* — but classification *within* it is itself open-ended: dollar tags with
+arbitrary names, `AS` clauses that are not the first quoted span, PL/pgSQL
+bodies, renames, ownership, default privileges, role membership, and function
+bodies that can do anything. **Privileges do not arrive only through GRANT
+statements, and SQL has a procedural sublanguage inside it.** So:
+
+⛔ **`privilege.test.mjs` is a NET, not a proof** — the same language this repo
+already uses for `check-keep-back-routes.js`, and it should have been used here
+from the start instead of three successive claims to have closed the class.
+What bounds the harm is that a construct it cannot read now **fails by name**,
+so the cost of a novel one is a loud failure rather than a silent hole.
+
+✅ **THE AUTHORITATIVE CHECK IS A CATALOG QUERY, AND IT IS NOW WRITTEN DOWN.**
+`index.ts`'s deploy header previously said only "confirm the migrations are
+applied". It now carries, as step 3, four runnable queries that measure the END
+STATE however it was reached: who holds privileges on the claim table and **who
+owns it** (an owner is not subject to its own policies unless FORCE is set);
+whether RLS is on and that there are **zero** policies; `pg_proc.prosecdef` /
+`proconfig` / `proacl` for the claim RPC (a null `proacl` means PUBLIC may
+execute); and **every function whose source names the claim table**, which must
+be exactly one. (a) and (d) are the two no source scan can replace.
+
+**The four fixes, since they are real regardless:**
+- the function body is located from its **`AS` clause**, walking the statement
+  while skipping dollar- and single-quoted spans so an `as` inside an option
+  value cannot be mistaken for the clause;
+- `alter table … rename` leaves the benign list and **fails closed** (this repo
+  contains no RENAME at all, measured, so it costs nothing);
+- `create|alter function` is classified by **what its body touches** — a
+  function naming a protected table is a write path to it whatever its grants
+  say, and only the claim RPC itself is allowed to;
+- the literal test has **no anchor and no head test left**: any literal naming
+  `grant`/`revoke` is reported, with one structural exemption — the argument of
+  a `COMMENT`, which is documentation by construction. Measured: exactly one
+  literal in this repo names either word and it is that COMMENT.
+
+⚠️ **FIXING THE REPORTED BUG WAS NOT ENOUGH FOR (A), AND THE FIRST FIX WAS GREEN
+AND INERT.** `asClauseBody` correctly returned the `$real$` body — and the
+attack still produced **zero failures**, because `hit.body` spans the WHOLE
+create statement, decoy included, and that is what the assertions read. The
+reported parse bug and the consumer were two defects. It surfaced only on a
+re-check with a probe footer added, so the incidental "no probe documented" gate
+could not mask it: **a repro that fails for a different reason than the attack
+is not a repro.** `hit.inner` is now the body and `hit.body` the statement, and
+the split is stated at both.
+
+⚠️ **AND TWO OF MY PINS WERE TESTING A PATH NO CALLER TAKES.** The sweep
+classifies the BLANKED scan plus the verbatim text; the pins passed RAW SQL. So
+C and a string-bodied variant **survived their mutations while the pins were
+green** — a function body lives in a quoted span, which `scan` blanks by design.
+The pins now go through `sqlStatements` exactly as the sweep does. **A pin that
+feeds the classifier different input than its caller does is not a pin** — the
+same family as the concatenated-files lesson recorded below.
+
+**Measured, 15 mutations.** 9 bypasses caught — the four reported plus a function
+that only READS a protected table, a GRANT inside a `LOOP`, a rename with no
+replacement, a string-bodied writer, and the decoy with a probe footer. One
+control clean. All six fix-mutations caught, including the COMMENT exemption in
+the other direction (removing it cries wolf on this repo's own comment).
+
+⚠️ **One harness error worth keeping:** a mutation helper lost its `"$1" "$2"`
+arguments, so six mutations reported `!! DID NOT APPLY`. That is the *good*
+failure mode — compare the round-20 version, which lost its `return 0` and
+printed six names with silence under each. **Make the applied-check loud, never
+inferential.**
+
+### ⚠️ ROUND 24 — I SHIPPED AN UNRUNNABLE QUERY AND CALLED IT RUNNABLE
+
+Three P2s, and the first is the one to keep: **the round-23 deploy header, written
+specifically to replace an overclaiming scanner with an authoritative check,
+referenced `pg_policies_compat` — a relation that exists in neither PostgreSQL
+nor this repo.** Query (a) would have stopped with *relation does not exist* and
+returned none of the end state it promises. The overclaiming defect, reproduced
+one layer out, inside the section written to correct it, in the same commit.
+
+It is now gated mechanically rather than by a promise to proofread: a test reads
+the header, and any `from pg_*` / `from information_schema.*` naming something
+outside a known set **fails by name**.
+⚠️ **That gate took three attempts, and the first two are the lesson.** Scanning
+every `from X` flagged `the`, `a` and `authenticated` — the words after "from"
+in the header's own English. An indented-line heuristic did not help either,
+because one prose line literally begins *"from a session, see above"*, and
+joining the lines made it worse since `\s` spans newlines. Bounding the slice to
+the comment block was also needed: it had run to end-of-file and was reading an
+HTML email template. What settled it was **inverting the check** — validate only
+names that are CATALOG-SHAPED, which is exactly the mistake that happened. An
+invented relation of some other shape is missed, and that limit is stated rather
+than hidden. (Found by one `console.log` printing the offending lines, after two
+rounds of guessing at the classifier.)
+
+**The second finding answers the question I had put to the round:** the `prosrc`
+substring query does **not** list every function that can write the claim table.
+A PUBLIC-executable SECURITY DEFINER helper can **call** `claim_notification`
+without ever naming the table, so (b) still reports the RPC as service-role-only
+and the substring search still returns one row while a client pre-consumes a
+claim. Views, triggers and dynamically assembled names have the same gap. So the
+deploy step had inherited the unsoundness just retracted for the scanner.
+**Fixed by changing what is measured, not by widening a regex:** the set of
+functions a client role may execute *as their definer* is **exact from the ACL**,
+independent of any source text, and small —
+`where p.prosecdef and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+or has_function_privilege('anon', …))`. Every row must be one you can account
+for, because a definer function runs as its owner and so is not bounded by what
+the caller can do. The substring search is kept as a narrower aid and **labelled
+not exhaustive**; a test asserts that label is present, so the word
+"authoritative" cannot quietly come back.
+**What (d) now claims, precisely:** it bounds the *reviewable surface* rather
+than proving it empty. An escalation path must appear as a row; deciding what a
+given row's body does is back to reading code. (a)–(c) remain exact.
+
+**The third:** `isClaimRpc` searched the whole CREATE statement, so a different
+helper could carry the inert text `function public.claim_notification(` in its
+**body** — a string literal, say — and inherit the allowed RPC's exemption while
+inserting into the claim table. Reproduced at 21/21. The identity now comes from
+the statement **header** (everything before the `AS` clause's body), so a body
+cannot contribute to the name.
+⚠️ My first repro put that string in a `--` comment, which `stripSqlComments`
+removes, so it failed for the wrong reason — the same "a repro that fails for a
+different reason than the attack is not a repro" trap as round 23, one round
+later.
+
+**Measured, 6 mutations, all caught:** the body-text impersonation and its
+quoted-string variant; reverting `isClaimRpc` to the whole text; restoring the
+invented relation; and deleting the not-exhaustive label. A legitimate
+replacement of the real claim RPC stays clean.
+
+### ⚠️ ROUND 25 — THE CLAIM WAS THE DEFECT, THREE ROUNDS RUNNING, AND IT IS NOW GATED
+
+Two P2s, both direct answers to questions put to the round, and both confirmed
+the claim was too strong.
+
+**1. "Every escalation path appears as a row" was false, and a trigger shows
+it.** PostgreSQL checks `EXECUTE` on a trigger function **when the trigger is
+created**, not for the role whose DML fires it. So a SECURITY DEFINER trigger
+function with EXECUTE revoked from `anon` and `authenticated` still runs on a
+client's INSERT, `has_function_privilege` is false, and the direct-ACL query
+omits it — even if its body writes the claim table or calls the claim RPC. Codex
+round 25, with the upstream thread cited. Closed by a second query over
+`pg_trigger` ⋈ `pg_proc` for definer trigger functions on client-writable
+tables, and by **naming what is still not covered**: a view with
+`security_invoker` off, `ALTER DEFAULT PRIVILEGES` on later objects, role
+MEMBERSHIP, rules, and dynamic SQL inside a definer body.
+
+**2. The header gate scanned `FROM` and not `JOIN`.** Queries (a), (b) and (d)
+all join catalogs, so mistyping `join pg_namespace n` → `join
+pg_namespace_compat n` stayed green and permitted exactly the unrunnable-query
+class the gate exists to prevent. Reproduced at 22/22. One of two syntaxes for
+the same thing — the enumeration mistake of rounds 17–22, in miniature, inside
+the gate written to end it.
+
+⚠️ **THE REAL FINDING IS WHAT MUTATION TESTING THEN SHOWED: THE NARROWING WAS
+NOT GATED.** Deleting the trigger query failed **nothing**. Deleting the whole
+NOT-COVERED list failed **nothing**. Three consecutive rounds had found the
+header *claiming* more than its queries deliver — "authoritative" (r23), "every
+function that can write the table" (r24), "every escalation path appears as a
+row" (r25) — and each time the correction was **documentation**, which is
+precisely what had been wrong. So the honesty is asserted now: tests require the
+`pg_trigger` query to be present, require the prosrc aid to carry its own
+not-exhaustive disclaimer, and require each of the four known gaps to be named.
+**Prose that nothing checks is the thing that has been wrong every time.**
+
+⚠️ **And my own new assertion had the scoping defect, on a third surface.** The
+not-exhaustive check matched **anywhere in the header** — and the phrase also
+appears in the summary paragraph, so deleting the prosrc query's *own*
+disclaimer left it green. Mutation-tested: that version SURVIVED. It is now
+scoped to the query's own block, on the reasoning that a reader who copies the
+SQL does not read a summary four paragraphs down.
+
+**Measured, 9 mutations.** Both findings caught; the JOIN arm, the trigger
+query, the gap list, the scoped disclaimer and the prosrc query are each proven
+load-bearing; and reverting the gate to FROM-only lets the mistype through,
+which is what makes the JOIN arm the gate rather than decoration.
+
+**What the deploy header now claims, in its own words:** (a)–(c) are sound and
+exact from the catalog; (d1) and (d2) each enumerate **one kind** of path to a
+definer body a client can cause to run; five kinds are listed as not covered.
+*"These queries make the escalation surface SMALL AND LISTED, not empty and
+proven."* That is a weaker claim than any of the three it replaces, and it is
+the first one that is true.
+
+### ⚠️ ROUND 26 — KNOWING A DEFECT CLASS IS NOT THE SAME AS NOT WRITING IT AGAIN
+
+Two P2s, both answering the two questions put to the round, and both small. The
+instructive part is what mutation testing then said about my own fixes.
+
+**1. The trigger query filtered on the caller's privileges, and that cannot be
+sound.** It required the client to hold INSERT or UPDATE on the trigger's table.
+Triggers fire on **all four** DML events, so a client holding only DELETE or
+TRUNCATE still fires one; and a DELETE trigger also fires on a **CASCADE** from
+another table, where the client may hold *nothing* on the trigger's own
+relation. Fixed by **deleting the filter**: the privileges are reported as
+columns for the operator to read, and the row set is every non-internal definer
+trigger in `public`, which is small. CASCADE is now named in the gap list too.
+
+**2. The gap-list assertion pinned FOUR of the FIVE gaps the prose named**, so
+deleting `rules (CREATE RULE)` from the header stayed green — the exact
+mutation-testing failure the assertion had been added one round earlier to
+prevent, reintroduced by transcribing the list instead of counting it. The
+array in the test is now canonical: a new gap goes there first.
+
+⚠️ **AND THEN TWO OF MY OWN FIXES SURVIVED THEIR MUTATIONS, FOR THE SAME REASON
+AS EACH OTHER.** Deleting `CASCADE` or `dynamic SQL` from the gap list failed
+nothing, because **both phrases appear twice in the header** — once explaining a
+query, once in the list — and the assertion matched anywhere in the header. That
+is *the same scoping defect fixed one round earlier for the not-exhaustive
+check*, **reintroduced in the assertion written directly beside it**, in the same
+test, by me, one round later.
+It is now scoped to the NOT-COVERED paragraph, and each of the six gaps is
+mutation-tested individually against its **last** occurrence rather than its
+first — because mutating the first occurrence hits the explanatory mention and
+proves nothing. 7/7 caught after that.
+
+**The generalisable lesson, which is why this has its own section:** this repo
+already records the scoping defect three times (the concatenated-migrations
+scan, the `.k-h1` assertion, the round-25 disclaimer). Recording it did not stop
+me writing it a fourth time, in the file where it had just been fixed. What
+caught it was **mutating each item separately**, and nothing else would have —
+the suite was green, the assertion looked scoped, and the prose read correctly.
+**A defect class you can name is still one you will write; only the mutation
+grades it.**
+
+⚠️ One further process note: two mutations in this round were initially
+mis-graded because the script replaced the **first** occurrence in the file,
+which for both of these words lay outside the list under test. Mutating "the
+word" is not the same as mutating "the word where it carries the claim".
+
+### ✅ PR #256 REVIEW CHAIN TERMINATED CLEAN AT ROUND 28 (2026-10-13)
+
+Twenty-eight Codex rounds, ending *"Didn't find any major issues"* on `b03b571`.
+Recorded because the shape of those rounds is the useful part, and because a
+reader meeting the sections below needs to know they describe a chain that
+**finished** rather than one still running.
+
+| rounds | what the findings were about |
+|---|---|
+| 1–16 | the handler, the claim mechanism, RLS and grants — **real behaviour** |
+| 17–22 | the source scanner's completeness — five rounds, one mechanism, ending in a redesign |
+| 23–27 | **the CLAIMS**: ten findings, nine of them documentation asserting more than its queries deliver |
+| 28 | clean |
+
+**The single most useful thing learned here:** from round 23 on, the code stopped
+being the defect and the *write-up* became it. The function, the proposed
+migration and the suite's behaviour were unchanged from `da86e83` to `b03b571`;
+every finding in that stretch was a sentence claiming more than it could. Three
+of those were in sections written specifically to correct an earlier overclaim.
+**Prose that nothing checks is the least reliable artefact in the repo**, and the
+answer that finally worked was to gate the claims mechanically — the header's
+queries must name only real relations, must carry their own non-exhaustiveness
+disclaimer, must name every known gap, and must not state an `EXPECT` that the
+migrations contradict.
+
+⚠️ **What is NOT closed, and must not be read as closed:** the owner gate below.
+`supabase/proposed/20261013_enhancement_notifications.sql` is still **written and
+not applied**, and `notify-enhancement` is still **not deployed**. A clean review
+is a statement about the diff, not about production.
+
+### ⚠️ ROUND 27 — A WRONG `EXPECT` IS WORSE THAN A MISSING ONE
+
+One P2, and it is a factual error in the deploy checklist rather than a bypass.
+The (d2) trigger query filters on `p.prosecdef`, and
+`enforce_notified_write_once()` is declared **without** `security definer`
+(`20261013013743`) — so it is an INVOKER trigger and the query correctly returns
+**zero rows**. The header said to expect the write-once trigger in that result.
+An operator following it would have read a correct empty result as a **failed
+apply**.
+
+**Why that is worse than having no EXPECT at all:** a checklist that cries wolf
+on its first run is a checklist that stops being run, and the whole reason this
+header exists is that the source scanner could not be trusted. A false alarm in
+the replacement is a direct attack on the replacement's usefulness.
+
+**The filter is right and stays.** An INVOKER trigger runs with the CALLER's
+privileges, so it is not an escalation path and does not belong in a query about
+definer bodies. The *prose* was wrong, not the SQL — consistent with rounds
+23–26, where the claims kept being the defect.
+
+**And the EXPECT is now tied to the source**, so it cannot drift again: a test
+counts the SECURITY DEFINER trigger functions this repo declares and requires
+the header to say "zero rows" while that count is zero — or, if one is ever
+added, to **name it**, so an operator can tell an expected row from a new one.
+Mutation-tested 3/3: reverting the EXPECT fails; adding a definer trigger
+function to a migration fails until the header names it; adding an **invoker**
+one correctly stays clean.
+
+⚠️ Recorded also because of what it says about the last five rounds: 23 through
+27 produced **ten findings, and nine were about claims rather than code.** The
+function, the migration and the suite's behaviour have been unchanged since
+`da86e83`; what kept being wrong was what the documentation asserted about them.
+That is worth knowing the next time a section of this file reads as confident.
+
+### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
+
+Second time on one PR that closing a direction opened or deepened another, so it
+is recorded as a rule rather than as two incidents.
+
+`20261013013743` revoked table-wide UPDATE on `enhancement_requests` and
+re-granted `(status, approved_at)`, closing every path by which staff could
+reset or forge a notification stamp — **by UPDATE**. It left the table-wide
+**INSERT** grant from `20260628091530` untouched, and `er_insert_own` checks only
+`owner = auth.uid() and status = 'requested'`. So a client could simply create a
+request with a stamp already populated:
+
+```sql
+insert into enhancement_requests (owner, subject, message, requested_notified_at)
+values (auth.uid(), 'x', 'x', now());          -- ACCEPTED, pre-stamped
+```
+
+`notify-enhancement` then reads a populated stamp, answers `already_notified`,
+and emails nobody — and the write-once trigger from the same migration makes the
+forged value **immutable**. That is the identical pre-claim that caused the
+trigger-only design to be withdrawn one round earlier, arriving through the other
+write path. Found by Codex within minutes of the apply.
+
+Closed by `20261013014854`: INSERT narrowed to the seven columns
+`addEnhancementRequest()` actually writes (`owner, subject, message, policy_id,
+asset_id, entity_id, context`). `status`, `id` and `created_at` are omitted
+because each has a NOT NULL default — and the `status` default `'requested'` is
+what keeps `er_insert_own`'s check satisfied without letting the client choose a
+status, measured rather than assumed.
+
+**The generalisable rule:** when narrowing write access to a column, enumerate
+**every** statement type that can write it — INSERT and UPDATE at minimum — and
+check the grant for each. Narrowing one is not narrowing the column. The same
+applies to a default: a column the client cannot name is still set, so the
+default has to be the safe value.
+
+### ⚠️ FOUR WAYS A MUTATION TEST LIES, all hit on 2026-10-13
+
+Found while gating the `notify-enhancement` rewrite. None of them is about the
+code under test — all four are about the *harness* — and each one produced a
+confident green that meant nothing. This file already records that a green DOM assertion
+does not prove the guard you wrote is holding the line; these are the same
+lesson one level down, in the tool used to check it.
+
+**1. `git checkout --` CANNOT REVERT A BASELINE YOU HAVE NOT COMMITTED.** The
+mutation loop was: apply a mutation with `sed`, run the test, `git checkout --
+<file>` to restore. But the rewritten `index.ts` was still **uncommitted**, so
+every "restore" reverted it to the ORIGINAL service-role version — not to the
+new baseline. Mutations 2 through 7 were therefore all run against the old file,
+and six of seven reported "all tests fail", which reads like a thorough catch and
+is actually the harness testing the wrong file. Untracked files are worse: `git
+checkout --` errors out and the mutation **stays applied**, so the next mutation
+stacks on top of it. Two mutations to the new migration were silently left in
+place and had to be reversed by hand.
+**The rule: commit the baseline BEFORE mutating, and verify the working tree is
+clean between mutations.** A baseline you cannot restore is not a baseline.
+
+**2. AN ASSERTION OVER CONCATENATED FILES CANNOT FAIL.** The gate checked that
+the SECURITY DEFINER function still carries `owner = auth.uid()` — its entire
+authorisation — by testing that regex against **every migration joined
+together**. A dozen unrelated RLS policies in this repo contain that exact
+string, so deleting the gate from the function under test **passed**. It was
+caught only by running the mutation; nothing about the green run looked wrong.
+Now scoped to the function's own body, matched from `create … function
+public.<name>(` to its closing `$$;` — which also made room for two guards the
+unscoped version could never have expressed (SECURITY INVOKER, unpinned
+`search_path`). 9/9 mutations caught after the fix.
+**The rule: scope a source assertion to the smallest unit that owns the
+property.** Same class as the `.k-h1` visibility assertion and the inverted
+`contract.test.mjs` finding already recorded above.
+
+⚠️ **AND "SCOPED" IS NOT A STATE YOU REACH BY NARROWING ONCE — round 18 hit this
+rule twice in one assertion.** Gating the new `claim_notification` probe on
+`42501` over the whole probe footer was vacuous (probes 1 and 2 both say
+`Expect 42501`, so probe 2b carrying no expectation at all passed). Narrowing to
+*the nearest preceding `-- <n>.` heading* was **also** vacuous, and that version
+**survived its mutation**: strip 2b's number and the search walks back to probe
+2, whose block carries its own `42501`. The same defect, one level up, from the
+fix for it. What settled it was asserting the unit really is the probe's own —
+no other `select`/`insert` between the heading and the call — so the scope is
+proven rather than assumed. 5/5 caught after that; a benign renumbering of probe
+3 is correctly ignored, which is what shows the block end is not hardcoded.
+
+**3. A MUTATION THAT NEVER APPLIED READS EXACTLY LIKE A SURVIVOR.** Hit on the
+round-10 fix, and it is the quietest of the three. The mutation was "move the
+owner lookup back below the claim", scripted as a slice between two `s.index`
+anchors — and the second anchor, `const { data: claim, error: claimErr }`,
+matches the **requested** branch first, which appears EARLIER in the file. So
+the slice ran backwards, came out empty, `s.replace("", "")` was the identity,
+and the test passed. Reported as a survivor on the one fix the whole round was
+about.
+What caught it: `git diff` was **empty** after the mutation. So the rule is to
+**prove the mutation applied before grading it** — a non-empty diff, or an
+assertion inside the script (`assert out != s`), and for an ordering mutation,
+re-grep the two line numbers and check they actually swapped. A green run on an
+unmutated file is not evidence of anything, and it is indistinguishable from the
+guard holding.
+
+**4. A MUTATION THAT APPLIED CLEANLY CAN STILL ENCODE AN IMPOSSIBLE STATE —
+and I hit this TWICE, one round apart, the second time with my own warning
+about it in the file I was editing.** `orderedMigrations()` already carried the
+note: a probe migration dated `29990101` in `migrations/` *cannot exist*, since
+a file in `migrations/` is one that has already run and so sorts before anything
+in `proposed/`. Round 19's mutation — the anon grant Codex described — went into
+`migrations/` again, where the claim migration's own `revoke all … from anon,
+authenticated` correctly cancelled it. Four mutations, four "SURVIVED", and the
+conclusion I nearly drew was that my fix was inert. Placed realistically (a
+LATER file in `proposed/`) it is caught, naming the grantee and the file.
+**The rule: a mutation has to describe a state the system can actually reach.**
+It differs from #3 in that nothing about the run looks wrong — the diff is
+non-empty, the file is read, the replay sees the statement — so the only check
+is asking whether the scenario is possible before believing the verdict. And a
+survivor must be explained before it is accepted: #3 fails loudly under `git
+diff`, this one only fails under thinking about it.
+
+### ⚠️ HTTPS EGRESS TO THE SUPABASE PROJECT IS BLOCKED FROM A SESSION (measured 2026-10-13)
+
+`curl https://bdsegmjcgfmgzuxwiplj.supabase.co/...` fails with
+`connect_rejected` — "the egress proxy denied the CONNECT (organization policy)
+or could not reach the destination". So from a session there is **no way to run a
+real client session over PostgREST or `/auth/v1/token`**, and no way to invoke a
+deployed Edge Function. `akyachtsman.github.io` is reachable, so this is
+host-specific, not general.
+
+**The workaround, and what it is actually worth.** The in-database substitute is
+`set local role authenticated` plus `set local "request.jwt.claims"`, and it
+**DOES enforce RLS and column privileges** — so it exercises policies, grants and
+a SECURITY DEFINER function's own predicate. Measured 2026-10-13 with a uid
+holding no `profiles` row (`99999999-…`): `enhancement_requests` 0 rows,
+`profiles` 0, `entities` 0.
+
+⚠️ **AN EARLIER VERSION OF THIS SECTION SAID THE OPPOSITE — "it does NOT enforce
+RLS" — AND THE ERROR IS THE INSTRUCTIVE PART.** That claim came from one probe
+which acted as `authenticated` with what it called "a FOREIGN uid" and saw
+`select count(*) from public.enhancement_requests` return **1** where
+`er_select_own` should give 0. The uid used was
+`22222222-2222-4222-8222-222222222222` — **the seeded BROKER's id** — and
+`er_broker_select` legitimately shows a broker every request. So the row it
+returned was RLS working correctly, read as RLS being bypassed, and the wrong
+conclusion then propagated into two migration files, a PR body and three Codex
+threads before anything caught it.
+**The lesson is not about this harness.** It is that a probe's INPUT needs
+checking as carefully as its output: the uid was never verified to belong to
+nobody, and `select id, role from profiles` would have settled it in one call.
+Same family as the `.k-h1` assertion and the concatenated-migrations scan — a
+measurement that cannot mean what it is taken to mean.
+
+⚠️ **What it still cannot do:** run a real PostgREST request or invoke a deployed
+Edge Function, so anything about HTTP status codes, PostgREST's
+return-representation behaviour or gateway `verify_jwt` handling is still
+unmeasurable from here. And `session_user` is `postgres`, so a statement run
+WITHOUT `set local role` bypasses RLS entirely — which is the service-role
+false-pass trap this file records elsewhere, one `set` away.
+
+⚠️ **A DELETE CANNOT BE RUN THROUGH THE MCP EITHER (measured twice, 2026-10-13).**
+`delete from public.enhancement_requests where id = …` hangs 60s and applies
+nothing, the same signature this file records for `DROP POLICY`/`DROP TABLE`; the
+earlier finding was written as a DDL constraint and does not cover DML. Verified
+by re-reading the table after each attempt — the row was still there both times.
+
+✅ **BUT `begin; … rollback;` IS HONOURED, and that is the technique for a write
+probe from a session.** Measured the same day: a client insert inside an explicit
+transaction was visible inside it (count 3) and gone after it (count 2). So a
+probe that needs to write should be wrapped in a rolled-back transaction rather
+than insert-then-delete — which is what should have been done the first time.
+⚠️ It does not help retrospectively: a committed row cannot be rolled back, so
+one throwaway probe row is outstanding and needs one line from the owner (see
+`migrations/20261013014854_enhancement_requests_insert_column_scope.sql`).
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
