@@ -620,14 +620,25 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
       // Replay the migrations in order and keep the LAST word on this
       // privilege: a table-wide grant opens it, a revoke closes it, and a
       // column-scoped grant leaves it closed.
+      // ⚠️ ONLY A TABLE-WIDE REVOKE CLOSES A TABLE-WIDE GRANT. In Postgres,
+      // `revoke update (role) on public.profiles from authenticated` removes a
+      // COLUMN privilege and leaves the table-level one untouched — so treating
+      // any revoke as closing the table-wide state meant a migration narrowing
+      // the existing `revoke update on public.profiles` to `(role)` would leave
+      // clients able to self-assign `underwriter` with this test still green.
+      // Codex #256 round 11; it is the mirror of the grant side, where a column
+      // list makes a statement harmless, and here it makes one ineffective.
       let openedBy = null;
       let everRevoked = false;
       for (const m of migs) {
         for (const stmt of privilegeStatements(m.sql, table)) {
           const held = carries(stmt, priv);
           if (!held) continue;
-          if (stmt.verb === "revoke") { everRevoked = true; openedBy = null; }
-          else if (held.tableWide) openedBy = m.file;
+          if (stmt.verb === "revoke") {
+            if (!held.tableWide) continue;          // column-scoped: no effect on the table privilege
+            everRevoked = true;
+            openedBy = null;
+          } else if (held.tableWide) openedBy = m.file;
         }
       }
       assert.ok(
@@ -644,41 +655,80 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
   }
 });
 
-test("the approved branch resolves AND validates the client recipient before claiming", () => {
-  // ⚠️ ORDERING, AGAIN, AND THE MIRROR IMAGE OF ROUND 1. The claim must come
-  // before the SENDS — that is what makes it a gate, asserted above — and it
-  // must come after everything that can fail WITHOUT sending anything. The
-  // owner lookup used to sit below the claim, so a transient `getUserById`
-  // failure, or an account with no email, consumed the row's one claim and then
-  // called sendEmail("") — which returns `no_recipient`, not an error. The
-  // handler answered 200 and the client's approval notice was unsendable
-  // forever, because the claim is write-once by design. Codex #256 round 10.
+test("EVERY recipient is resolved and validated before either claim", () => {
+  // ⚠️ ORDERING, AND THE MIRROR IMAGE OF ROUND 1. Round 1 was "the gate ran
+  // after the side effect". This is "something that can fail WITHOUT a side
+  // effect ran after the gate". Together they give the rule this test pins:
+  // the claim comes AFTER everything that can fail without sending, and BEFORE
+  // anything that sends (the latter is the BRANCHES table above).
   //
-  // Three things in order, and all three are pinned: the lookup, the guard that
-  // returns on a bad recipient, then the claim. The guard EXPRESSION is pinned
-  // too, not just the refusal string — a refusal inside `if (false)` survives,
-  // which this file has already learned once.
-  const a = code.indexOf('if (row.status !== "underwriting"');
-  assert.ok(a >= 0, "could not find the approved branch — has it been restructured?");
-  const branch = code.slice(a);
-
-  const lookupAt = branch.indexOf("auth.admin.getUserById");
-  const guardAt = branch.indexOf("if (ownerErr || !clientEmail)");
-  const refusalAt = branch.indexOf("no_client_recipient");
-  const claimAt = branch.indexOf('rpc("stamp_approved_notified"');
-
-  assert.ok(lookupAt >= 0, "the approved branch no longer resolves the client's address");
-  assert.ok(guardAt >= 0, "the approved branch lost its `if (ownerErr || !clientEmail)` guard");
-  assert.ok(refusalAt >= 0, "the approved branch lost its no_client_recipient refusal");
-  assert.ok(claimAt >= 0, "the approved branch no longer claims");
+  // Why it matters: `sendEmail("")` returns {sent:false, reason:"no_recipient"}
+  // rather than throwing, so an empty address discovered after the claim means
+  // 200 to the caller and a notification that is PERMANENTLY undeliverable —
+  // the claim is write-once by design.
+  //
+  // ⚠️ THIS TEST IS BRANCH-GENERIC ON PURPOSE. Its first version asserted the
+  // approved branch's client lookup alone, because that is the instance round
+  // 10 found; round 11 named three more doors into the same mechanism (an unset
+  // BROKER_EMAIL on either branch, and a requested-event caller whose JWT
+  // carries no email). A per-instance assertion would have passed all three.
+  const gates = [
+    { name: "requested", from: 'if (event === "requested")', claim: 'rpc("stamp_requested_notified"' },
+    { name: "approved", from: 'if (row.status !== "underwriting"', claim: 'rpc("stamp_approved_notified"' },
+  ];
 
   assert.ok(
-    lookupAt < claimAt,
+    /function missingRecipients\(/.test(code),
+    "the shared recipient gate is gone — each branch would validate recipients by habit again",
+  );
+  assert.ok(
+    /filter\(\(\[, v\]\) => !v\.trim\(\)\)/.test(code),
+    "missingRecipients no longer treats a blank address as missing",
+  );
+  assert.ok(
+    /error: "no_recipient", missing/.test(code),
+    "missingRecipients no longer reports WHICH recipient is missing, which is the only actionable part",
+  );
+
+  for (const g of gates) {
+    const a = code.indexOf(g.from);
+    assert.ok(a >= 0, `could not find the ${g.name} branch — has it been restructured?`);
+    const branch = code.slice(a, g.name === "requested" ? code.indexOf('if (row.status !== "underwriting"', a) : code.length);
+
+    const claimAt = branch.indexOf(g.claim);
+    const callAt = branch.indexOf("missingRecipients({");
+    const returnAt = branch.indexOf("if (badRecipients) return badRecipients;");
+    assert.ok(claimAt >= 0, `the ${g.name} branch no longer claims`);
+    assert.ok(callAt >= 0, `the ${g.name} branch does not call missingRecipients`);
+    assert.ok(returnAt >= 0, `the ${g.name} branch calls missingRecipients without RETURNING on a failure`);
+    assert.ok(
+      callAt < claimAt && returnAt < claimAt,
+      `the ${g.name} branch must validate recipients and RETURN before the claim, ` +
+      `or a missing address burns a claim that can never be retaken`,
+    );
+
+    // BOTH recipients, in the one call. A gate that checks the client and not
+    // the broker is the round-11 finding.
+    const call = branch.slice(callAt, branch.indexOf("}", callAt) + 1);
+    for (const who of ["broker: BROKER_EMAIL", "client:"]) {
+      assert.ok(
+        call.includes(who),
+        `the ${g.name} branch's recipient gate does not cover \`${who}\` — it reads \`${call}\``,
+      );
+    }
+  }
+
+  // The approved branch additionally resolves the address through the Auth admin
+  // API, which can fail on its own; that lookup must also precede the claim.
+  const approved = code.slice(code.indexOf('if (row.status !== "underwriting"'));
+  assert.ok(
+    approved.indexOf("auth.admin.getUserById") >= 0 &&
+    approved.indexOf("auth.admin.getUserById") < approved.indexOf('rpc("stamp_approved_notified"'),
     "the owner lookup must run BEFORE the claim, or a lookup failure burns a claim that can never be retaken",
   );
   assert.ok(
-    guardAt < claimAt && refusalAt < claimAt,
-    "the recipient guard must RETURN before the claim is taken, not merely run before it",
+    /if \(ownerErr\) \{/.test(approved),
+    "the approved branch no longer checks the getUserById error, so a transient failure reads as 'no email'",
   );
 
   // And the send-failure log must fire on EITHER failure. `!broker && !client`
@@ -686,6 +736,6 @@ test("the approved branch resolves AND validates the client recipient before cla
   // cannot be retaken.
   assert.ok(
     /if \(!brokerMail\.sent \|\| !clientMail\.sent\)/.test(code),
-    "the approved branch logs only when BOTH sends fail, so a half-delivered notification is invisible",
+    "a branch logs only when BOTH sends fail, so a half-delivered notification is invisible",
   );
 });

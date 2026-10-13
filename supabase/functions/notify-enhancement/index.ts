@@ -166,6 +166,29 @@ function esc(s: string): string {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 }
 
+// ⚠️ EVERY RECIPIENT IS VALIDATED BEFORE EITHER CLAIM, and this helper exists so
+// that is one rule rather than a per-branch habit. `sendEmail("")` returns
+// `{sent:false, reason:"no_recipient"}` — it does not throw — so an empty
+// address after the claim means the handler answers 200 while the notification
+// is PERMANENTLY undeliverable: the claim is write-once by design, so correcting
+// the address later changes nothing.
+//
+// Round 10 fixed this for ONE recipient (the approved branch's client lookup).
+// Round 11 pointed out the other three ways in: an unset BROKER_EMAIL on either
+// branch, and a requested-event caller whose JWT carries no email. Same
+// mechanism, three more doors — so per global.md -> *Review Rounds Have to
+// Terminate* this is a helper both branches call, not a third patch.
+//
+// Returning here leaves the row CLAIMABLE, so a retry works once the address or
+// the secret is fixed. Nothing has been sent at this point, so there is nothing
+// to be idempotent about.
+function missingRecipients(parts: Record<string, string>): Response | null {
+  const missing = Object.entries(parts).filter(([, v]) => !v.trim()).map(([k]) => k);
+  if (missing.length === 0) return null;
+  console.error(JSON.stringify({ where: "recipients", missing }));
+  return json({ error: "no_recipient", missing }, 502);
+}
+
 async function sendEmail(to: string, subject: string, html: string) {
   if (!RESEND_API_KEY) return { sent: false, reason: "no_provider_key" };
   if (!to) return { sent: false, reason: "no_recipient" };
@@ -287,7 +310,19 @@ Deno.serve(async (req: Request) => {
       return json({ error: "already_notified", at: row.requested_notified_at }, 409);
     }
 
-    // 3. THE CLAIM — atomic, and the actual gate. `update ... where
+    // 3. EVERY RECIPIENT, BEFORE THE CLAIM. The caller's own address comes from
+    //    their OWN session — no admin lookup, because on this path the caller
+    //    IS the recipient — so this is a read of the JWT and cannot double-send.
+    //    BROKER_EMAIL is checked here too: it is a secret this repo cannot
+    //    verify is set (see the header), so "configured but empty" is the
+    //    likely shape, not an exotic one. Codex #256 round 11.
+    const clientEmail = user.email || "";
+    const clientName =
+      (user.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail;
+    const badRecipients = missingRecipients({ broker: BROKER_EMAIL, client: clientEmail });
+    if (badRecipients) return badRecipients;
+
+    // 4. THE CLAIM — atomic, and the actual gate. `update ... where
     //    requested_notified_at is null and status = 'requested'` is evaluated
     //    under a row lock: a second concurrent invocation blocks, re-evaluates
     //    the WHERE against the committed new version, matches nothing and gets
@@ -306,13 +341,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "already_notified" }, 409);
     }
 
-    // The client's own address comes from their OWN session — no admin lookup,
-    // because on this path the caller IS the recipient. One fewer cross-user
-    // read than the version this replaces.
-    const clientEmail = user.email || "";
-    const clientName =
-      (user.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail || "your client";
-
+    // (Both addresses were resolved and validated above, before the claim.)
     const brokerMail = await sendEmail(
       BROKER_EMAIL,
       `New enhancement request: ${row.subject}`,
@@ -489,16 +518,18 @@ Deno.serve(async (req: Request) => {
   // idempotent about. The lookup is a READ: doing it first cannot double-send,
   // and two concurrent invocations still resolve to one claim and one refusal.
   const { data: ownerData, error: ownerErr } = await authAdmin.auth.admin.getUserById(row.owner);
-  const clientEmail = ownerData?.user?.email || "";
-  if (ownerErr || !clientEmail) {
-    console.error(JSON.stringify({
-      where: "owner_lookup", code: ownerErr?.code ?? null,
-      message: ownerErr?.message ?? "no email on the owner's auth record",
-    }));
-    return json({ error: "no_client_recipient" }, 502);
+  if (ownerErr) {
+    console.error(JSON.stringify({ where: "owner_lookup", code: ownerErr.code ?? null, message: ownerErr.message }));
+    return json({ error: "owner_lookup_failed" }, 502);
   }
+  const clientEmail = ownerData?.user?.email || "";
   const clientName =
     (ownerData?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail;
+  // BROKER_EMAIL is in the same gate as the client address — round 10 validated
+  // only the client here, and an unset BROKER_EMAIL burns the claim exactly the
+  // same way. Codex #256 round 11.
+  const badRecipients = missingRecipients({ broker: BROKER_EMAIL, client: clientEmail });
+  if (badRecipients) return badRecipients;
 
   const { data: claim, error: claimErr } = await caller
     .rpc("stamp_approved_notified", { p_request: requestId });
