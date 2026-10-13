@@ -206,14 +206,12 @@ create trigger enhancement_requests_notified_write_once
 --                                       write-once (was ..., attempted <NULL>)"
 --   set approved_notified_at = now() -> 42501 "... attempted 2026-10-13 01:40:35"
 --
--- ⚠️ ONE PIECE OF LITTER, AND IT NEEDS ONE LINE FROM THE OWNER. The throwaway
--- probe row could not be removed: **the Supabase MCP hangs 60s on a DELETE and
--- applies nothing**, exactly as CLAUDE.md records for DROP. Measured twice, and
--- the row is still present and verified still present after each attempt. It is
--- owned by the demo client, subject "PROBE ROW - delete me", and it will show up
--- in the Keep's My-requests list. Remove it in the Dashboard SQL editor:
---   delete from public.enhancement_requests
---    where id = 'aaaaaaaa-0000-4000-8000-000000000001';
+-- ✅ THE LITTER IS GONE — the owner deleted it in the Dashboard SQL editor on
+-- 2026-10-13 and the table is back to its one seeded row, verified from a
+-- session. The finding that forced that stands: **the Supabase MCP hangs 60s on
+-- a DELETE and applies nothing**, exactly as CLAUDE.md records for DROP.
+-- Measured twice, the row verified still present after each attempt — which is
+-- why it took a human in the dashboard to remove a row this probe created.
 -- (This is a NEW constraint on this environment — the recorded DROP finding did
 -- not cover DML. Use a transaction-wrapped probe, or no probe row at all, next
 -- time.)

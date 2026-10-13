@@ -68,10 +68,10 @@ grant insert (owner, subject, message, policy_id, asset_id, entity_id, context)
 -- the technique for a write-probe from a session is a rolled-back transaction,
 -- not an insert-then-delete. That is what should have been used the first time.
 --
--- The stuck row from the earlier probe is still outstanding and still needs one
--- line from the owner — a committed row cannot be rolled back after the fact:
---   delete from public.enhancement_requests
---    where id = 'aaaaaaaa-0000-4000-8000-000000000001';
+-- ✅ The stuck row from the earlier probe was deleted by the owner in the
+-- Dashboard SQL editor on 2026-10-13 — a committed row cannot be rolled back
+-- after the fact, so it needed a human. The lesson it paid for is the paragraph
+-- above: wrap a write-probe in a transaction and roll it back.
 --
 -- ── INVERSE (reversible-by-design, per data.md) ─────────────────────────────
 --   grant insert on public.enhancement_requests to authenticated;

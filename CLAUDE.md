@@ -262,12 +262,21 @@ these, so they were applied with `execute_sql` and the
 statements), which is what `apply_migration` does. Versions match the filenames
 in `supabase/migrations/`, so `list_migrations` still agrees with the directory.
 
-⚠️ **One piece of litter, and it needs one line from the owner.** A table
-`public._mcp_write_probe` exists in `public` — it was the single-statement probe
-that established the above (CREATE worked, so writes were possible at all), and
-`drop table` then hung, which is exactly the finding. It has no grants, no RLS, no
-rows and nothing references it. It carries a `COMMENT` saying all of this. Remove
-it in the Dashboard SQL editor: `drop table public._mcp_write_probe;`
+✅ **The litter is GONE — dropped by the owner in the Dashboard SQL editor on
+2026-10-13, verified from a session (`to_regclass('public._mcp_write_probe')` is
+null).** Kept as a record because the table was the probe that established the
+finding above: `create table` worked, so writes were possible at all, and
+`drop table` then hung — which is the finding, and is also why the owner had to
+remove it by hand.
+⚠️ **Its own `COMMENT` said "no grants, no RLS, no rows" and two of those three
+were wrong**, measured before the drop: RLS **was** enabled (this repo's
+auto-enable event trigger did it) and the standard Supabase role grants existed.
+The conclusion held for a different reason than the comment gave — **0 policies**
+meant default-deny, and the only data privileges belonged to `postgres`, with
+`anon`/`authenticated`/`service_role` holding just `REFERENCES/TRIGGER/TRUNCATE`.
+Recorded because "nothing could read it" being true by accident rather than by
+the stated reason is the same comment-overclaims-code defect this file keeps
+paying for.
 
 ⚠️ **Verification comes AFTER the merge, and that ordering is forced, not a
 preference.** This list had them the other way round — verify at 7, merge at 8 —
