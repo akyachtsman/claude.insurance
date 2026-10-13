@@ -198,6 +198,28 @@ revoke execute on function public.stamp_approved_notified(uuid)  from authentica
 -- 2. The old bypass is closed. Expect 42501:
 --      select public.stamp_requested_notified('<their own request id>');
 --
+-- 2b. ⚠️ THE NEW CLAIM FUNCTION IS CLOSED TO THE CLIENT. Expect 42501:
+--      select public.claim_notification(
+--               '00000000-0000-0000-0000-000000000000'::uuid, 'requested');
+--
+--    THIS IS THE MOST IMPORTANT PROBE IN THE LIST, and the first version of this
+--    footer did not have it — probe 1 tests the TABLE's ACL, probe 2 calls the
+--    RETIRED function, and probe 3 runs as service_role, so nothing exercised
+--    the one SECURITY DEFINER function a client could use to pre-consume a claim
+--    and permanently suppress the real email. Codex, round 18.
+--
+--    It matters precisely because the source scanner says it cannot model
+--    `ALTER DEFAULT PRIVILEGES`, role inheritance, or a grant to a role outside
+--    the four channel names it tracks. Those are the paths by which EXECUTE
+--    could be held without any statement this repo can see — and this probe is
+--    the authoritative check that was supposed to cover them. A stated fallback
+--    that does not test the thing it is falling back for is not a fallback.
+--
+--    ⚠️ The all-zeros UUID is deliberate, not a placeholder: if EXECUTE is
+--    unexpectedly held, the function still matches no request row, so the probe
+--    reveals the privilege WITHOUT creating a claim that would suppress a real
+--    notification. A probe for a suppression bug must not be able to suppress.
+--
 -- 3. service_role CAN claim (run as the function does, with the service key):
 --      insert into public.enhancement_notifications (request_id, event)
 --        values ('<a request id>', 'requested')

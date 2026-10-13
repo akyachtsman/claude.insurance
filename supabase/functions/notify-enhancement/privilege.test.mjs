@@ -1221,3 +1221,68 @@ test("the claim serializes against a concurrent stage change", () => {
     `the \`for update\` must be part of the INSERT ... SELECT that takes the claim, between the request table and the ON CONFLICT`,
   );
 });
+
+test("the migration documents a real-client probe of the claim RPC", () => {
+  // ⚠️ THIS ASSERTS A COMMENT, WHICH THIS FILE NORMALLY REFUSES TO DO — and the
+  // reason is the scanner's own stated limit. The scan cannot model
+  // `ALTER DEFAULT PRIVILEGES`, role inheritance, or a grant to a role outside
+  // the four channels it tracks; it says so. The deploy-time probe is the
+  // authoritative check for exactly those paths, so losing the probe silently
+  // would remove the only cover for the gap this file admits to.
+  //
+  // Codex, round 18: the first version of the footer probed the TABLE's ACL, the
+  // RETIRED function, and service_role — never the one SECURITY DEFINER function
+  // a client could use to pre-consume a claim. A stated fallback that does not
+  // test the thing it is falling back for is not a fallback.
+  const hit = effectiveFunction(CLAIM_RPC, CLAIM_RPC_ARGS);
+  assert.ok(hit, `no migration defines public.${CLAIM_RPC}`);
+  const raw = readFileSync(join(here, "..", "..", hit.file), "utf8");
+  const probes = raw.slice(raw.indexOf("POST-APPLY PROBE"));
+  assert.ok(probes.length > 0, `${hit.file} has no post-apply probe section`);
+
+  // ⚠️ SCOPED TO THE ONE PROBE THAT OWNS EACH PROPERTY, not to the whole footer.
+  // `42501` appears in probes 1 and 2 as well, so asserting it against the
+  // joined text would pass with probe 2b carrying no expectation at all — the
+  // same defect as the concatenated-migrations scan recorded in CLAUDE.md
+  // ("an assertion over concatenated files cannot fail"). The block runs from
+  // its own numbered heading to the next one.
+  const call = new RegExp(`select\\s+public\\.${CLAIM_RPC}\\(`);
+  const at = probes.search(call);
+  assert.ok(
+    at !== -1,
+    `${hit.file}'s probes never call public.${CLAIM_RPC} as a client — the one privilege path the source scan admits it cannot model is then untested in both places`,
+  );
+  // The heading is the LAST `-- <number>.` line before the call. Searching for a
+  // bare `\n-- ` instead finds the call's own line, because the call is itself a
+  // `--` comment with leading spaces — which silently cut the heading, and its
+  // `Expect 42501`, out of the block.
+  const headings = [...probes.slice(0, at).matchAll(/\n-- \d/g)];
+  assert.ok(
+    headings.length > 0,
+    `the ${CLAIM_RPC} probe must sit under a numbered heading, so a reader runs it in order`,
+  );
+  const headingStart = headings[headings.length - 1].index;
+
+  // ⚠️ AND THE HEADING MUST BE THIS PROBE'S OWN. Taking the nearest preceding
+  // heading is not enough: strip 2b's number and the search walks back to probe
+  // 2, whose block carries its own `Expect 42501`, and the assertion below goes
+  // vacuous again one level up. Mutation-tested — that version SURVIVED.
+  // So: no other statement may sit between the heading and this call.
+  const between = probes.slice(headingStart, at);
+  assert.ok(
+    !/^--\s+(?:select|insert|update|delete)\b/im.test(between),
+    `the ${CLAIM_RPC} probe shares a numbered block with an earlier statement — it needs its own heading, or its expected result cannot be told apart from the other probe's`,
+  );
+
+  const after = [...probes.slice(at).matchAll(/\n-- \d/g)];
+  const nextHeading = after.length ? at + after[0].index : probes.length;
+  const block = probes.slice(headingStart, nextHeading);
+  assert.ok(
+    /42501/.test(block),
+    `${hit.file}'s probe of ${CLAIM_RPC} must state the expected denial (42501) in its OWN block, not merely call the function`,
+  );
+  assert.ok(
+    /00000000-0000-0000-0000-000000000000/.test(block),
+    `the ${CLAIM_RPC} probe must use a nonexistent UUID, so that if EXECUTE is unexpectedly held it reveals the privilege without creating a claim — a probe for a suppression bug must not be able to suppress`,
+  );
+});
