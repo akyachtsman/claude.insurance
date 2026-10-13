@@ -2017,6 +2017,59 @@ suppressed every grade through an `&&`. Nothing looked wrong: five mutation
 names printed with silence under each. **An applied-check that can swallow the
 grade is worse than no applied-check** — read the output, not the exit status.
 
+### ⚠️ ROUND 21 — AN INVERSION COVERS THE SURFACE YOU INVERT, AND NOT ITS NEIGHBOURS
+
+The round-20 redesign above was right and **incomplete in a way worth more than
+either bug it missed.** It inverted the **target** of a `GRANT`/`REVOKE` — fail
+closed on anything unclassifiable — and left the two surfaces either side of it
+enumerated. Codex found both in the very next round, and neither is a new class:
+
+| surface | the bypass | 20/20 green? |
+|---|---|---|
+| the **grantee** | `\bpublic\b` on the grantee text read a quoted custom role as the PUBLIC pseudo-role: grant EXECUTE to PUBLIC, then `revoke … from "public-reader"`, and the replay recorded the revoke as closing PUBLIC while the real grant stood | yes |
+| the **literal's context** | a `DO` body may be a plain string literal — `do 'begin grant execute on function public.claim_notification(uuid, text) to authenticated; end'` executes that grant, and round 20 blanked every `'…'` as inert data and forgot it | yes |
+
+Both reproduced before fixing. **The lesson is the shape, not the two fixes:**
+when a mechanism is redesigned to fail closed, the *boundary* of that redesign
+is the new attack surface. "I inverted the parser" was not true — one field of
+it was inverted.
+
+**Both surfaces are now inverted the same way**, and deliberately as
+allow-lists of the *safe* case with a fail-closed default:
+- **Grantees are parsed as SQL identifiers**, not matched as substrings.
+  Unquoted folds to lower case, quoted is verbatim, and the mapping to the four
+  channels is EXACT — so `"public-reader"`, `"Authenticated"` and
+  `some_other_role` are simply not channels. An **unrecognised grantee is
+  reported**, because a custom role can be `GRANTED TO authenticated` and role
+  membership is not modelled. (Measured: the only grantees this repo names are
+  PUBLIC/public/anon/authenticated/service_role, so failing closed costs
+  nothing today.) `WITH GRANT OPTION` and `GRANTED BY` are stripped as the
+  clause suffixes they are — the first also contains the word `grant`.
+- **A quoted literal is code or data by its STATEMENT HEAD.** `DO` and a
+  function definition's `AS '…'` are code; a documented inert set (COMMENT,
+  INSERT, SELECT, CREATE TABLE/POLICY/…, …) is data; **anything else whose
+  literal contains grant/revoke is reported**. Enumerating the *executable*
+  side is what failed, so the enumeration is on the inert side.
+- `REVOKE GRANT OPTION FOR <priv>` is **reported rather than modelled**: it
+  removes the right to re-grant and leaves the privilege, so reading it as a
+  revoke would record the privilege as closed — wrong in the unsafe direction.
+
+**17 mutations across both rounds.** Round 21: 7 bypasses caught (the two
+reported plus `as '<literal body>'`, a grant to a custom role, a quoted
+`"authenticated"`, `REVOKE GRANT OPTION FOR`, and `WITH GRANT OPTION`), 3
+controls clean, and the fail-closed default proven load-bearing — a `CALL`
+whose literal is a GRANT is caught, and flipping the default to fail-open lets
+it through.
+
+⚠️ **WHERE THE GATE ACTUALLY SITS, stated because a reader will assume
+otherwise.** Reverting `parseGrantees` to the round-20 substring version *with
+the bypass present* is caught by the **unit pin** on `parseGrantees`, not by the
+end-state replay — the replay cannot see it unless that bypass migration is in
+the repo. Same for `WITH GRANT OPTION`. So the pins are the gate on parser
+semantics, and deleting one is not cosmetic. This is the third time on this PR
+that the thing catching a regression was not the thing it looked like: see also
+the schema-wide table wiring, and S22's console-log assertion.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it

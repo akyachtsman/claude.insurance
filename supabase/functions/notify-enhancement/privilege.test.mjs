@@ -181,9 +181,12 @@ function effectiveExecute(name, want, migs = orderedMigrations()) {
   const state = { authenticated: null, anon: null, public: null, service_role: null };
   let exists = false;
   const CH = Object.keys(state);
-  const setFrom = (roles, verb, file) => {
-    for (const ch of CH) {
-      if (!new RegExp(`\\b${ch}\\b`, "i").test(roles)) continue;
+  // ⚠️ PARSED CHANNELS, NOT A SUBSTRING TEST. This was `\\b${ch}\\b` against the
+  // raw grantee text, which read `revoke ... from "public-reader"` as closing
+  // the PUBLIC channel (Codex round 21). parseGrantees maps identifiers.
+  const setFrom = (channels, verb, file) => {
+    for (const ch of channels) {
+      if (!CH.includes(ch)) continue;
       state[ch] = verb === "revoke" ? null : file;
     }
   };
@@ -229,7 +232,7 @@ function effectiveExecute(name, want, migs = orderedMigrations()) {
         (t) => t.kind === "all-funcs" ||
           (t.kind === "function" && t.name === name.toLowerCase() && sameSignature(t.args, want)),
       );
-      if (hits) events.push({ at: st.at, kind: "acl", verb: st.verb, roles: st.roles });
+      if (hits) events.push({ at: st.at, kind: "acl", verb: st.verb, channels: st.grantees.channels });
     }
     for (const e of events.sort((a, b) => a.at - b.at)) {
       if (e.kind === "drop") { exists = false; for (const ch of CH) state[ch] = null; continue; }
@@ -241,7 +244,7 @@ function effectiveExecute(name, want, migs = orderedMigrations()) {
         exists = true;
         continue;
       }
-      setFrom(e.roles, e.verb, m.file);
+      setFrom(e.channels, e.verb, m.file);
     }
   }
   return state;
@@ -884,10 +887,10 @@ function stripSqlComments(sql) {
 function sqlStatements(src) {
   const out = [];
   let text = "", scan = "", start = 0, depth = 0, i = 0, tag = null, inStr = false;
-  let body = "", bodyHadAcl = false;
+  let body = "", bodyHadAcl = false, lit = "", lits = [];
   const push = () => {
-    if (text.trim()) out.push({ text, scan, at: start, bodyHadAcl });
-    text = ""; scan = ""; bodyHadAcl = false;
+    if (text.trim()) out.push({ text, scan, at: start, bodyHadAcl, lits });
+    text = ""; scan = ""; bodyHadAcl = false; lits = [];
   };
   while (i < src.length) {
     if (tag) {                                   // inside $tag$ ... $tag$
@@ -900,14 +903,14 @@ function sqlStatements(src) {
       continue;
     }
     if (inStr) {                                 // inside '...', '' escapes
-      if (src[i] === "'" && src[i + 1] === "'") { text += "''"; scan += "  "; i += 2; continue; }
-      if (src[i] === "'") { inStr = false; text += "'"; scan += " "; i += 1; continue; }
-      text += src[i]; scan += " "; i += 1;
+      if (src[i] === "'" && src[i + 1] === "'") { lit += "'"; text += "''"; scan += "  "; i += 2; continue; }
+      if (src[i] === "'") { inStr = false; lits.push(lit); lit = ""; text += "'"; scan += " "; i += 1; continue; }
+      lit += src[i]; text += src[i]; scan += " "; i += 1;
       continue;
     }
     const open = src.slice(i).match(/^\$[A-Za-z_]*\$/);
     if (open) { tag = open[0]; text += tag; scan += " ".repeat(tag.length); i += tag.length; continue; }
-    if (src[i] === "'") { inStr = true; text += "'"; scan += " "; i += 1; continue; }
+    if (src[i] === "'") { inStr = true; lit = ""; text += "'"; scan += " "; i += 1; continue; }
     const ch = src[i];
     if (ch === "(") depth += 1;
     if (ch === ")") depth -= 1;
@@ -957,17 +960,101 @@ function classifyTarget(raw) {
   return { kind: "unknown", what: t };
 }
 
+// ── GRANTEES ARE IDENTIFIERS, NOT SUBSTRINGS
+//
+// ⚠️ `\bpublic\b` ON THE GRANTEE TEXT READ A QUOTED CUSTOM ROLE AS THE PUBLIC
+// PSEUDO-ROLE. Codex round 21: grant EXECUTE to PUBLIC, then
+// `revoke ... from "public-reader"`, and the replay recorded the revoke as
+// closing the PUBLIC channel while the real PUBLIC grant stood — 20/20 green,
+// every client able to pre-consume a claim. Reproduced before fixing.
+//
+// So the grantee list is split and normalised as SQL identifiers, and the
+// mapping is EXACT. Postgres folds an unquoted identifier to lower case and
+// takes a quoted one verbatim, so `"public-reader"`, `"Authenticated"` and
+// `some_other_role` are all simply not these four channels.
+//
+// ⚠️ AND AN UNRECOGNISED GRANTEE IS REPORTED, NOT IGNORED — the same inversion
+// round 20 applied to targets. A custom role can be GRANTED TO `authenticated`,
+// which makes it an inherited channel, and this parser does not model role
+// membership (it says so). Measured: the only grantees this repo names are
+// PUBLIC, public, anon, authenticated and service_role, so failing closed on
+// anything else costs nothing today and is loud when it would matter.
+function parseGrantees(rolesRaw) {
+  const channels = new Set();
+  const unknown = [];
+  // `WITH GRANT OPTION` and `GRANTED BY role` are suffixes of the grantee
+  // clause, not grantees. The first also contains the word `grant`, which is
+  // exactly the kind of substring this function exists to stop reading as SQL.
+  const roles = rolesRaw
+    .replace(/\s+with\s+grant\s+option\s*$/i, "")
+    .replace(/\s+granted\s+by\s+[\w"]+\s*$/i, "");
+  for (const raw of topLevelSplit(roles)) {
+    const g = raw.trim().replace(/^group\s+/i, "").trim();
+    if (!g) continue;
+    const quoted = /^"(.*)"$/.exec(g);
+    if (quoted) {
+      // A quoted identifier is verbatim. `"public"` is NOT the PUBLIC
+      // pseudo-role — it names a role literally called public — so it is
+      // deliberately reported rather than guessed either way.
+      const name = quoted[1];
+      if (["authenticated", "anon", "service_role"].includes(name)) channels.add(name);
+      else unknown.push(g);
+      continue;
+    }
+    const name = g.toLowerCase();
+    if (["authenticated", "anon", "service_role", "public"].includes(name)) channels.add(name);
+    else unknown.push(g);
+  }
+  return { channels, unknown };
+}
+
+// ── WHICH QUOTED LITERALS ARE CODE
+//
+// ⚠️ A `DO` BODY MAY BE A PLAIN STRING LITERAL: `do 'begin grant execute on
+// function public.claim_notification(uuid, text) to authenticated; end'`
+// executes that grant. Round 20 blanked every `'...'` as inert data and forgot
+// it, so this was invisible — 20/20 green. Codex round 21, reproduced before
+// fixing. A function body given as `as '...'` instead of `as $$...$$` is the
+// same hole.
+//
+// The classification is an ALLOW-LIST OF INERT CONTEXTS with a fail-closed
+// default, not a list of executable ones — enumerating the executable side is
+// what failed here, and in rounds 17, 19 and 20. A statement head this does not
+// recognise, whose literal contains grant/revoke, is REPORTED by name.
+const INERT_HEAD = new RegExp(
+  "^(?:comment|insert|update|delete|select|with|set|reset|grant|revoke|truncate|analyze|vacuum|notify|" +
+  "begin|commit|rollback|savepoint|release|discard|" +
+  "create\\s+(?:unique\\s+)?(?:table|index|policy|trigger|view|materialized\\s+view|schema|type|domain|" +
+  "extension|sequence|role|publication|subscription|event\\s+trigger|cast|operator|aggregate)|" +
+  "alter\\s+(?:table|index|policy|view|schema|type|domain|sequence|role|publication|subscription|extension)|" +
+  "drop\\s+\\w+)\\b",
+  "i",
+);
+const CODE_HEAD = /^(?:do\b|create\s+(?:or\s+replace\s+)?(?:function|procedure)\b|alter\s+(?:function|procedure)\b)/i;
+
+function executableLiteralAcl(head, lits) {
+  const acl = (lits || []).filter((l) => /\b(grant|revoke)\b/i.test(l));
+  if (acl.length === 0) return null;
+  if (CODE_HEAD.test(head)) return acl[0];
+  if (INERT_HEAD.test(head)) return null;       // prose, a column default, a row value
+  return acl[0];                                // unrecognised head: fail closed, loudly
+}
+
 // Every GRANT/REVOKE in one migration, classified. `targets` is never empty:
 // an unreadable one is reported as {kind:"unknown"} so the completeness test
 // can fail by name instead of this returning nothing.
 function aclStatements(sql) {
   const out = [];
-  for (const { scan, at, bodyHadAcl } of sqlStatements(stripSqlComments(sql))) {
+  for (const { scan, at, bodyHadAcl, lits } of sqlStatements(stripSqlComments(sql))) {
     const head = scan.trim();
-    if (bodyHadAcl) {
+    // Code first: a privilege change built inside a body — dollar-quoted OR a
+    // plain string literal in a DO / function definition — is real, and is not
+    // modelled. Reported so the completeness gate names it.
+    const inBody = bodyHadAcl ? head.slice(0, 100) : executableLiteralAcl(head, lits);
+    if (inBody) {
       out.push({
-        verb: "grant", privList: "", roles: "",
-        targets: [{ kind: "unknown", what: `a GRANT/REVOKE inside a quoted body: ${head.slice(0, 100)}` }],
+        verb: "grant", privList: "", roles: "", grantees: { channels: new Set(), unknown: [] },
+        targets: [{ kind: "unknown", what: `a GRANT/REVOKE inside an executable body: ${String(inBody).slice(0, 100).replace(/\s+/g, " ")}` }],
         indirect: true, at,
       });
       continue;
@@ -981,7 +1068,8 @@ function aclStatements(sql) {
     if (!lead) {
       out.push({
         verb: /\brevoke\b/i.test(head) ? "revoke" : "grant",
-        privList: "", roles: "", targets: [{ kind: "unknown", what: head.slice(0, 120).replace(/\s+/g, " ") }],
+        privList: "", roles: "", grantees: { channels: new Set(), unknown: [] },
+        targets: [{ kind: "unknown", what: head.slice(0, 120).replace(/\s+/g, " ") }],
         indirect: true, at,
       });
       continue;
@@ -989,18 +1077,26 @@ function aclStatements(sql) {
     const m = head.match(/^(grant|revoke)\s+([\s\S]*?)\s+on\s+([\s\S]*?)\s+(?:to|from)\s+([\s\S]*)$/i);
     if (!m) {
       out.push({
-        verb: lead[1].toLowerCase(), privList: "", roles: "",
+        verb: lead[1].toLowerCase(), privList: "", roles: "", grantees: { channels: new Set(), unknown: [] },
         targets: [{ kind: "unknown", what: head.slice(0, 120).replace(/\s+/g, " ") }],
         indirect: false, at,
       });
       continue;
     }
     const [, verb, privList, targetList, roles] = m;
+    // ⚠️ `REVOKE GRANT OPTION FOR <priv>` leaves the privilege and removes only
+    // the right to re-grant it, so reading it as a revoke would be wrong in the
+    // UNSAFE direction (it would record the privilege as closed). Reported
+    // rather than modelled.
+    const privs = /\bgrant\s+option\s+for\b/i.test(privList)
+      ? [{ kind: "unknown", what: `REVOKE GRANT OPTION FOR is not modelled: ${head.slice(0, 100).replace(/\s+/g, " ")}` }]
+      : null;
     out.push({
       verb: verb.toLowerCase(),
       privList,
       roles,
-      targets: topLevelSplit(targetList).map(classifyTarget),
+      grantees: parseGrantees(roles),
+      targets: privs ?? topLevelSplit(targetList).map(classifyTarget),
       indirect: false,
       at,
     });
@@ -1019,16 +1115,6 @@ function aclPrivs(privList) {
     privs.set(name, { tableWide: !item.includes("(") });
   }
   return privs;
-}
-
-// The client/server channels an ACL statement names. PUBLIC is its own channel
-// because every role inherits it and a revoke closes only the channel it names.
-function aclChannels(roles) {
-  const channels = new Set();
-  for (const ch of ["authenticated", "anon", "public", "service_role"]) {
-    if (new RegExp(`\\b${ch}\\b`, "i").test(roles)) channels.add(ch);
-  }
-  return channels;
 }
 
 // Statements touching ONE table, as the two replays consume them. A schema-wide
@@ -1053,7 +1139,7 @@ function privilegeStatements(sql, table) {
       (t) => t.kind === "all-tables" || (t.kind === "table" && t.table === table.toLowerCase()),
     );
     if (!hits) continue;
-    const channels = aclChannels(st.roles);
+    const channels = st.grantees.channels;
     if (channels.size === 0) continue;
     out.push({ verb: st.verb, privs: aclPrivs(st.privList), channels });
   }
@@ -1535,6 +1621,13 @@ test("every GRANT/REVOKE in every migration is one this suite can account for", 
           `${m.file}: ${st.indirect ? "a GRANT/REVOKE that is not the statement's own verb" : "unreadable target"} — ${t.what}`,
         );
       }
+      // ⚠️ GRANTEES TOO, for the same reason and with the same consequence. A
+      // custom role can be GRANTED TO `authenticated`, making it an inherited
+      // channel this parser does not model — so an unrecognised grantee is a
+      // statement whose effect on the client is unknown, not irrelevant.
+      for (const g of st.grantees.unknown) {
+        unreadable.push(`${m.file}: unrecognised grantee ${g} — role membership is not modelled`);
+      }
     }
   }
   assert.deepEqual(
@@ -1587,6 +1680,56 @@ test("every GRANT/REVOKE in every migration is one this suite can account for", 
     "a schema-wide table grant must reach the per-table replay — it applies to every already-created table without naming one",
   );
   assert.ok(schemaWide[0].channels.has("anon"));
+
+  // ── ROUND 21: THE GRANTEE AND LITERAL-CONTEXT SURFACES, inverted the same way.
+  // Round 20 made the TARGET side fail closed and left these two enumerated;
+  // both were then bypassed in the next round, which is the lesson rather than
+  // either bug. Pinned in both directions.
+  assert.deepEqual(
+    [...parseGrantees('public').channels], ["public"],
+    "an unquoted PUBLIC is the PUBLIC pseudo-role",
+  );
+  for (const role of ['"public-reader"', '"Authenticated"', "some_other_role", '"public"']) {
+    const g = parseGrantees(role);
+    assert.equal(
+      g.channels.size, 0,
+      `${role} is not one of the four channels — a substring match read "public-reader" as PUBLIC and let a real PUBLIC grant stand (Codex round 21)`,
+    );
+    assert.deepEqual(g.unknown, [role], `${role} must be REPORTED, not silently ignored — role membership is not modelled`);
+  }
+  assert.deepEqual(
+    [...parseGrantees("anon, authenticated with grant option").channels].sort(), ["anon", "authenticated"],
+    "WITH GRANT OPTION is a suffix of the grantee clause, not a grantee — and it contains the word `grant`",
+  );
+  assert.deepEqual(
+    [...parseGrantees("group authenticated").channels], ["authenticated"],
+    "the optional GROUP keyword must not make a known role unrecognisable",
+  );
+
+  // A DO body may be a plain string literal, and then it is CODE.
+  const doLit = aclStatements(
+    `do 'BEGIN GRANT EXECUTE ON FUNCTION public.${CLAIM_RPC}(uuid, text) TO authenticated; END';`,
+  );
+  assert.equal(doLit.length, 1, "a DO whose body is a string literal containing a GRANT must be reported");
+  assert.equal(doLit[0].targets[0].kind, "unknown");
+  for (const [sql, reported, why] of [
+    [`create function public.f() returns void as 'grant execute on function public.${CLAIM_RPC}(uuid, text) to anon' language sql;`,
+      true, "a function body given as a string literal is code too"],
+    [`comment on table public.${CLAIM_TABLE} is 'held by explicit grant; revoke lives elsewhere';`,
+      false, "prose in a COMMENT is inert — a gate that fails on a comment gets deleted"],
+    [`insert into public.audit (note) values ('we grant nothing on this table');`,
+      false, "a row value is inert"],
+    [`refresh materialized view public.x with data; -- unrecognised head`,
+      false, "no literal at all, so nothing to report"],
+  ]) {
+    const got = aclStatements(sql).some((st) => st.indirect);
+    assert.equal(got, reported, `${why} — aclStatements(${JSON.stringify(sql.slice(0, 60))})`);
+  }
+  assert.equal(
+    aclStatements(`revoke grant option for execute on function public.${CLAIM_RPC}(uuid, text) from authenticated;`)[0].targets[0].kind,
+    "unknown",
+    "REVOKE GRANT OPTION FOR removes the right to re-grant, NOT the privilege — reading it as a revoke would record the privilege as closed, which is the unsafe direction",
+  );
 
   // ⚠️ AND THE SAME WIRING ON THE FUNCTION SIDE, which went unpinned until a
   // mutation removing it SURVIVED. Classifying a target is not the same as
