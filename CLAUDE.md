@@ -2014,6 +2014,18 @@ unscoped version could never have expressed (SECURITY INVOKER, unpinned
 property.** Same class as the `.k-h1` visibility assertion and the inverted
 `contract.test.mjs` finding already recorded above.
 
+⚠️ **AND "SCOPED" IS NOT A STATE YOU REACH BY NARROWING ONCE — round 18 hit this
+rule twice in one assertion.** Gating the new `claim_notification` probe on
+`42501` over the whole probe footer was vacuous (probes 1 and 2 both say
+`Expect 42501`, so probe 2b carrying no expectation at all passed). Narrowing to
+*the nearest preceding `-- <n>.` heading* was **also** vacuous, and that version
+**survived its mutation**: strip 2b's number and the search walks back to probe
+2, whose block carries its own `42501`. The same defect, one level up, from the
+fix for it. What settled it was asserting the unit really is the probe's own —
+no other `select`/`insert` between the heading and the call — so the scope is
+proven rather than assumed. 5/5 caught after that; a benign renumbering of probe
+3 is correctly ignored, which is what shows the block end is not hardcoded.
+
 **3. A MUTATION THAT NEVER APPLIED READS EXACTLY LIKE A SURVIVOR.** Hit on the
 round-10 fix, and it is the quietest of the three. The mutation was "move the
 owner lookup back below the claim", scripted as a slice between two `s.index`
