@@ -473,6 +473,33 @@ Deno.serve(async (req: Request) => {
   //    the function existed only under `proposed/` and that this rpc would
   //    fail; leaving that in place would tell an operator a ready deployment was
   //    blocked. It is not: this call resolves against a live function.
+  // ⚠️ RESOLVE THE CLIENT'S ADDRESS **BEFORE** CLAIMING — ordering, again, and
+  // the mirror image of round 1. The claim must come before the SENDS (that is
+  // what makes it a gate), but it must come after everything that can fail
+  // without sending anything. This lookup used to sit below the claim, so a
+  // transient `getUserById` failure, or an account with no email, consumed the
+  // one claim the row has and then called sendEmail("") — which returns
+  // `no_recipient`, not an error. The handler answered 200 and the client's
+  // approval notice became **unsendable forever**, because the claim is
+  // write-once by design. Worse, the log below only fired when BOTH sends
+  // failed, so a successful broker send hid it completely. Codex #256 round 10.
+  //
+  // Returning here instead leaves the row CLAIMABLE, so a retry can still send
+  // both emails. Nothing has been sent at this point, so there is nothing to be
+  // idempotent about. The lookup is a READ: doing it first cannot double-send,
+  // and two concurrent invocations still resolve to one claim and one refusal.
+  const { data: ownerData, error: ownerErr } = await authAdmin.auth.admin.getUserById(row.owner);
+  const clientEmail = ownerData?.user?.email || "";
+  if (ownerErr || !clientEmail) {
+    console.error(JSON.stringify({
+      where: "owner_lookup", code: ownerErr?.code ?? null,
+      message: ownerErr?.message ?? "no email on the owner's auth record",
+    }));
+    return json({ error: "no_client_recipient" }, 502);
+  }
+  const clientName =
+    (ownerData?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail;
+
   const { data: claim, error: claimErr } = await caller
     .rpc("stamp_approved_notified", { p_request: requestId });
   if (claimErr) {
@@ -488,13 +515,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: "already_notified" }, 409);
   }
 
-  // The client's email — the one place the service key is still needed, and not
-  // a table read. See the header comment.
-  const { data: ownerData } = await authAdmin.auth.admin.getUserById(row.owner);
-  const clientEmail = ownerData?.user?.email || "";
-  const clientName =
-    (ownerData?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail || "your client";
-
+  // (The client's address was resolved above, before the claim — the one place
+  // the service key is still needed, and not a table read. See the header.)
   const brokerMail = await sendEmail(
     BROKER_EMAIL,
     `Enhancement approved: ${row.subject}`,
@@ -515,7 +537,12 @@ Deno.serve(async (req: Request) => {
   // Same residual as the requested branch, and the same reasoning: the claim is
   // taken before the send, so a provider configured-but-erroring leaves the row
   // marked notified with nothing delivered. Logged so it is findable.
-  if (!brokerMail.sent && !clientMail.sent) {
+  // ⚠️ EITHER failure logs, not both. This read `!broker && !client`, so a
+  // successful broker send silently masked a failed client send — on a claim
+  // that cannot be retaken. The recipient is now validated before the claim, so
+  // the remaining causes are provider-side, and a half-delivered notification is
+  // exactly the case worth finding in the logs. Codex #256 round 10.
+  if (!brokerMail.sent || !clientMail.sent) {
     console.error(JSON.stringify({
       where: "approved_send", broker: brokerMail.reason, client: clientMail.reason,
     }));

@@ -511,6 +511,63 @@ test("the deploy header names every RPC the code calls", () => {
   );
 });
 
+// Parses the privilege list of a GRANT or REVOKE on `public.<table>` naming
+// `authenticated`, and reports whether a given privilege is carried TABLE-WIDE
+// (no column list) or column-scoped.
+//
+// ⚠️ WHY THIS IS A PARSER AND NOT A REGEX PER PRIVILEGE. The first version
+// matched `grant\s+update\s+on ...`, i.e. the privilege immediately after the
+// keyword — so a COMBINED statement, `grant select, insert, update on ... to
+// authenticated`, matched neither UPDATE nor INSERT. That form is not
+// hypothetical: it is how this repo granted both trusted tables in the first
+// place (20260628083000 for enhancement_requests, 20260624171708 for profiles),
+// so a future combined re-grant after the revokes would have reopened direct
+// stamp writes with the security test still green. Codex #256 round 10.
+//
+// `all` / `all privileges` counts as carrying every privilege. A per-privilege
+// column list (`grant update (status, approved_at)`) is column-scoped, which is
+// the re-grant the narrowing depends on and must NOT be flagged.
+function privilegeStatements(sql, table) {
+  const out = [];
+  // ⚠️ `[^;]*?` FOR THE PRIVILEGE LIST, NOT `[\s\S]*?`. With the latter a match
+  // starting at an earlier statement's `revoke execute on function public.x(...)
+  // from ...` ran ACROSS the semicolon and swallowed the real
+  // `revoke update on public.enhancement_requests from authenticated` into its
+  // privilege list — so the file's own revoke went unseen and the test failed
+  // claiming nothing revokes it. Statement-scoped by construction instead.
+  const re = /\b(grant|revoke)\s+([^;]*?)\s+on\s+(?:table\s+)?public\.(\w+)\s+(to|from)\s+([^;]*)/gi;
+  for (const m of sql.matchAll(re)) {
+    const [, verb, privList, onTable, , roles] = m;
+    if (onTable.toLowerCase() !== table.toLowerCase()) continue;
+    if (!/\bauthenticated\b/i.test(roles)) continue;
+    // Split the privilege list on commas at paren depth 0, so a column list
+    // cannot be mistaken for a privilege separator.
+    const items = [];
+    let depth = 0, cur = "";
+    for (const ch of privList) {
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth -= 1;
+      if (ch === "," && depth === 0) { items.push(cur); cur = ""; continue; }
+      cur += ch;
+    }
+    items.push(cur);
+    const privs = new Map();
+    for (const raw of items) {
+      const item = raw.trim();
+      if (!item) continue;
+      const name = (item.match(/^([a-z ]+?)\s*(\(|$)/i)?.[1] || item).trim().toLowerCase()
+        .replace(/^all privileges$/, "all");
+      privs.set(name, { tableWide: !item.includes("(") });
+    }
+    out.push({ verb: verb.toLowerCase(), privs });
+  }
+  return out;
+}
+
+function carries(stmt, priv) {
+  return stmt.privs.get(priv) ?? stmt.privs.get("all") ?? null;
+}
+
 test("every table these RPCs trust has its client write surface narrowed IN SOURCE", () => {
   // ⚠️ WRITTEN BECAUSE A MUTATION SURVIVED. The deploy-set gate above requires
   // the MIGRATION to be named; it does not require the STATEMENT to exist.
@@ -522,19 +579,27 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
   // weaker half hides.
   //
   // THE INVARIANT: for every table the stamp functions read or write, the
-  // `authenticated` role must hold NO table-wide UPDATE and NO table-wide
-  // INSERT. The functions are SECURITY DEFINER precisely so the caller does not
-  // need those; leaving either makes the function decorative, and on `profiles`
-  // it is worse than decorative — table-wide UPDATE there means a client can set
-  // their own `role` to 'underwriter', which `stamp_approved_notified` then
-  // trusts (Codex #256 round 9).
+  // `authenticated` role must END UP with no table-wide UPDATE and no
+  // table-wide INSERT. The functions are SECURITY DEFINER precisely so the
+  // caller does not need those; leaving either makes the function decorative,
+  // and on `profiles` it is worse than decorative — table-wide UPDATE there
+  // means a client can set their own `role` to 'underwriter', which
+  // `stamp_approved_notified` then trusts (Codex #256 round 9).
+  //
+  // ⚠️ "END UP" IS DOING WORK: MIGRATION ORDER DECIDES. Both trusted tables
+  // were originally granted table-wide, so a check that ignored order would
+  // flag those original grants (false positive) or, read the other way, miss a
+  // re-grant that lands AFTER the revoke (false negative, the one that matters).
+  // Versions are 14-digit timestamps, so lexicographic order IS chronological.
+  // Codex #256 round 10.
   //
   // The table list is DERIVED from the function bodies, the same two-hop scan as
   // the deploy-set gate, so a new trusted table is covered the day it appears.
   const migDir = join(here, "..", "..", "migrations");
   const migs = readdirSync(migDir)
     .filter((f) => f.endsWith(".sql"))
-    .map((f) => ({ file: f, sql: readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, "") }));
+    .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, "") }))
+    .sort((a, b) => a.version.localeCompare(b.version));
 
   const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
   const trusted = new Set();
@@ -552,28 +617,75 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
 
   for (const table of trusted) {
     for (const priv of ["update", "insert"]) {
-      const revoked = migs.some((m) =>
-        new RegExp(`revoke\\s+${priv}\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+from\\s+[^;]*\\bauthenticated\\b`, "i")
-          .test(m.sql));
+      // Replay the migrations in order and keep the LAST word on this
+      // privilege: a table-wide grant opens it, a revoke closes it, and a
+      // column-scoped grant leaves it closed.
+      let openedBy = null;
+      let everRevoked = false;
+      for (const m of migs) {
+        for (const stmt of privilegeStatements(m.sql, table)) {
+          const held = carries(stmt, priv);
+          if (!held) continue;
+          if (stmt.verb === "revoke") { everRevoked = true; openedBy = null; }
+          else if (held.tableWide) openedBy = m.file;
+        }
+      }
       assert.ok(
-        revoked,
+        everRevoked,
         `no migration revokes table-wide ${priv.toUpperCase()} on public.${table} from authenticated — ` +
         `the stamp functions trust that table, so a client holding it writes the columns directly`,
       );
-      // And nothing may hand it back table-wide. A column list is fine (that is
-      // the re-grant the narrowing depends on); a bare `grant <priv> on <table>`
-      // is the hazard this repo has already been bitten by, which is why
-      // 20261006120000_help_queries refuses UPDATE at two layers.
-      const reGranted = migs.filter((m) =>
-        new RegExp(`grant\\s+${priv}\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+to\\s+[^;]*\\bauthenticated\\b`, "i")
-          .test(m.sql));
-      const offenders = reGranted.filter((m) =>
-        [...m.sql.matchAll(new RegExp(`grant\\s+${priv}(\\s*\\([^)]*\\))?\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+to\\s+[^;]*\\bauthenticated\\b`, "gi"))]
-          .some((g) => !g[1]));
-      assert.deepEqual(
-        offenders.map((m) => m.file), [],
-        `these migrations grant table-wide ${priv.toUpperCase()} on public.${table} back to authenticated, undoing the narrowing`,
+      assert.equal(
+        openedBy, null,
+        `${openedBy} grants table-wide ${priv.toUpperCase()} on public.${table} back to authenticated ` +
+        `after the revoke, undoing the narrowing the stamp functions depend on`,
       );
     }
   }
+});
+
+test("the approved branch resolves AND validates the client recipient before claiming", () => {
+  // ⚠️ ORDERING, AGAIN, AND THE MIRROR IMAGE OF ROUND 1. The claim must come
+  // before the SENDS — that is what makes it a gate, asserted above — and it
+  // must come after everything that can fail WITHOUT sending anything. The
+  // owner lookup used to sit below the claim, so a transient `getUserById`
+  // failure, or an account with no email, consumed the row's one claim and then
+  // called sendEmail("") — which returns `no_recipient`, not an error. The
+  // handler answered 200 and the client's approval notice was unsendable
+  // forever, because the claim is write-once by design. Codex #256 round 10.
+  //
+  // Three things in order, and all three are pinned: the lookup, the guard that
+  // returns on a bad recipient, then the claim. The guard EXPRESSION is pinned
+  // too, not just the refusal string — a refusal inside `if (false)` survives,
+  // which this file has already learned once.
+  const a = code.indexOf('if (row.status !== "underwriting"');
+  assert.ok(a >= 0, "could not find the approved branch — has it been restructured?");
+  const branch = code.slice(a);
+
+  const lookupAt = branch.indexOf("auth.admin.getUserById");
+  const guardAt = branch.indexOf("if (ownerErr || !clientEmail)");
+  const refusalAt = branch.indexOf("no_client_recipient");
+  const claimAt = branch.indexOf('rpc("stamp_approved_notified"');
+
+  assert.ok(lookupAt >= 0, "the approved branch no longer resolves the client's address");
+  assert.ok(guardAt >= 0, "the approved branch lost its `if (ownerErr || !clientEmail)` guard");
+  assert.ok(refusalAt >= 0, "the approved branch lost its no_client_recipient refusal");
+  assert.ok(claimAt >= 0, "the approved branch no longer claims");
+
+  assert.ok(
+    lookupAt < claimAt,
+    "the owner lookup must run BEFORE the claim, or a lookup failure burns a claim that can never be retaken",
+  );
+  assert.ok(
+    guardAt < claimAt && refusalAt < claimAt,
+    "the recipient guard must RETURN before the claim is taken, not merely run before it",
+  );
+
+  // And the send-failure log must fire on EITHER failure. `!broker && !client`
+  // let a successful broker send mask a failed client send, on a claim that
+  // cannot be retaken.
+  assert.ok(
+    /if \(!brokerMail\.sent \|\| !clientMail\.sent\)/.test(code),
+    "the approved branch logs only when BOTH sends fail, so a half-delivered notification is invisible",
+  );
 });
