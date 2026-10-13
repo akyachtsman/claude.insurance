@@ -1,5 +1,17 @@
--- stamp_requested_notified(uuid) — lets a request's OWNER record that their
--- "we received your request" email went out, and nothing else.
+-- stamp_requested_notified(uuid) — lets a request's OWNER CLAIM the
+-- "we received your request" notification on their own row, and nothing else.
+--
+-- ⚠️ READ "CLAIM" LITERALLY. A populated `requested_notified_at` records that a
+-- claim was TAKEN. It does **not** establish that an email was attempted, let
+-- alone delivered. `EXECUTE` on this function is granted to `authenticated`, so
+-- the owner can call /rest/v1/rpc/stamp_requested_notified directly — no Edge
+-- Function, no provider call — and the legitimate notification then answers
+-- `already_notified` and stays silent. The first line of this file's own
+-- post-apply probe below IS that call.
+-- An earlier version of this header said the stamp records that the email "went
+-- out", which a reader would reasonably take as delivery evidence. Corrected by
+-- Codex, round 7 on PR #256; the same wording is corrected in `index.ts` and in
+-- CLAUDE.md, where the two candidate redesigns are written up for the owner.
 --
 -- WHY THIS EXISTS AT ALL. `notify-enhancement` was rewritten to read and write
 -- `enhancement_requests` through the CALLER's own client (anon key + their JWT)
@@ -32,8 +44,13 @@
 -- client needs no UPDATE whatsoever and staff change only those two. Then both
 -- notified columns go through SECURITY DEFINER functions and neither is
 -- resettable. Raised by an automated security review of the applying commit;
--- recorded as an owner decision in CLAUDE.md rather than applied here, because
--- it narrows staff privileges and cannot be verified end-to-end from a session.
+-- ⚠️ **it was then APPROVED AND APPLIED** as
+-- `20261013013743_notified_stamps_write_once.sql` (2026-10-13), so this is no
+-- longer a still-open half and `authenticated` now holds UPDATE on
+-- `(status, approved_at)` only — measured, 2 of 13 columns. The reasoning above
+-- is kept because it is why the fix is a column REVOKE rather than a policy;
+-- the "recorded rather than applied" line it used to end on was true for one
+-- commit and is not now.
 --
 -- ⚠️ WHY NOT AN OWNER UPDATE POLICY. RLS evaluates whole rows, and
 -- `authenticated` holds table-wide UPDATE, so any owner UPDATE policy also lets

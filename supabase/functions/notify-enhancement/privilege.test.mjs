@@ -104,10 +104,27 @@ test("the requested stamp goes through the RPC, not a direct update", () => {
   assert.equal(directStamp, false, "requested_notified_at is being written by a direct .update(), which RLS refuses");
 });
 
-test("every RPC the code calls is defined, and an unapplied one is declared as blocking", () => {
-  // Cross-file drift gate. The code and the migration are two halves of one
-  // contract; renaming the function in one place would leave the claim silently
-  // returning an error nobody reads.
+test("every RPC the code calls is DEFINED IN SOURCE, and an unapplied one is declared as blocking", () => {
+  // Cross-file drift gate, over SOURCE ONLY. The code and the migration are two
+  // halves of one contract; renaming the function in one place would leave the
+  // claim silently returning an error nobody reads.
+  //
+  // ⚠️ WHAT THIS DOES NOT PROVE, stated here because the test name used to
+  // imply it did: that any migration is APPLIED. This reads directories. A file
+  // placed in supabase/migrations/ whose remote apply was skipped or FAILED is
+  // byte-identical to one that is live, so it classifies as applied, satisfies
+  // the definition lookup, and skips the proposed/ blocker checks below — while
+  // the deployed function returns `claim_failed` on every call. Codex round 7
+  // on PR #256; the claim is narrowed rather than the check strengthened,
+  // because strengthening it is not available here: a test that could tell
+  // would need production credentials, and this repo's Safety Rules say test
+  // commands must not require them. Directory placement is a CONVENTION this
+  // repo declares (CLAUDE.md: "`supabase/migrations/` means live and matching
+  // `list_migrations`"), not evidence.
+  // The authoritative check is therefore a DEPLOY STEP, written into index.ts's
+  // deploy header: run `list_migrations` and confirm the migration defining each
+  // called RPC is there, before deploying. Fail-closed if it is not, which is
+  // why a narrowed claim here is tolerable and a false one was not.
   //
   // ⚠️ `proposed/` IS SEARCHED TOO, AND THAT IS NOT A LOOSENING. This repo keeps
   // written-but-unapplied migrations in supabase/proposed/ precisely because
@@ -372,5 +389,41 @@ test("the requested branch keeps its bad_stage refusal", () => {
   assert.ok(
     /error:\s*"bad_stage",\s*status:\s*row\.status,\s*expected:\s*"requested"/.test(code),
     "the requested branch lost its bad_stage refusal",
+  );
+});
+
+test("the deploy header names every RPC the code calls", () => {
+  // The companion to the narrowed drift gate above. That gate cannot prove a
+  // migration is applied, so the proof was moved to a DEPLOY STEP in index.ts's
+  // header — and a deploy step that does not list a newly added RPC is a step
+  // that silently stops covering it. This is what keeps the two in sync: add an
+  // `.rpc("x")` without naming x in the deploy header and this fails.
+  //
+  // ⚠️ READS `src`, NOT `code`. `code` is comment-stripped (see the top of this
+  // file), so the deploy header does not exist in it — the first version of this
+  // test scanned `code` and failed with "the deploy header is gone", which is
+  // the right failure for the wrong reason and would have been a confusing
+  // false positive had it been written the other way round.
+  //
+  // Scoped to the header's own block, not the whole file, for the reason this
+  // file already records twice: an assertion over a wider text than the property
+  // belongs to cannot fail — every name here also appears in the handler below.
+  const start = src.indexOf("BEFORE DEPLOYING THIS FUNCTION");
+  assert.ok(start > 0, "the deploy header is gone — the list_migrations check has no home");
+  const end = src.indexOf('import "jsr:', start);
+  assert.ok(end > start, "could not find the end of the comment header");
+  const header = src.slice(start, end);
+
+  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
+  assert.ok(called.length > 0, "no rpc calls found — did the scan lose them?");
+  for (const name of called) {
+    assert.ok(
+      header.includes(name),
+      `index.ts calls rpc("${name}") but the deploy header does not name it, so the list_migrations step would miss it`,
+    );
+  }
+  assert.ok(
+    /list_migrations/.test(header),
+    "the deploy header no longer names list_migrations, which is the only authoritative applied-migration check available here",
   );
 });

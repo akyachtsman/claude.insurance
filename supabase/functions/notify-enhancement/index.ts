@@ -81,6 +81,28 @@
 // {sent:false, reason:"no_provider_key"} so the UI degrades gracefully — and as
 // of this rewrite that is the state nobody has confirmed either way, so a green
 // response from here is not evidence that mail left the building.
+//
+// ⚠️⚠️ BEFORE DEPLOYING THIS FUNCTION — the one check CI cannot make.
+// Every `.rpc(...)` below resolves against a migration, and `privilege.test.mjs`
+// gates that the definition EXISTS and is shaped correctly. It cannot gate that
+// the migration is APPLIED: it reads directories, and a file sitting in
+// supabase/migrations/ whose remote apply was skipped or failed looks identical
+// to one that is live. A test that could tell would need production credentials,
+// which this repo's Safety Rules forbid. So the authoritative check is a deploy
+// step, and it is this:
+//
+//   1. list the RPCs this file calls:
+//        grep -o '\.rpc("[^"]*"' index.ts | sort -u
+//      today: stamp_requested_notified, stamp_approved_notified
+//   2. run the Supabase MCP `list_migrations` and confirm the migration defining
+//      each one is present — 20261013005250 and 20261013013743 respectively
+//   3. only then deploy. A missing migration is FAIL-CLOSED (the rpc errors and
+//      the branch returns `claim_failed` with nothing sent), so the cost is a
+//      silent dead endpoint rather than a wrong email — which is exactly the
+//      failure mode that let this function read ACTIVE while sending nothing for
+//      its whole life. Confirm, do not assume.
+//   Also confirm RESEND_API_KEY / BROKER_EMAIL / FROM_EMAIL are set (unknowable
+//   from a session, see above) and that verify_jwt is ON for the deploy.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 

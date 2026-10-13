@@ -608,8 +608,9 @@ profile**, never by listing a directory.
   JWT), where `authenticated` does hold SELECT and RLS scopes rows to
   `owner = auth.uid()` — which is also stronger, since RLS cannot be removed by
   editing a `.eq()` out of the handler. `service_role` is used for `help_queries`
-  alone, and that works only because `supabase/proposed/20261006_help_queries.sql`
-  grants it explicitly.
+  alone, and that works only because `migrations/20261006120000_help_queries.sql`
+  grants it explicitly. (This cited the `proposed/` path long after that file was
+  applied — the same stale-pointer defect Codex round 7 found two sections down.)
   **⚠️ NOW MEASURED, AND WORSE THAN "VERIFY BEFORE RELYING":** this said *"the
   deployed `notify-enhancement` reads `enhancement_requests` under the same key,
   so it has the same denial. Verify before relying on its emails."* Verified
@@ -1694,8 +1695,12 @@ UPDATE revoke), a SELECT, and `advanceRequest`, which builds its patch as exactl
 `{ status }` plus `approved_at` when approving. That **is** the column grant.
 Nothing else writes the table. The narrowing was a guess no longer.
 
-**The design that shipped** (`supabase/proposed/20261013_notified_stamps_write_once.sql`,
-written **not applied**):
+**The design that shipped** — ⚠️ **and this said `supabase/proposed/…`,
+"written **not applied**", for two commits after it went live.** It is
+`migrations/20261013013743_notified_stamps_write_once.sql`, **APPLIED
+2026-10-13**, and the stale pointer mattered: the paragraph below then told an
+operator the rpc would fail and the deploy was blocked, which is the same
+staleness already corrected in `index.ts`. Found by Codex, round 7:
 1. `stamp_approved_notified(uuid)` — SECURITY DEFINER, authorizes **caller**
    (underwriter, read from `profiles`), **status** (`approved`) and **direction**
    (null → now), mirroring `stamp_requested_notified`.
@@ -1709,13 +1714,24 @@ written **not applied**):
    which is why `20261006120000_help_queries.sql` refuses UPDATE at both the
    grant and policy layers.
 
-⚠️ **The code and the migration ship as a pair.** `index.ts` calls
-`stamp_approved_notified`, which exists only in `proposed/`. Until it is applied
-the rpc fails and the branch returns `claim_failed` with nothing sent —
-fail-closed, and no regression, since the endpoint 404s on every call today.
-`privilege.test.mjs` enforces the coupling rather than trusting a PR thread: an
-RPC defined only in `proposed/` is allowed, **but that file must be listed in
+⚠️ **The code and the migration ship as a pair, and that pair is now BOTH
+live.** `index.ts` calls `stamp_approved_notified`; it resolves against
+`migrations/20261013013743`, applied 2026-10-13, so nothing about this branch is
+deploy-blocked on a migration any more. What the earlier text described —
+"exists only in `proposed/`, the rpc fails, the branch returns `claim_failed`
+with nothing sent" — was the fail-closed state *before* the apply, and is kept
+here only as the shape the coupling has to hold for the next such pair.
+`privilege.test.mjs` enforces it rather than trusting a PR thread: an RPC defined
+only in `proposed/` is allowed, **but that file must be listed in
 `proposed/README.md` as blocking the deploy.**
+⚠️ **That gate proves SOURCE consistency, not that a migration is applied** —
+it reads directories, and a file sitting in `migrations/` whose remote apply was
+skipped or failed classifies as applied and passes. Codex raised this in the
+same round. It is not fixable in CI by design: a test that could tell would need
+production credentials, which this repo's Safety Rules forbid. So the claim is
+narrowed in the test's own name and comment, and the authoritative check —
+`list_migrations` against the names the code's RPCs resolve to — is a **deploy
+step**, recorded in `index.ts`'s deploy header, not a CI assertion.
 
 ⚠️ **TWO MUTATION SURVIVORS HERE, AND THE FIRST IS THE WORST OF THE PR.**
 Deleting the `revoke` — the single load-bearing statement — left **every** test
