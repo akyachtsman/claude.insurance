@@ -189,7 +189,19 @@ const BRANCHES = [
     // body, `claimed` is empty on success as well as on a lost race, and the
     // two become indistinguishable. A mutation deleting it survived the first
     // version of this test.
-    requires: ['.select(', "if (!claimed || claimed.length === 0)"],
+    // ⚠️ `.eq("status", "approved")` binds the claim to the fact being
+    // announced. Without it the claim matched a row another underwriter had
+    // moved to `declined` after the stage read, and the client was emailed
+    // "final approval" about a declined request (Codex #256 round 3).
+    // `if (!moved ...)` is the other half: the underwriting->approved
+    // transition must PROVE it matched, since PostgREST does not error when an
+    // update matches zero rows.
+    requires: [
+      '.select(',
+      "if (!claimed || claimed.length === 0)",
+      '.eq("status", "approved")',
+      "if (!moved || moved.length === 0)",
+    ],
   },
 ];
 

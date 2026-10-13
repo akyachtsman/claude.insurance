@@ -336,13 +336,22 @@ Deno.serve(async (req: Request) => {
   //    second clobbered `approved_at` with a later timestamp. `.eq("status",
   //    "underwriting")` makes it a no-op for the loser.
   if (row.status === "underwriting") {
-    const { error } = await caller.from("enhancement_requests")
+    const { data: moved, error } = await caller.from("enhancement_requests")
       .update({ status: "approved", approved_at: new Date().toISOString() })
       .eq("id", requestId)
-      .eq("status", "underwriting");
+      .eq("status", "underwriting")
+      .select("id");
     if (error) {
       console.error(JSON.stringify({ where: "approve_update", code: error.code, message: error.message }));
       return json({ error: "update_failed" }, 500);
+    }
+    // ⚠️ THE TRANSITION MUST PROVE IT MATCHED (Codex #256 round 3, P1). Without
+    // `.select("id")` and this check, a concurrent underwriter who moved the row
+    // to `declined` between the stage read and here left this update matching
+    // ZERO rows — silently, because PostgREST does not error on that — and the
+    // function carried on to announce an approval for a declined request.
+    if (!moved || moved.length === 0) {
+      return json({ error: "bad_stage", expected: "underwriting", note: "row moved before the transition" }, 409);
     }
   }
 
@@ -376,9 +385,18 @@ Deno.serve(async (req: Request) => {
   //    blocks, re-reads the committed row and matches nothing. `.select("id")`
   //    is what lets us SEE that it matched nothing — without it PostgREST
   //    returns no body and a lost race is indistinguishable from a win.
+  //    ⚠️ AND IT BINDS TO THE CURRENT STATUS, not just the stamp (Codex #256
+  //    round 3, P1). Filtering on `approved_notified_at is null` alone, this
+  //    claim still matched a row another underwriter had moved to `declined`
+  //    after the stage read — `er_underwriter_update` admits a resulting
+  //    `declined` row, so the write succeeded, `.select("id")` reported one row,
+  //    and the client was emailed "your request has final approval" about a
+  //    request that had just been declined. `.eq("status", "approved")` makes the
+  //    claim and the thing being announced the same fact.
   const { data: claimed, error: claimErr } = await caller.from("enhancement_requests")
     .update({ approved_notified_at: new Date().toISOString() })
     .eq("id", requestId)
+    .eq("status", "approved")
     .is("approved_notified_at", null)
     .select("id");
   if (claimErr) {

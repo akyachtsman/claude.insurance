@@ -13,6 +13,7 @@ same change that applies it.
 
 | file | why it is waiting |
 |---|---|
+| `20261013_notified_stamps_write_once.sql` | **⚠️ BLOCKS THE `notify-enhancement` DEPLOY.** `authenticated` holds UPDATE on every column of `enhancement_requests` (measured) while the staff policies constrain only `status`, so a broker or underwriter can reset either notification stamp to null and make the function re-send both emails without bound. PR #256's rework is what turns that endpoint from dead (42501 → 404 on every call) into working, so the abuse becomes reachable at the same moment the feature does — Codex raised it as a P1 with "before deployment" in the finding. A BEFORE UPDATE trigger making both stamps write-once; chosen over the privilege narrowing because a rejection trigger cannot break what works and, unlike a REVOKE, its behaviour is provable from a session (a trigger fires regardless of RLS, which the in-database probe harness does not enforce). |
 | `20261006_profiles_no_client_insert.sql` | **Its security effect is already LIVE** — the `revoke insert` was applied 2026-10-09 as step 2 of `migrations/20261005120100_profiles_role_not_self_assignable.sql`, and verified as a client session (42501). What is left is its `drop policy` line alone: redundant (the policy is now narrower *and* dormant) and unrunnable through the Supabase MCP, which hangs on any DROP. A one-statement tidy-up for the Dashboard SQL editor, not a gate. |
 
 ## ~~20261005_enhancement_request_stage_guard.sql~~ — APPLIED 2026-10-09

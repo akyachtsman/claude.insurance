@@ -1645,12 +1645,37 @@ half. The owner still needs the SECURITY DEFINER function regardless, because
 the owner has no UPDATE **policy**, which is a different question from which
 **columns** the role holds. Both halves are now stated in the file.
 
-**Not applied here** because it narrows staff privileges and cannot be verified
-end-to-end from a session: there is no HTTPS egress to the project, and the
-in-database substitute does not enforce RLS (see below). A privilege revocation
-that silently breaks the request lifecycle — which, per the Backend section, had
-never been exercised by anyone until 2026-10-09 — is worth measuring before
-shipping.
+⚠️ **CODEX ESCALATED THIS TO BLOCKING-BEFORE-DEPLOY (round 3, P1), and that is
+the right call** — it was also the direct answer to a question put to it, namely
+whether recording this was sufficient for a security finding. The reasoning:
+PR #256's rework is what turns `notify-enhancement` from a dead endpoint (42501 →
+404 on every call) into a working one, so the abuse becomes *reachable* at the
+same moment the feature does. A hole that ships with the thing that enables it is
+not a follow-up.
+
+**Written as `supabase/proposed/20261013_notified_stamps_write_once.sql`**, and
+it takes the **BEFORE UPDATE trigger** rather than the privilege narrowing above:
+- a rejection trigger **cannot break what works** — nothing in this project
+  legitimately resets a notification stamp, so it refuses only calls that are
+  already defects. A `revoke` silently breaks any writer touching a column
+  nobody remembered, and the staff lifecycle it governs had never been exercised
+  by anybody until 2026-10-09 (the broker and underwriter logins returned HTTP
+  500 for their entire existence), so "nothing else writes these" rests on a
+  reading of the code rather than on traffic.
+- **it is provable from a session and the revoke is not.** A trigger fires for
+  every writer regardless of RLS — which is exactly the property the
+  in-database probe harness lacks. Shipping an unverified revocation against a
+  lifecycle nobody has exercised is the riskier of the two.
+The two are not exclusive; applying both is strictly better, and the revoke is
+the one to prefer if narrowing capability is wanted over refusing misuse.
+⚠️ Neither fix touches the wider pre-existing gap recorded above: staff can still
+rewrite `owner`, `subject` and `body` on any client's request.
+
+⚠️ **One consequence for this repo's own habits.** The probe in
+`migrations/20261013120000_stamp_requested_notified.sql` finishes by restoring
+the demo row's `requested_notified_at` to null. Once the trigger is applied that
+statement is **refused** — correctly. Use the documented disable/enable pair, or
+leave the demo row stamped.
 
 **Context for weighing it:** staff are already able to rewrite `owner`,
 `subject` and `body` on any client's request, recorded above and accepted. An
