@@ -396,3 +396,47 @@ test("index.ts: hasKeys is decided before any client is constructed", () => {
   // 3. The deps literal uses the guarded binding by name.
   assert.match(depsBlock, /admin:\s*adminClient\b/, "deps.admin must reference the guarded binding");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE MODEL TOGGLE'S WIRING IN index.ts
+//
+// ⚠️ A SOURCE SCAN, AND THAT LIMIT IS THE REASON IT EXISTS. index.ts imports
+// `jsr:`/`npm:` specifiers Node cannot resolve, so nothing here EXECUTES it —
+// which is the exact condition that let seven of eight behaviour-breaking edits
+// survive this feature's original suite. handler.test.mjs proves the resolver and
+// proves what reaches `messages.create`; neither can see whether index.ts ever
+// hands the secret over. Only a scan can, and a scan is all this claims to be.
+// ─────────────────────────────────────────────────────────────────────────────
+test("index.ts reads HELP_MODEL from the environment", () => {
+  assert.ok(/Deno\.env\.get\(\s*"HELP_MODEL"\s*\)/.test(idxSrc),
+    "index.ts does not read the HELP_MODEL secret, so the dashboard toggle does nothing");
+});
+
+test("index.ts passes HELP_MODEL into the handler's deps", () => {
+  // Reading the env and then not injecting it is a silent no-op: the handler
+  // falls back to the default and logs nothing, because nothing was rejected.
+  assert.ok(/helpModel:\s*HELP_MODEL\b/.test(idxSrc),
+    "HELP_MODEL is read but never injected — the toggle would be silently inert");
+});
+
+test("HELP_MODEL is not folded into HAS_KEYS", () => {
+  // A missing model is a working default, not a missing secret. Conflating them
+  // would take the desk down over a setting that is correct when absent — the
+  // Boolean(...) above is what turns a missing secret into FR-17's notice.
+  // Scoped to the declaration itself, not the file: HELP_MODEL legitimately
+  // appears elsewhere in index.ts, so a whole-file check could never fail.
+  const at = idxSrc.search(/const HAS_KEYS\s*=/);
+  assert.ok(at > 0, "HAS_KEYS must be computed at module scope");
+  const decl = idxSrc.slice(at, idxSrc.indexOf(";", at) + 1);
+  assert.ok(!/HELP_MODEL/.test(decl), "an unset HELP_MODEL must not make hasKeys false");
+});
+
+test("the provider call carries no hardcoded model literal", () => {
+  // Belt for the one mutation that defeats every resolver test: reverting the
+  // call site to a literal while leaving resolveModel in place and passing.
+  const call = fnSrc.slice(fnSrc.indexOf("anthropic.messages.create("));
+  const body = call.slice(0, call.indexOf("});"));
+  assert.ok(!/model:\s*["'`]/.test(body),
+    "model is a literal at the call site — the HELP_MODEL toggle is bypassed");
+  assert.ok(/^\s*model,\s*$/m.test(body), "the resolved `model` is not passed to messages.create");
+});

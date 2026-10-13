@@ -38,6 +38,13 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const APP_URL = Deno.env.get("APP_URL") ?? "https://akyachtsman.github.io/claude.insurance";
+// OPTIONAL. Unset runs the default; an unrecognised value falls back to it and
+// logs `where: "model"`. Deliberately NOT part of HAS_KEYS — a missing model is a
+// working default, not a missing secret, and conflating the two would take the
+// desk down for a setting that has a correct answer without it.
+// Change it in the Supabase dashboard (Project Settings -> Edge Functions ->
+// Secrets); it takes effect on the next ask, with no redeploy.
+const HELP_MODEL = Deno.env.get("HELP_MODEL") ?? "";
 
 // The help guide has ONE home: content/help-guide.json, which also seeds the
 // client's suggestion chips. Bundling a copy here would be faster and would
@@ -119,5 +126,6 @@ Deno.serve((req: Request) =>
     anthropic: new Anthropic({ apiKey: ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 0 }),
     loadGuide,
     appUrl: APP_URL,
+    helpModel: HELP_MODEL,
     hasKeys: HAS_KEYS,
   }));

@@ -61,6 +61,10 @@ export interface Deps {
   /** The help corpus, or null when it cannot be read. */
   loadGuide: () => Promise<HelpTopic[] | null>;
   appUrl: string;
+  /** The raw `HELP_MODEL` secret, unvalidated. `resolveModel` is what decides
+   *  which id reaches the provider — kept raw here so the handler, not the
+   *  wiring, owns the fallback and the log that explains it. */
+  helpModel?: string | null;
   /** False when any required secret is missing — checked before anything else. */
   hasKeys: boolean;
 }
@@ -120,6 +124,41 @@ const DAILY_TOTAL_CAP = 400;
 // broker-written jsonb with no length limit and it is re-sent on every question.
 const COVERAGES_PER_POLICY = 20;
 const QUESTION_MAX = 500;
+
+// ─── THE MODEL, AND WHY THE SECRET IS AN ALLOW-LIST RATHER THAN A PASS-THROUGH ─
+// `HELP_MODEL` lets the owner move between tiers from the Supabase dashboard
+// without a redeploy or a PR. Unset means the default below.
+//
+// It is NOT passed through to the provider verbatim, and that is the whole point
+// of this function. An unrecognised id reaches the API as an unknown model, comes
+// back 400, and FR-17 renders EVERY failure as the same quiet "not available"
+// notice — so a typo in a secret would be indistinguishable from an outage, a
+// missing key, or an undeployed function. That is this repo's recurring defect,
+// not a hypothetical: the owner gate says in terms that the single notice is why
+// one real answer is the only proof the deploy worked.
+//
+// So an unknown value FALLS BACK to the default and names itself in the log.
+// Falling back rather than refusing is deliberate: a mistyped secret should cost
+// a log line, not a dead help desk. Case and surrounding space are forgiven
+// because they cannot be ambiguous — `rejected` still fires for a real typo.
+//
+// ⚠️ The model is never read from the request body, for the same reason `owner`
+// is not: a client-chosen model is a client deciding how much of the owner's
+// money an ask costs, and both caps count ASKS, not dollars.
+export const HELP_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] as const;
+export const DEFAULT_HELP_MODEL: string = HELP_MODELS[0];
+
+/** Resolve the configured model. `rejected` is non-null only when a value was
+ *  supplied and is not on the allow-list — i.e. exactly when a human should be
+ *  told they typed something that is not taking effect. */
+export function resolveModel(raw: string | null | undefined): { model: string; rejected: string | null } {
+  const want = (raw ?? "").trim();
+  if (!want) return { model: DEFAULT_HELP_MODEL, rejected: null };
+  const norm = want.toLowerCase();
+  return (HELP_MODELS as readonly string[]).includes(norm)
+    ? { model: norm, rejected: null }
+    : { model: DEFAULT_HELP_MODEL, rejected: want };
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -718,13 +757,25 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // it does not take a record tag or make a record-less client look stocked.
   const { system, messages, sentRecordIds } = buildPrompt({ question, topics, facts, today: new Date().toISOString().slice(0, 10) });
 
+  // Resolved before the billing line because it is configuration, not spend. A
+  // rejected value is logged on every ask that uses the fallback, deliberately:
+  // it is bounded by the caps, and a secret that is silently not taking effect is
+  // precisely the thing one line in the logs should be shouting about.
+  const { model, rejected } = resolveModel(deps.helpModel);
+  if (rejected !== null) {
+    console.error(JSON.stringify({ where: "model", rejected, using: model, allowed: HELP_MODELS }));
+  }
+
   // ─── THE BILLING LINE. Past here the reservation STAYS, whatever comes back,
   // because the call has been paid for. No `releaseAnd` below this point. ───
 
   let answer: string | null = null;
   try {
     const res = await anthropic.messages.create({
-      model: "claude-opus-5-5",
+      // From `HELP_MODEL`, allow-listed by resolveModel above — NOT a literal, and
+      // not from the request body. A test asserts what actually reaches this
+      // argument, because a resolver nothing calls is a resolver nobody checked.
+      model,
       // 8192, not 2048. Thinking cannot be disabled on this model and counts
       // against this budget, and the comment below already calls a max_tokens cut
       // "realistic" — each cut is billed, spends one of the caller's 20 hourly
