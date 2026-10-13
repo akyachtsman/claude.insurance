@@ -1,0 +1,124 @@
+# functions-deploy.yml — deploy the help-ask Edge Function from the repo.
+#
+# WHY THIS EXISTS, and it is not convenience. Until now the only way to deploy
+# was the Supabase MCP's `deploy_edge_function`, which takes file CONTENT inline
+# — so a session had to re-emit ~96KB of source into a tool call. That was tried
+# on 2026-10-13 and failed twice by sending an incomplete file set; the third
+# attempt succeeded only by STRIPPING EVERY COMMENT to make it fit. The live
+# function is therefore not the repo's source, and nobody can diff the two.
+#
+# CLAUDE.md already called the inline path a safety risk, for the right reason:
+# `prompt.ts` defines what client data crosses the Anthropic boundary, and a
+# single-character corruption there is a safety defect that FR-17 renders as the
+# same quiet "not available" notice as every other failure. The fix is not to
+# re-emit more carefully. It is to stop re-emitting: this workflow uploads the
+# files as they exist in git, so "deployed == repo" becomes true by construction
+# rather than by anyone's care.
+#
+# ⚠️ IT DEPLOYS help-ask AND NOTHING ELSE, deliberately. `supabase functions
+# deploy` with no slug deploys EVERY function in supabase/functions/, which here
+# would include notify-enhancement — whose claim table
+# (supabase/proposed/20261013_enhancement_notifications.sql) is WRITTEN AND NOT
+# APPLIED. Deploying it would replace a dead endpoint with one that fails closed
+# on every call, silently, and this repo's own gate says that migration is a
+# prerequisite. When notify-enhancement is ready, add it here in the same change
+# that applies its migration — not before.
+#
+# Required setup (one repository secret):
+#   SUPABASE_ACCESS_TOKEN — a Supabase personal access token.
+#     Supabase dashboard -> account menu -> Access Tokens -> Generate new token.
+#     Add it at Settings -> Secrets and variables -> Actions -> New repository secret.
+#   ⚠️ A Supabase PAT is ACCOUNT-WIDE, and this account also holds the `apfp`
+#   project — see CLAUDE.md's "Shared Supabase account" trade-off. The token this
+#   workflow holds can therefore reach both projects, which is the same exposure
+#   the MCP credential already has. Narrowing it is the per-project split that
+#   CLAUDE.md lists as a before-production task; it is not made worse here, and
+#   the `--project-ref` below pins what this workflow actually touches.
+
+name: Deploy Edge Functions
+
+on:
+  push:
+    branches: [main]
+    # Only when the function's own source moves. A README or CLAUDE.md edit must
+    # not redeploy a live endpoint.
+    paths:
+      - "supabase/functions/help-ask/**"
+      - ".github/workflows/functions-deploy.yml"
+  # Manual escape hatch: lets a deploy be re-run without an empty commit, which
+  # the drive-to-green rules forbid for CI and which is no better here.
+  workflow_dispatch:
+
+# Two deploys of the same function racing would make "what is live" a matter of
+# which finished last. cancel-in-progress is FALSE on purpose: a deploy that has
+# started should finish, because a cancelled one leaves the previous version live
+# with nothing saying so.
+concurrency:
+  group: functions-deploy-help-ask
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: help-ask
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail LOUDLY and early on a missing token. Without this the CLI's own
+      # error is an auth failure several steps later, which reads like an outage
+      # rather than like "the one setup step was never done".
+      - name: Require SUPABASE_ACCESS_TOKEN
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is not set. Generate one in the"
+            echo "::error::Supabase dashboard (account menu -> Access Tokens) and add it"
+            echo "::error::under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # The three modules must go together: index.ts imports handler.ts and
+      # prompt.ts, so a partial upload fails at bundle time. The CLI sends the
+      # whole directory, which is the entire point of this workflow.
+      #
+      # verify_jwt is NOT passed: supabase/config.toml deliberately carries no
+      # [functions.help-ask] block, so the CLI applies the default (true). That
+      # default is the safe one and the config file says at length why.
+      - name: Deploy help-ask
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy help-ask \
+            --project-ref bdsegmjcgfmgzuxwiplj
+
+      # A deploy that reports success still says nothing about whether the
+      # function BOOTS — a bad import surfaces on the first request, which FR-17
+      # then renders as the same quiet notice as everything else. This asks the
+      # gateway for an unauthenticated POST, which verify_jwt refuses BEFORE the
+      # function runs: a 401 proves the route exists and is JWT-gated. A 404
+      # means the deploy did not take.
+      #
+      # It deliberately does NOT send a real question: that would be a billable
+      # provider call on every push to main, and CLAUDE.md already records
+      # qa-live's four-asks-per-deploy as a cost worth watching.
+      - name: Smoke — the route exists and is JWT-gated
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"question":"ping"}' \
+            https://bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask)
+          echo "unauthenticated POST -> HTTP $code"
+          case "$code" in
+            401) echo "OK: gateway refused an unauthenticated call, so the route is live and gated." ;;
+            404) echo "::error::404 — the function is not deployed at that slug."; exit 1 ;;
+            *)   echo "::error::Unexpected $code. Expected 401 from the verify_jwt gateway."; exit 1 ;;
+          esac
