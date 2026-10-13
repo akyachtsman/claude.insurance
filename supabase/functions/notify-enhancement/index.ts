@@ -109,6 +109,15 @@
 //      header's first version checked only the two RPC migrations.
 //      `privilege.test.mjs` DERIVES this list (any migration revoking on that
 //      table) and fails if one is missing here, so it cannot go stale.
+//
+//   ⚠️ THE MACHINE-CHECKED LIST IS THE NEXT LINE, and it is the only part of
+//   this header `privilege.test.mjs` compares against the migrations. Keeping it
+//   on one line is deliberate: the first version of that check looked for each
+//   version ANYWHERE in the header, and a mutation deleting 20261013014854 from
+//   the checklist PASSED because the prose above still mentioned it. An
+//   assertion over a wider text than the property belongs to cannot fail.
+//   CONFIRM APPLIED: 20261013005250 20261013013743 20261013014854
+//
 //   3. only then deploy. A missing RPC migration is FAIL-CLOSED (the rpc errors and
 //      the branch returns `claim_failed` with nothing sent), so the cost is a
 //      silent dead endpoint rather than a wrong email — which is exactly the

@@ -435,29 +435,49 @@ test("the deploy header names every RPC the code calls", () => {
   // leaves a working function with no boundary. Codex #256 round 8; the
   // header's first version listed only the two RPC migrations.
   //
-  // DERIVED, not a second hand-maintained list: any migration that REVOKES on
-  // public.enhancement_requests is part of that boundary, so adding one forces
-  // the deploy step to name it. Comments are stripped first — this file has
-  // already been bitten twice by a scan matching a migration's own prose
-  // documenting the statement it must not contain.
-  // `root` is local to the drift-gate test above, deliberately not hoisted —
-  // each test resolves its own paths so neither can be moved and leave the
-  // other reading a stale directory.
+  // SET EQUALITY AGAINST A DERIVED SET, on ONE machine-readable line.
+  // ⚠️ The first version of this check asked `header.includes(version)` and a
+  // mutation deleting 20261013014854 from the checklist SURVIVED, because the
+  // paragraph explaining why it matters still named it. Same class as the two
+  // scans in this file that matched a migration's own prose: an assertion over a
+  // wider text than the property belongs to cannot fail. So the header carries a
+  // single `CONFIRM APPLIED:` line and this compares that line, exactly.
+  //
+  // The required set is DERIVED, never a second hand-maintained copy:
+  //   * every migration defining an RPC this code calls, and
+  //   * every migration that REVOKES on public.enhancement_requests.
+  // Equality, not containment — so a version left behind after its migration is
+  // renamed or dropped fails too, the same inversion lesson as BACK_ELIGIBLE.
+  // Comments are stripped before the revoke scan: this file has already been
+  // bitten twice by a migration's prose documenting the statement it must not
+  // contain.
   const migDir = join(here, "..", "..", "migrations");
-  const boundary = readdirSync(migDir)
+  const migs = readdirSync(migDir)
     .filter((f) => f.endsWith(".sql"))
-    .filter((f) => /revoke[^;]*\bon\s+public\.enhancement_requests/i.test(
-      readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, ""),
-    ));
+    .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8") }));
+
+  const required = new Set();
+  for (const name of called) {
+    const defRe = new RegExp(
+      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(`, "i",
+    );
+    for (const m of migs.filter((m) => defRe.test(m.sql))) required.add(m.version);
+  }
+  const revokers = migs.filter((m) =>
+    /revoke[^;]*\bon\s+public\.enhancement_requests/i.test(m.sql.replace(/^\s*--.*$/gm, "")));
   assert.ok(
-    boundary.length > 0,
+    revokers.length > 0,
     "no migration revokes on public.enhancement_requests — the privilege narrowing that makes the stamp functions a boundary is gone",
   );
-  for (const f of boundary) {
-    const version = f.split("_")[0];
-    assert.ok(
-      header.includes(version),
-      `${f} narrows privileges on enhancement_requests but the deploy header does not name ${version}, so a skipped apply would leave the boundary absent with the function still working`,
-    );
-  }
+  for (const m of revokers) required.add(m.version);
+
+  const line = header.split("\n").find((l) => l.includes("CONFIRM APPLIED:"));
+  assert.ok(line, "the deploy header has no `CONFIRM APPLIED:` line, so nothing names the migrations to verify");
+  const listed = new Set(line.slice(line.indexOf("CONFIRM APPLIED:")).match(/\d{14}/g) || []);
+  assert.deepEqual(
+    [...listed].sort(), [...required].sort(),
+    "the deploy header's CONFIRM APPLIED list does not match the migrations this function actually depends on " +
+    `(defining its RPCs, or revoking on enhancement_requests): listed ${[...listed].sort().join(", ") || "none"}, ` +
+    `required ${[...required].sort().join(", ")}`,
+  );
 });
