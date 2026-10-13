@@ -251,12 +251,18 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
   // taught on the other replay. Applied there, not here, until now.
   //
   // So: replay every migration in order and assert the END STATE.
-  // Proposed files sort last because that is what they are — not yet applied,
-  // so they land after everything in migrations/ whenever they do.
-  const ordered = [
-    ...applied.slice().sort((a, b) => a.file.localeCompare(b.file)),
-    ...proposed.slice().sort((a, b) => a.file.localeCompare(b.file)),
-  ];
+  //
+  // ⚠️ ORDERED BY VERSION ACROSS BOTH DIRECTORIES, and the first version of this
+  // sorted `proposed` LAST — which a mutation immediately defeated. A probe
+  // migration granting the claim table to `authenticated` with a later version
+  // (29990101…) PASSED, because the proposed file's `revoke all` was replayed
+  // after it and cancelled it. That ordering is a fiction: once the proposed
+  // file is applied it takes its own version (20261013…), so a migration dated
+  // after it really does land after it. Sorting everything by its version
+  // prefix is the only ordering that matches what Postgres will see.
+  const ordered = [...applied, ...proposed]
+    .map((m) => ({ ...m, version: m.file.replace(/^.*\//, "") }))
+    .sort((a, b) => a.version.localeCompare(b.version));
   const endState = {};   // channel -> priv -> file that last opened it
   for (const m of ordered) {
     for (const stmt of privilegeStatements(m.sql.replace(/^\s*--.*$/gm, ""), CLAIM_TABLE)) {
