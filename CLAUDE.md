@@ -1787,6 +1787,63 @@ silently lose it. `privilege.test.mjs` asserts the ordering (claim before any
 Mutation-tested: claim moved back after the sends, provider-key return deleted,
 null claim allowed to fall through, `bad_stage` refusal dropped — 4/4 caught.
 
+### ⛔ OPEN (owner decision) — FOUR ROUNDS ON ONE MECHANISM: the notification stamps do not establish that a notification happened
+
+`global.md` → *Review Rounds Have to Terminate* says a mechanism that keeps
+failing across rounds gets reverted or redesigned, not patched again. This one
+failed four consecutive times on PR #256, so the fifth patch was **not** written.
+
+| round | the bypass | the fix |
+|---|---|---|
+| 3 | staff reset the stamp to null → unbounded resend | revoke table-wide UPDATE, column-grant `(status, approved_at)` |
+| 4 | a write-once trigger closes backward writes but leaves the FIRST write open → **pre-claim**, made immutable | withdrew the trigger-only design; authorizing SECURITY DEFINER functions |
+| 5 | the **INSERT** path — create the request already stamped | narrow INSERT to the seven creation columns |
+| 6 | the grantee calls the **RPC directly** — no Edge Function, no email | **not patched. This section.** |
+
+**What the stamps actually promise:** that a claim was taken. **Not** that a
+notification was attempted. `EXECUTE` on both functions is granted to
+`authenticated`, so an owner can call `/rest/v1/rpc/stamp_requested_notified`
+directly and the legitimate notification then answers `already_notified` and
+stays silent.
+⚠️ **The post-apply probe in `migrations/20261013005250` is that exploit**, and
+it was read as a passing test — calling the function as the owner *is* the
+bypass. A probe can demonstrate a hole and be recorded as proof of a fix.
+
+**Residual harm, stated precisely rather than as "a bypass exists":** a client
+suppressing their own email is self-harm and negligible. An **underwriter**
+suppressing a *client's* approval notice is real, silent, and by an account that
+can already approve or decline arbitrarily. Neither produces unbounded
+**sending**, which is what the claim was introduced to stop and does stop. So
+this is a suppression residual on an endpoint that is **not deployed**, not a
+live incident.
+
+**The two candidate designs, for the owner to choose between:**
+
+**(A) Move the stamps' writer off `authenticated`.** Grant `EXECUTE` on both
+functions to `service_role` only and have the Edge Function call them with a
+service-role client — the functions are SECURITY DEFINER, so they still need no
+table privileges. Caller identity stays RLS-backed because the handler reads the
+row as the caller *before* stamping; only the stamp moves. Smallest change that
+makes the notification sender the sole writer.
+*Cost:* reintroduces a service-role client in the function for one call, and the
+identity half becomes "the handler verified it" rather than "the database
+enforced it" — though the verification is still an RLS-scoped read.
+
+**(B) Stop using the row, and count in a table the caller cannot touch.** The
+`help_queries` model this repo already settled on for exactly this class: a
+server-only table where `authenticated` holds **nothing** and only
+`service_role` has an explicit grant. Dedup becomes a row keyed on
+`(request_id, event)`, written by the function. Immune to every one of the four
+bypasses above, because the client has no write path at all.
+*Cost:* a new table and migration, and the stamps on `enhancement_requests`
+become what they always honestly were — operational markers, not a gate.
+
+**(B) is the better answer and the one this repo's own history points at** — it
+is the pattern already chosen when the same question was asked about `help-ask`'s
+spend. (A) is the smaller change if the appetite is for one more step rather than
+the right shape. Either is a migration plus a code change, so either needs owner
+approval.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it

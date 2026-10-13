@@ -125,45 +125,45 @@ comment on function public.stamp_requested_notified(uuid) is
   'and column privileges cannot distinguish client from broker (same DB role). '
   'Returns NULL for every refusal so it cannot be used to probe row ids it does not own.';
 
--- POST-APPLY PROBE — RUN 2026-10-13 against the live project, and read the
--- limitation note before trusting any of it.
+-- POST-APPLY PROBE — RUN 2026-10-13.
 --
--- HTTPS egress to the project is blocked from the authoring sandbox (measured:
--- the agent proxy rejects bdsegmjcgfmgzuxwiplj.supabase.co with
--- connect_rejected, organization policy), so a real client session over
--- PostgREST was not available. The session was simulated in-database with
---   set local role authenticated;
---   set local "request.jwt.claims" = '{"sub":"<uuid>","role":"authenticated"}';
+-- ⚠️ THIS SECTION PREVIOUSLY CONCLUDED THAT THE IN-DATABASE HARNESS "DOES NOT
+-- ENFORCE RLS", AND THAT WAS WRONG. It is corrected here rather than left to
+-- contradict the re-measurement, because a stale conclusion in a probe footer
+-- is worse than no conclusion: it labels a real denial as merely "derived" and
+-- sends the next maintainer after a bearer-token probe they do not need.
 --
--- ⚠️ THAT HARNESS DOES NOT ENFORCE RLS, AND IT WAS CHECKED RATHER THAN ASSUMED.
--- Acting as `authenticated` with a FOREIGN uid, `select count(*) from
--- public.enhancement_requests` returned 1 where `er_select_own` should give 0;
--- `session_user` is `postgres` and the MCP evidently executes in a privileged
--- context. So this harness can measure anything that does not depend on RLS,
--- and nothing that does. CLAUDE.md records the same trap for service-role
--- probes against an earlier migration here.
+-- What happened: the probe that established it used uid
+-- 22222222-2222-4222-8222-222222222222 as "a DIFFERENT client". That is the
+-- seeded BROKER's id, and `er_broker_select` legitimately shows a broker every
+-- request — so the row it returned was RLS working correctly, read as RLS being
+-- bypassed. Re-measured with a uid holding no `profiles` row
+-- (99999999-9999-4999-8999-999999999999): enhancement_requests 0 rows,
+-- profiles 0, entities 0. **The harness enforces RLS and column privileges.**
+-- See 20261013013743's probe footer for the full write-up.
 --
--- WHAT IS THEREFORE MEASURED, and it is the part that matters: this function is
--- SECURITY DEFINER, so it bypasses RLS BY DESIGN. Its only gate is its own
--- `owner = auth.uid()` clause, and `auth.uid()` reads the claims the harness
--- does set correctly. Both directions, because a stamp tightened one notch too
--- far refuses the owner and still looks like a working guard:
+-- So, measured as a client session (`set local role authenticated` plus
+-- `set local "request.jwt.claims"`), both directions:
 --
 --   owner, status='requested', unstamped   -> timestamp returned, column written
 --   owner, same call a second time         -> NULL, first timestamp intact
---   a DIFFERENT client's uuid              -> NULL, column unchanged
+--   the BROKER's uid (not the owner)       -> NULL, column unchanged
+--   a uid with no profiles row             -> NULL
+--   direct `update ... set requested_notified_at = ...` as authenticated
+--                                          -> 42501 permission denied
 --
--- The seeded demo row was then restored to requested_notified_at = null.
+-- That last line is now MEASURED, not derived — and it is a privilege denial
+-- rather than an RLS one since 20261013013743 narrowed `authenticated`'s UPDATE
+-- to `(status, approved_at)`.
 --
--- WHAT IS *NOT* MEASURED, stated rather than implied: that a client cannot
--- simply UPDATE requested_notified_at directly. That depends on RLS, which this
--- harness does not apply. It is DERIVED from two readings — `pg_policies` lists
--- no owner UPDATE policy on this table, and
--- `has_table_privilege('authenticated', 'public.enhancement_requests', 'UPDATE')`
--- is true, so RLS is the only thing refusing it. Sound, but not end-to-end.
--- Settle it with a real bearer against PostgREST from somewhere with egress:
---   PATCH /rest/v1/enhancement_requests?id=eq.<row>
---   {"requested_notified_at":"2026-01-01T00:00:00Z"}   expect 403 / 42501
+-- ⚠️ AND ONE THING THIS PROBE DEMONSTRATES WITHOUT HAVING MEANT TO: the first
+-- line IS a bypass. Calling this function directly as the owner — which is
+-- exactly what the probe does — stamps the row without the Edge Function running
+-- and without any email being sent, after which the legitimate notification
+-- answers `already_notified`. So these stamps record "a claim was taken", NOT
+-- "a notification was attempted". Raised by Codex on PR #256 and recorded in
+-- CLAUDE.md as an open design question; the probe above was the proof of it and
+-- was read as a passing test.
 --
 -- INVERSE (reversible-by-design, per data.md). Removes the capability and
 -- restores the state where the owner cannot stamp at all. The Supabase MCP in

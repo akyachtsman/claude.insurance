@@ -44,6 +44,34 @@
 // privilege reason above. Removing it is what lets this function deploy with
 // verify_jwt ON; see supabase/config.toml.
 //
+// ⚠️⚠️ WHAT THE NOTIFICATION STAMPS DO AND DO NOT PROMISE — read before
+// trusting either column, and before adding a fifth guard to this file.
+//
+// They record that a CLAIM WAS TAKEN. They do **not** establish that a
+// notification was attempted, let alone delivered. EXECUTE on both stamp
+// functions is granted to `authenticated`, so the grantee can call
+// `/rest/v1/rpc/stamp_requested_notified` (or the approved one) DIRECTLY,
+// without this function running and without any email being sent — after which
+// the legitimate notification answers `already_notified` and stays silent.
+// ⚠️ The post-apply probe in migrations/20261013005250 demonstrates exactly this
+// and was read as a passing test: calling the function as the owner IS the
+// bypass.
+//
+// WHAT THAT IS AND IS NOT WORTH WORRYING ABOUT. A client calling the requested
+// stamp suppresses their OWN email — self-harm, negligible. An UNDERWRITER
+// calling the approved stamp suppresses the CLIENT's approval notice, silently.
+// That one is real, and it is by a trusted staff account that can already
+// approve or decline arbitrarily. Neither causes unbounded SENDING, which is
+// what the claim was introduced to stop and does stop.
+//
+// FOUR ROUNDS, ONE MECHANISM (Codex #256 rounds 3-6): staff resetting the stamp;
+// a write-once trigger that left the first write open; the INSERT path; and now
+// the grantee calling the RPC directly. Each fix was right for its round and the
+// mechanism kept failing, which per global.md -> *Review Rounds Have to
+// Terminate* is a redesign decision rather than a fifth patch. The two candidate
+// designs and the trade-offs are written up in CLAUDE.md; it is an owner call,
+// deliberately not taken here.
+//
 // Email is sent via Resend. Secrets (set in the Supabase dashboard):
 //   RESEND_API_KEY  — provider API key (required for email to actually send)
 //   BROKER_EMAIL    — where broker notifications go
@@ -377,12 +405,13 @@ Deno.serve(async (req: Request) => {
   //    null — so the role check above and the `.eq("status","approved")` this
   //    replaces are now belt, with the boundary in the function.
   //
-  //    ⚠️ THE MIGRATION AND THIS CALL SHIP AS A PAIR.
-  //    supabase/proposed/20261013_notified_stamps_write_once.sql defines this
-  //    function and is NOT applied. Until it is, this rpc fails and the branch
-  //    returns `claim_failed` with nothing sent — fail-closed, and no
-  //    regression, because the function returns 404 on every call today and is
-  //    explicitly not deployable before that migration lands.
+  //    ⚠️ THE MIGRATION IS NOW APPLIED — `migrations/20261013013743_notified_
+  //    stamps_write_once.sql`, live as of 2026-10-13, together with
+  //    `20261013014854_enhancement_requests_insert_column_scope.sql` which
+  //    narrowed INSERT the same way. An earlier version of this comment said
+  //    the function existed only under `proposed/` and that this rpc would
+  //    fail; leaving that in place would tell an operator a ready deployment was
+  //    blocked. It is not: this call resolves against a live function.
   const { data: claim, error: claimErr } = await caller
     .rpc("stamp_approved_notified", { p_request: requestId });
   if (claimErr) {
