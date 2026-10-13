@@ -510,3 +510,70 @@ test("the deploy header names every RPC the code calls", () => {
     `listed ${[...listed].sort().join(", ") || "none"}, required ${[...required].sort().join(", ")}`,
   );
 });
+
+test("every table these RPCs trust has its client write surface narrowed IN SOURCE", () => {
+  // ⚠️ WRITTEN BECAUSE A MUTATION SURVIVED. The deploy-set gate above requires
+  // the MIGRATION to be named; it does not require the STATEMENT to exist.
+  // Deleting `revoke update on public.profiles from authenticated` left that
+  // gate green, because the same file still carries the INSERT revoke and so
+  // stays in the derived set. The named-migration check and the narrowing itself
+  // are two different claims, and only the first had a test for `profiles` —
+  // `enhancement_requests` had one (above) and that asymmetry is exactly how the
+  // weaker half hides.
+  //
+  // THE INVARIANT: for every table the stamp functions read or write, the
+  // `authenticated` role must hold NO table-wide UPDATE and NO table-wide
+  // INSERT. The functions are SECURITY DEFINER precisely so the caller does not
+  // need those; leaving either makes the function decorative, and on `profiles`
+  // it is worse than decorative — table-wide UPDATE there means a client can set
+  // their own `role` to 'underwriter', which `stamp_approved_notified` then
+  // trusts (Codex #256 round 9).
+  //
+  // The table list is DERIVED from the function bodies, the same two-hop scan as
+  // the deploy-set gate, so a new trusted table is covered the day it appears.
+  const migDir = join(here, "..", "..", "migrations");
+  const migs = readdirSync(migDir)
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => ({ file: f, sql: readFileSync(join(migDir, f), "utf8").replace(/^\s*--.*$/gm, "") }));
+
+  const called = [...new Set([...code.matchAll(/\.rpc\(\s*["']([^"']+)["']/g)].map((m) => m[1]))];
+  const trusted = new Set();
+  for (const name of called) {
+    const defRe = new RegExp(
+      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
+    );
+    for (const m of migs.filter((x) => defRe.test(x.sql))) {
+      for (const t of m.sql.match(defRe)[0].matchAll(/public\.(\w+)/g)) {
+        if (!called.includes(t[1])) trusted.add(t[1]);
+      }
+    }
+  }
+  assert.ok(trusted.size > 0, "no trusted tables derived from the RPC bodies — did the body scan lose them?");
+
+  for (const table of trusted) {
+    for (const priv of ["update", "insert"]) {
+      const revoked = migs.some((m) =>
+        new RegExp(`revoke\\s+${priv}\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+from\\s+[^;]*\\bauthenticated\\b`, "i")
+          .test(m.sql));
+      assert.ok(
+        revoked,
+        `no migration revokes table-wide ${priv.toUpperCase()} on public.${table} from authenticated — ` +
+        `the stamp functions trust that table, so a client holding it writes the columns directly`,
+      );
+      // And nothing may hand it back table-wide. A column list is fine (that is
+      // the re-grant the narrowing depends on); a bare `grant <priv> on <table>`
+      // is the hazard this repo has already been bitten by, which is why
+      // 20261006120000_help_queries refuses UPDATE at two layers.
+      const reGranted = migs.filter((m) =>
+        new RegExp(`grant\\s+${priv}\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+to\\s+[^;]*\\bauthenticated\\b`, "i")
+          .test(m.sql));
+      const offenders = reGranted.filter((m) =>
+        [...m.sql.matchAll(new RegExp(`grant\\s+${priv}(\\s*\\([^)]*\\))?\\s+on\\s+(?:table\\s+)?public\\.${table}\\s+to\\s+[^;]*\\bauthenticated\\b`, "gi"))]
+          .some((g) => !g[1]));
+      assert.deepEqual(
+        offenders.map((m) => m.file), [],
+        `these migrations grant table-wide ${priv.toUpperCase()} on public.${table} back to authenticated, undoing the narrowing`,
+      );
+    }
+  }
+});
