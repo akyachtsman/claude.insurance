@@ -2070,6 +2070,87 @@ semantics, and deleting one is not cosmetic. This is the third time on this PR
 that the thing catching a regression was not the thing it looked like: see also
 the schema-wide table wiring, and S22's console-log assertion.
 
+### ⛔ ROUND 22 — THE TERMINATING INVERSION: every STATEMENT, not every GRANT
+
+**Five rounds, one shape.** Each one found a construct that changes what a client
+can do and that the scanner was not looking at. Rounds 20 and 21 were already
+redesigns, and they are the reason this entry exists: **both inverted a FIELD of
+a GRANT statement**, and the next round walked in through the field next door,
+then through something that is not a GRANT at all.
+
+| round | construct | where it lived |
+|---|---|---|
+| 17 | `all [privileges]` | a FIELD of a GRANT (the privilege) |
+| 19 | `anon` | a FIELD of a GRANT (the grantee) |
+| 20 | `on routine` / `on all tables in schema public` | a FIELD of a GRANT (the target) |
+| 21 | `"public-reader"`, `do '…'` | a FIELD, and the literal's context |
+| 22 | **`alter table … owner to authenticated`** | **not a GRANT at all** |
+
+**Why field-by-field inversion could never terminate:** the set of things that
+affect privileges is not a set of GRANT fields. Ownership transfer, `ALTER
+DEFAULT PRIVILEGES`, role membership (`grant <role> to authenticated`), a
+SECURITY DEFINER body, dynamic SQL, and `FORCE ROW LEVEL SECURITY` are all
+outside it. A gate that only reads GRANTs is unsound however carefully its
+fields are parsed.
+
+**So the question is now asked about the STATEMENT — the last boundary there
+is.** Nothing in a migration sits outside one, so there is no further level to
+be pushed out to; that is the sense in which this ends the regress structurally
+rather than by promising to be more careful next time. Every statement must be a
+kind this suite has reasoned about, and anything else **fails by name** with the
+file and the statement. The allow-list is of **benign** kinds, measured against
+the 87 statements this repo actually contains (every head enumerated before the
+list was written) — not a deny-list of dangerous ones, because a deny-list is
+exactly how rounds 17–22 happened.
+
+⚠️ **AND THE GATE DOES NOT DEPEND ON HAVING ANTICIPATED THE FINDING.** Measured:
+with the named `owner` arm **and both its pins** deleted, the sweep still
+reports `alter table … owner to authenticated` as *"unrecognised statement
+kind"*. The named arm only improves the message. That is the property that
+makes this different from the four previous fixes.
+
+**The three round-22 findings, all reproduced at 20/20 green before fixing:**
+
+| # | finding | why it was invisible |
+|---|---|---|
+| 1 | `select public.run_sql('GRANT … TO authenticated')` | the literal classifier asked whether the statement's HEAD was executable, and `select` was on the inert list |
+| 2 | a later `create or replace … as $body$ … $body$` | `effectiveFunction` closed the body on a literal `$$;`, so the replacement was skipped and every gate kept validating the OLDER definition — a version with no status predicate and no `for update` passed |
+| 3 | `alter table … owner to authenticated` | not a GRANT, so the privilege replay saw no event at all; a table owner also bypasses RLS unless FORCE is set |
+
+**The head was never the right question for a literal.** A literal either parses
+as a GRANT statement or it does not, and that is decidable without knowing who
+executes it — so the test is anchored at a statement start (the literal's
+beginning, after an optional `BEGIN`, or just after a `;`). Head-independent,
+with no inert list left to be incomplete. That anchor is what separates
+`'GRANT EXECUTE ON … TO authenticated'` from this repo's own
+`'… holds select+insert by explicit grant. Replaces …'`.
+⚠️ **My own pin table disagreed with the implementation on first run** and the
+pin was the thing that was wrong: I had marked *"we grant nothing on this table
+to anyone"* as reportable. It contains `grant`, `on` and `to` and is still
+prose — which is the anchor's whole job, since an executed literal must *begin*
+a statement.
+
+**`effectiveFunction` now matches PAIRED dollar tags and fails closed.** `$$` is
+just the empty tag, so a tagged body was never an exotic spelling; and a
+definition whose body cannot be delimited is **reported** rather than skipped,
+through one shared `requireFunction()` so the reason reaches the reader instead
+of surfacing as an unrelated failure on `hit.body` being undefined.
+
+**Measured, 15 mutations.** 8 bypasses caught — the three reported plus five
+nobody reported: `no force row level security`, `create role` + `grant <role> to
+authenticated`, `alter role authenticated bypassrls`, an `insert` whose row value
+is a grant statement, and an event trigger. The control (a benign DDL+DML mix,
+including a `COMMENT` whose prose contains both words and a legitimate RPC call)
+stays clean. Every fix is proven load-bearing: deleting the sweep reopens the
+owner hole, flattening `BENIGN_STATEMENT` to "benign" fails the pins, removing
+the literal anchor lets the `run_sql` grant through, and reverting the dollar-tag
+match restores finding 2.
+
+⚠️ **One deliberate false positive.** An `insert` whose row value happens to be a
+grant statement is reported. No such table exists here; if a legitimate
+job-queue table ever does, the reported-not-silent direction is still the right
+one and the fix is to model that table, not to loosen the anchor.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it
