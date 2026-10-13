@@ -11,6 +11,21 @@ authorizing SECURITY DEFINER functions, which is what makes
 `drop trigger if exists`, which the MCP hangs on and which is a no-op on a
 first apply.
 
+⚠️ **The write-once trigger in that file is BELT, not the boundary** — an earlier
+draft of this entry presented the trigger as the chosen design over privilege
+narrowing, which that migration explicitly withdraws. The boundary is the
+`revoke update` plus the column grant; the trigger does not stop a pre-claim.
+Flagged by Codex on PR #256 precisely because this README is the operator-facing
+warning, so a stale rationale here would point whoever applies it at the design
+the migration rejects.
+
+⚠️ **And it needed a follow-on the same day:**
+`migrations/20261013014854_enhancement_requests_insert_column_scope.sql`.
+Narrowing UPDATE left the table-wide **INSERT** grant live, so a client could
+create a request with a notification stamp already populated — the same
+pre-claim, through the other write path. **A column is only as protected as its
+weakest write path.**
+
 `supabase/migrations/` mirrors the schema that is **actually provisioned** (its
 versions match `list_migrations`). Anything in this directory is a migration that
 has been **written but deliberately not applied**, because CLAUDE.md requires

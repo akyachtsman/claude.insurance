@@ -1,0 +1,79 @@
+-- Narrow INSERT on enhancement_requests the way 20261013013743 narrowed UPDATE.
+--
+-- ✅ APPLIED 2026-10-13 as version 20261013014854, with the probe below run.
+--
+-- THE HOLE, and it was LIVE for the minutes between the two migrations.
+-- 20261013013743 revoked table-wide UPDATE and re-granted `(status,
+-- approved_at)`, which closed every path by which staff could reset or forge a
+-- notification stamp — by UPDATE. It left the table-wide INSERT grant from
+-- 20260628091530 untouched, and `er_insert_own` checks only
+-- `owner = auth.uid() and status = 'requested'`. So:
+--
+--   client: insert into enhancement_requests
+--             (owner, subject, message, requested_notified_at)
+--           values (auth.uid(), 'x', 'x', now());     -- ACCEPTED, pre-stamped
+--
+-- `notify-enhancement` then reads a populated stamp, answers `already_notified`,
+-- and emails NOBODY — and the write-once trigger from the previous migration
+-- makes the forged value immutable, so it can never be corrected. Exactly the
+-- pre-claim shape that caused the trigger-only design to be withdrawn, arriving
+-- through INSERT instead of UPDATE.
+--
+-- ⚠️ SO THE PREVIOUS MIGRATION MADE THIS VECTOR WORSE WHILE CLOSING THE OTHER,
+-- which is the second time on this PR that a fix for one direction opened or
+-- deepened another. Found by Codex immediately after that apply. The lesson is
+-- narrow and worth stating: **a column is only as protected as its WEAKEST
+-- write path.** Narrowing UPDATE and leaving INSERT is not narrowing the column.
+--
+-- THE GRANT IS MEASURED, NOT GUESSED. `addEnhancementRequest()` in
+-- js/supabase.js is the only client-side insert, and it writes exactly:
+--   owner, subject, message, policy_id, asset_id, entity_id, context
+-- which is the list below.
+--
+-- WHAT IS DELIBERATELY NOT GRANTED, and why each is safe to omit:
+--   status       default 'requested'::text, NOT NULL — so the default supplies
+--                it and `er_insert_own`'s `status = 'requested'` check passes
+--                WITHOUT the client being able to choose a status. Measured:
+--                a narrowed insert lands with status 'requested'.
+--   id           default gen_random_uuid(), NOT NULL
+--   created_at   default now(), NOT NULL
+--   approved_at  lifecycle state, written by the underwriter's narrowed UPDATE
+--   requested_notified_at, approved_notified_at
+--                notification state, written ONLY by the SECURITY DEFINER stamp
+--                functions. This is the point of the migration.
+revoke insert on public.enhancement_requests from authenticated;
+grant insert (owner, subject, message, policy_id, asset_id, entity_id, context)
+  on public.enhancement_requests to authenticated;
+
+-- ── POST-APPLY PROBE — RUN 2026-10-13, both directions ─────────────────────
+-- As the demo client in the in-database harness, which DOES enforce RLS and
+-- column privileges (see 20261013013743's probe note for the correction that
+-- established this).
+--
+-- THE DENIAL — the forged pre-claim this migration exists to stop:
+--   insert (owner, subject, message, requested_notified_at) values (…, now())
+--     -> 42501 permission denied for table enhancement_requests
+--
+-- THE ALLOW — client request creation must still work, which is the half that
+-- matters for not breaking production:
+--   insert (owner, subject, message, policy_id, asset_id, entity_id, context)
+--     -> 1 row, and `status` defaulted to 'requested'
+--
+-- ⚠️ THE ALLOW WAS RUN INSIDE `begin; … rollback;` AND THAT IS A FINDING IN
+-- ITSELF. The previous migration's probe inserted a throwaway row and could not
+-- remove it, because the Supabase MCP hangs 60s on a DELETE and applies nothing
+-- (measured twice). An explicit transaction with ROLLBACK **is** honoured —
+-- verified here: the row was visible inside the transaction (count 3) and gone
+-- after it (count 2, the seeded request plus the earlier stuck probe row). So
+-- the technique for a write-probe from a session is a rolled-back transaction,
+-- not an insert-then-delete. That is what should have been used the first time.
+--
+-- The stuck row from the earlier probe is still outstanding and still needs one
+-- line from the owner — a committed row cannot be rolled back after the fact:
+--   delete from public.enhancement_requests
+--    where id = 'aaaaaaaa-0000-4000-8000-000000000001';
+--
+-- ── INVERSE (reversible-by-design, per data.md) ─────────────────────────────
+--   grant insert on public.enhancement_requests to authenticated;
+-- Restores the table-wide grant, i.e. reopens the pre-claim. Non-destructive:
+-- no row is read, written or deleted.

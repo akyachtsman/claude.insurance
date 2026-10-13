@@ -227,6 +227,36 @@ test("the privilege narrowing that makes the stamp functions a boundary is prese
       `a notified_at column is granted back to authenticated, which reopens the reset and pre-claim: ${cols}`,
     );
   }
+
+  // ⚠️ INSERT TOO. A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH.
+  // Narrowing UPDATE and leaving the table-wide INSERT grant live let a client
+  // CREATE a request with a notification stamp already populated — the same
+  // pre-claim through the other statement type, and the write-once trigger then
+  // made the forged value immutable. Found by Codex minutes after the UPDATE
+  // narrowing applied.
+  assert.ok(
+    /revoke\s+insert\s+on\s+public\.enhancement_requests\s+from\s+[^;]*\bauthenticated\b/i.test(sql),
+    "no `revoke insert on public.enhancement_requests from authenticated` — a client can pre-stamp a request at creation",
+  );
+  const inserts = [...sql.matchAll(/grant\s+insert\s*(\([^)]*\))?\s*on\s+public\.enhancement_requests\s+to\s+([^;]*);/gi)];
+  assert.ok(inserts.length > 0, "the creation columns are never granted back — addEnhancementRequest would 42501");
+  for (const g of inserts) {
+    if (!/\bauthenticated\b/.test(g[2])) continue;
+    const cols = g[1];
+    assert.ok(cols, `a table-wide \`grant insert on enhancement_requests to authenticated\` reopens the pre-claim: ${g[0].trim()}`);
+    assert.ok(
+      !/notified_at/.test(cols),
+      `a notified_at column is insertable by authenticated, which is the pre-claim: ${cols}`,
+    );
+    // The columns addEnhancementRequest() actually writes. Dropping one breaks
+    // client request creation outright.
+    for (const need of ["owner", "subject", "message", "policy_id", "asset_id", "entity_id", "context"]) {
+      assert.ok(
+        new RegExp(`\\b${need}\\b`).test(cols),
+        `the insert grant must cover ${need} — addEnhancementRequest writes it: ${cols}`,
+      );
+    }
+  }
 });
 
 // ⚠️ BOTH BRANCHES, NOT JUST THE ONE THAT WAS REPORTED. The round-1 version of

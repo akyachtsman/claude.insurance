@@ -163,8 +163,10 @@ This is the one to follow; the others defer to it.
    2026-10-13: `20261013013743_notified_stamps_write_once` leaves
    `authenticated` able to UPDATE only `(status, approved_at)`, so a leaked staff
    credential can move a request's stage but can no longer rewrite its `owner`,
-   `subject`, `message` or `context`. The READ exposure is unchanged and is
-   still the reason to rotate.
+   `subject`, `message` or `context`. INSERT was narrowed the same day
+   (`20261013014854`) to the seven creation columns, so neither notification
+   stamp can be supplied at creation either. The READ exposure is unchanged and
+   is still the reason to rotate.
    Accepted today on a **measured** precondition — `auth.users` holds exactly
    three rows, all `@example.com`, and `enhancement_requests` holds one row owned
    by the demo client, so there is no real client data to expose — and that
@@ -1785,6 +1787,42 @@ silently lose it. `privilege.test.mjs` asserts the ordering (claim before any
 Mutation-tested: claim moved back after the sends, provider-key return deleted,
 null claim allowed to fall through, `bad_stage` refusal dropped — 4/4 caught.
 
+### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
+
+Second time on one PR that closing a direction opened or deepened another, so it
+is recorded as a rule rather than as two incidents.
+
+`20261013013743` revoked table-wide UPDATE on `enhancement_requests` and
+re-granted `(status, approved_at)`, closing every path by which staff could
+reset or forge a notification stamp — **by UPDATE**. It left the table-wide
+**INSERT** grant from `20260628091530` untouched, and `er_insert_own` checks only
+`owner = auth.uid() and status = 'requested'`. So a client could simply create a
+request with a stamp already populated:
+
+```sql
+insert into enhancement_requests (owner, subject, message, requested_notified_at)
+values (auth.uid(), 'x', 'x', now());          -- ACCEPTED, pre-stamped
+```
+
+`notify-enhancement` then reads a populated stamp, answers `already_notified`,
+and emails nobody — and the write-once trigger from the same migration makes the
+forged value **immutable**. That is the identical pre-claim that caused the
+trigger-only design to be withdrawn one round earlier, arriving through the other
+write path. Found by Codex within minutes of the apply.
+
+Closed by `20261013014854`: INSERT narrowed to the seven columns
+`addEnhancementRequest()` actually writes (`owner, subject, message, policy_id,
+asset_id, entity_id, context`). `status`, `id` and `created_at` are omitted
+because each has a NOT NULL default — and the `status` default `'requested'` is
+what keeps `er_insert_own`'s check satisfied without letting the client choose a
+status, measured rather than assumed.
+
+**The generalisable rule:** when narrowing write access to a column, enumerate
+**every** statement type that can write it — INSERT and UPDATE at minimum — and
+check the grant for each. Narrowing one is not narrowing the column. The same
+applies to a default: a column the client cannot name is still set, so the
+default has to be the safe value.
+
 ### ⚠️ TWO WAYS A MUTATION TEST LIES, both hit on 2026-10-13
 
 Found while gating the `notify-enhancement` rewrite. Neither is about the code
@@ -1864,10 +1902,15 @@ false-pass trap this file records elsewhere, one `set` away.
 nothing, the same signature this file records for `DROP POLICY`/`DROP TABLE`; the
 earlier finding was written as a DDL constraint and does not cover DML. Verified
 by re-reading the table after each attempt — the row was still there both times.
-**Consequence:** a probe that inserts a row cannot clean up after itself from a
-session. Wrap probe data in a transaction that rolls back, or probe an existing
-row, or accept that the owner must delete it by hand. One such row is outstanding
-— see `migrations/20261013013743_notified_stamps_write_once.sql`'s probe footer.
+
+✅ **BUT `begin; … rollback;` IS HONOURED, and that is the technique for a write
+probe from a session.** Measured the same day: a client insert inside an explicit
+transaction was visible inside it (count 3) and gone after it (count 2). So a
+probe that needs to write should be wrapped in a rolled-back transaction rather
+than insert-then-delete — which is what should have been done the first time.
+⚠️ It does not help retrospectively: a committed row cannot be rolled back, so
+one throwaway probe row is outstanding and needs one line from the owner (see
+`migrations/20261013014854_enhancement_requests_insert_column_scope.sql`).
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
