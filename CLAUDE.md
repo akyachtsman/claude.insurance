@@ -1827,7 +1827,7 @@ silently lose it. `privilege.test.mjs` asserts the ordering (claim before any
 Mutation-tested: claim moved back after the sends, provider-key return deleted,
 null claim allowed to fall through, `bad_stage` refusal dropped — 4/4 caught.
 
-### ⛔ OPEN (owner decision) — FOUR ROUNDS ON ONE MECHANISM: the notification stamps do not establish that a notification happened
+### ✅ RESOLVED by redesign (option B) — FOUR ROUNDS ON ONE MECHANISM: the notification stamps did not establish that a notification happened
 
 `global.md` → *Review Rounds Have to Terminate* says a mechanism that keeps
 failing across rounds gets reverted or redesigned, not patched again. This one
@@ -1878,11 +1878,45 @@ bypasses above, because the client has no write path at all.
 *Cost:* a new table and migration, and the stamps on `enhancement_requests`
 become what they always honestly were — operational markers, not a gate.
 
-**(B) is the better answer and the one this repo's own history points at** — it
-is the pattern already chosen when the same question was asked about `help-ask`'s
-spend. (A) is the smaller change if the appetite is for one more step rather than
-the right shape. Either is a migration plus a code change, so either needs owner
-approval.
+**(B) WAS CHOSEN AND IS BUILT** (owner delegated the call, 2026-10-13). The claim
+is now a row in `public.enhancement_notifications`, keyed `(request_id, event)`:
+`authenticated` and `anon` hold **nothing** on it, there are no policies, and
+only `service_role` has an explicit `select, insert`. The client has no write
+path, so none of the four bypasses has an analogue. The migration also **revokes
+EXECUTE on both stamp functions from `authenticated`**, closing round 6 outright,
+and leaves the two stamp columns in place but **vestigial** — nothing writes them.
+⚠️ **The migration is WRITTEN, NOT APPLIED** (`supabase/proposed/20261013_enhancement_notifications.sql`):
+it creates a table and grants, which is an owner decision. Until it is applied the
+function fails closed — `claim_failed`, nothing sent — which is no regression on
+an endpoint that 404s today. `proposed/README.md` declares it deploy-blocking and
+`privilege.test.mjs` enforces that declaration.
+
+⚠️ **(A) WAS NOT MERELY THE LESSER OPTION — IT DOES NOT WORK, and the write-up
+above said otherwise for a day.** Both stamp functions authorize on
+`auth.uid()` (`owner = auth.uid()`, and `profiles.id = auth.uid()` for the
+underwriter check). A service-role client carries no user JWT, so `auth.uid()` is
+**NULL** and both predicates match zero rows: granting EXECUTE to `service_role`
+and calling them that way would make every claim return null, the handler answer
+`claim_failed`, and no email ever send again. (A) was therefore never a grant
+change — it was a rewrite of the functions' authorization, moving the identity
+check out of the database and into the handler, which is the expensive half of
+the option with none of its stated benefit. Measured by reading both function
+bodies when the choice was actually being made, not when it was being written up.
+
+**What (B) does NOT move into the handler**, since that was the stated cost of
+(A) and deserves the same scrutiny: authorization. The row is still READ as the
+caller under RLS (`er_select_own` / `er_underwriter_select`), the role still comes
+from the caller's OWN `profiles` row, and the status transition is still an UPDATE
+as the caller under `er_underwriter_update`. What changed is only that the claim
+STATEMENT stopped being the place that also checks identity — a caller who is not
+entitled cannot reach the claim, and could not move the row if they did.
+
+**The one honest loss:** the old claim checked stage and ownership *atomically
+with* the claim. Now the stage pre-read races the claim, so a request that
+advances in that window could get one "we received your request" email a moment
+late. Bounded to **one** by the primary key — the harm shrank from "unbounded
+re-announcement" to "one possibly-stale email", which is the trade the redesign
+accepts and states rather than hides.
 
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
