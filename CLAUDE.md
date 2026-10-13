@@ -1602,6 +1602,55 @@ contents** — the exact string, twice, on two projects — and the filter is
 verified against that exact string. Both ends are measured; the middle is the
 one CI already executed.
 
+### ⚠️ A GATE THAT RUNS AFTER THE SIDE EFFECT IS NOT A GATE (notify-enhancement, 2026-10-13)
+
+Codex #256 round 1, P1, and it is the same shape as the `help_queries`
+reservation lesson arrived at from the other side.
+
+`notify-enhancement`'s requested path sent the broker email and the client email
+and **then** called `stamp_requested_notified`, whose
+`status = 'requested' and requested_notified_at is null` clauses were meant to be
+the stage/idempotency gate. They ran after the side effect, so they gated
+nothing: any signed-in owner could POST `event: "requested"` for their own row
+indefinitely — including after it had advanced to **approved or declined**, where
+the client email still read *"we've received your request and sent it to your
+broker for review"*. Unbounded broker email, unbounded provider spend, and a
+re-announcement that is actively misleading about the request's state.
+
+⚠️ **And the migration's own comment asserted the protection it did not have** —
+"what it stops is re-announcing a request that has since moved to broker_review
+or beyond". That is the comment-overclaims-code defect this repo keeps paying
+for; it is now the **third** instance recorded (the two `pageErrors` filters on
+PR #255 were the others).
+
+**The fix is an ordering, not a stronger clause.** The stamp became a CLAIM taken
+before the sends, which also makes it atomic: `update … where
+requested_notified_at is null` is evaluated under a row lock, so a second
+concurrent invocation blocks, re-reads the committed row, matches nothing and
+gets null — one claim, one refusal, never two emails. A pre-read check on
+`status`/`requested_notified_at` is kept **only** for a useful error message and
+is explicitly not the gate, because it races.
+
+**One guard had to come before the claim:** with `RESEND_API_KEY` unset nothing
+can be sent, so the function returns before claiming. Without that, a keyless
+deployment — the state this repo cannot currently verify, and so the likely one —
+would stamp every request as notified while sending none, which is the exact lie
+the "only stamp when something went out" rule exists to prevent.
+
+**Residual, stated rather than hidden:** a provider that is *configured but
+erroring* leaves the row claimed with nothing delivered. That is the deliberate
+direction, the same trade `help-ask` makes for its reservations ("billing unknown
+resolves as billed"), because releasing the claim on failure needs an
+owner-callable un-stamp — and an owner-callable un-stamp reopens the unbounded
+re-send this gate closes. Logged as `where: "requested_send"` so it is findable;
+a real retry mechanism is the product answer, not a weaker gate.
+
+**The guarantee belongs to the PAIR**, so a future caller that sends first would
+silently lose it. `privilege.test.mjs` asserts the ordering (claim before any
+`sendEmail`, provider-key return before the claim) and the two refusals.
+Mutation-tested: claim moved back after the sends, provider-key return deleted,
+null claim allowed to fall through, `bad_stage` refusal dropped — 4/4 caught.
+
 ### ⚠️ TWO WAYS A MUTATION TEST LIES, both hit on 2026-10-13
 
 Found while gating the `notify-enhancement` rewrite. Neither is about the code

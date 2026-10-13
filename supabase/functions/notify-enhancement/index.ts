@@ -146,7 +146,7 @@ Deno.serve(async (req: Request) => {
   // used to probe which request ids exist.
   const { data: row, error: rowErr } = await caller
     .from("enhancement_requests")
-    .select("id, owner, subject, message, context, status")
+    .select("id, owner, subject, message, context, status, requested_notified_at")
     .eq("id", requestId)
     .maybeSingle();
   if (rowErr || !row) return json({ error: "not_found" }, 404);
@@ -157,6 +157,65 @@ Deno.serve(async (req: Request) => {
     // Belt, not the boundary: `er_select_own` already refused any row the caller
     // does not own, so reaching here with a foreign row would mean RLS failed.
     if (user.id !== row.owner) return json({ error: "forbidden" }, 403);
+
+    // ⚠️ THE STAGE/IDEMPOTENCY GATE RUNS **BEFORE** THE EMAILS, AND THAT
+    // ORDERING IS THE WHOLE POINT (Codex #256 round 1, P1).
+    //
+    // The first version of this sent both emails and only THEN called the RPC,
+    // whose `status = 'requested' and requested_notified_at is null` clauses
+    // were meant to be the gate. They were not: they ran after the side effect.
+    // So any signed-in owner could POST `event: "requested"` for their own row
+    // over and over — including after it had advanced to approved or declined,
+    // where the client email still read "we've received your request and sent it
+    // to your broker for review" — and the RPC would dutifully return null
+    // afterwards having prevented nothing. Unbounded broker email, unbounded
+    // provider spend, and a re-announcement that is actively misleading.
+    // The migration's own comment claimed that clause "stops re-announcing a
+    // request that has since moved to broker_review or beyond"; as integrated it
+    // stopped nothing, which is the comment-overclaims-code defect this PR has
+    // now produced twice.
+    //
+    // 1. NO PROVIDER KEY -> RETURN BEFORE CLAIMING. With RESEND_API_KEY unset
+    //    nothing can be sent, so there is nothing to record; claiming here would
+    //    stamp every request as notified while sending none, which is exactly
+    //    the lie the "only stamp when something went out" rule exists to
+    //    prevent. This is also the state the repo cannot currently verify, so it
+    //    is the likely one.
+    if (!RESEND_API_KEY) {
+      return json({ ok: true, event, broker: { sent: false, reason: "no_provider_key" },
+                    client: { sent: false, reason: "no_provider_key" }, stamped: null });
+    }
+
+    // 2. A PRE-READ CHECK, FOR A USEFUL ERROR ONLY — not the gate. The RPC
+    //    cannot distinguish "wrong stage" from "already notified" (it returns a
+    //    bare null by design, so it cannot be used to probe row ids), so this
+    //    turns the common cases into something a log reader can act on. It
+    //    RACES, and is therefore not relied on.
+    if (row.status !== "requested") {
+      return json({ error: "bad_stage", status: row.status, expected: "requested" }, 409);
+    }
+    if (row.requested_notified_at) {
+      return json({ error: "already_notified", at: row.requested_notified_at }, 409);
+    }
+
+    // 3. THE CLAIM — atomic, and the actual gate. `update ... where
+    //    requested_notified_at is null and status = 'requested'` is evaluated
+    //    under a row lock: a second concurrent invocation blocks, re-evaluates
+    //    the WHERE against the committed new version, matches nothing and gets
+    //    null. So two simultaneous POSTs produce one claim and one refusal, not
+    //    two emails — which is the half a pre-read check alone cannot give.
+    const { data: claim, error: claimErr } = await caller
+      .rpc("stamp_requested_notified", { p_request: requestId });
+    if (claimErr) {
+      console.error(JSON.stringify({ where: "stamp_requested", code: claimErr.code, message: claimErr.message }));
+      return json({ error: "claim_failed" }, 500);
+    }
+    const stamped = (claim as string | null) ?? null;
+    if (!stamped) {
+      // Lost the race, or the row moved between the read and the claim. Nothing
+      // was sent, which is the correct outcome rather than a failure.
+      return json({ error: "already_notified" }, 409);
+    }
 
     // The client's own address comes from their OWN session — no admin lookup,
     // because on this path the caller IS the recipient. One fewer cross-user
@@ -186,29 +245,20 @@ Deno.serve(async (req: Request) => {
       ]),
     );
 
-    // Only stamp when something actually went out. sendEmail returns
-    // {sent:false, reason:"no_provider_key"} whenever RESEND_API_KEY is unset, so
-    // an unconditional stamp would record "we tried" and make the column useless
-    // for finding un-notified requests.
-    //
-    // ⚠️ VIA AN RPC, NOT AN UPDATE, AND THAT IS NOT A STYLE CHOICE. There is no
-    // owner UPDATE policy on enhancement_requests — only er_insert_own,
-    // er_select_own and the broker/underwriter UPDATE pair — so the owner's
-    // `.update()` here would be refused by RLS. A column grant cannot fix it
-    // either: column privileges are per ROLE, and client, broker and underwriter
-    // are all `authenticated`. public.stamp_requested_notified is a SECURITY
-    // DEFINER function that writes that one column on a row the caller owns;
-    // migrations/20261013120000_stamp_requested_notified.sql carries the full
-    // reasoning and the alternatives that were rejected.
-    let stamped: string | null = null;
-    if (brokerMail.sent || clientMail.sent) {
-      const { data, error } = await caller.rpc("stamp_requested_notified", { p_request: requestId });
-      // The RPC returns NULL for every refusal (not the owner, already stamped,
-      // no longer at 'requested'). A null is not an error and must not read as
-      // one — but a transport/privilege failure IS worth seeing in the logs,
-      // because it means the column silently stops recording.
-      if (error) console.error(JSON.stringify({ where: "stamp_requested", code: error.code, message: error.message }));
-      else stamped = (data as string | null) ?? null;
+    // ⚠️ RESIDUAL, STATED RATHER THAN HIDDEN: the claim is taken before the
+    // send, so a provider that is CONFIGURED but ERRORING leaves the row marked
+    // notified with nothing delivered. That is the deliberate direction — the
+    // same "billing unknown resolves as billed" trade help-ask makes for its
+    // reservations — because the alternative, releasing the claim on failure,
+    // needs an owner-callable un-stamp, and an owner-callable un-stamp
+    // reopens exactly the unbounded re-send this gate closes. It is logged
+    // loudly so the condition is findable, and a real retry mechanism is the
+    // product answer rather than a weaker gate.
+    if (!brokerMail.sent && !clientMail.sent) {
+      console.error(JSON.stringify({
+        where: "requested_send", claimed: stamped,
+        broker: brokerMail.reason, client: clientMail.reason,
+      }));
     }
     return json({ ok: true, event, broker: brokerMail, client: clientMail, stamped });
   }

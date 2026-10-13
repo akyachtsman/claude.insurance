@@ -55,8 +55,21 @@
 -- `status = 'requested'` is a TIGHTENING over the code it replaces, which
 -- stamped unconditionally. `er_insert_own` forces `status = 'requested'` on
 -- insert and `js/keep/views/policies-view.js` calls the function immediately
--- afterwards, so the normal path is unaffected; what it stops is re-announcing a
--- request that has since moved to broker_review or beyond.
+-- afterwards, so the normal path is unaffected.
+--
+-- ⚠️ AND THIS CLAUSE ONLY STOPS A RE-ANNOUNCEMENT BECAUSE OF *WHERE THE CALLER
+-- PUTS THE CALL*. An earlier version of this comment said it "stops
+-- re-announcing a request that has since moved to broker_review or beyond",
+-- and that was false as integrated: `notify-enhancement` sent both emails and
+-- called this afterwards, so the clause returned null having prevented nothing
+-- (Codex #256 round 1, P1). The function is now a CLAIM taken BEFORE the sends,
+-- which is also what makes it atomic: `update ... where requested_notified_at is
+-- null` is evaluated under a row lock, so a second concurrent invocation blocks,
+-- re-reads the committed row, matches nothing and gets null — one claim, one
+-- refusal, not two emails.
+-- So the guarantee belongs to the PAIR, and a future caller that sends first
+-- would silently lose it. `privilege.test.mjs` asserts the ordering for exactly
+-- that reason.
 --
 -- `requested_notified_at is null` makes it IDEMPOTENT and keeps the FIRST
 -- notification's time. A second call returns NULL and changes nothing, so a

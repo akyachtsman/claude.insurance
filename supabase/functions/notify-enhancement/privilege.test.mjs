@@ -156,3 +156,52 @@ test("the RPC the code calls exists in an applied migration, under that exact na
     );
   }
 });
+
+test("the requested-event gate runs BEFORE any email is sent", () => {
+  // ⚠️ THE ORDERING IS THE GATE (Codex #256 round 1, P1). The first version sent
+  // both emails and only then called the RPC, so its stage/idempotency clauses
+  // ran after the side effect and prevented nothing: an owner could re-POST
+  // `requested` for their own row indefinitely, including after it advanced to
+  // approved or declined, where the client email still said the request had just
+  // been received. Unbounded broker email and unbounded provider spend.
+  //
+  // This asserts the shape that fixes it, inside the requested branch only: the
+  // claim is taken first, and the provider-key early return precedes the claim
+  // so a keyless deployment cannot stamp rows it never emailed.
+  const branch = code.slice(
+    code.indexOf('if (event === "requested")'),
+    code.indexOf("event === \"approved\"") >= 0 ? code.indexOf("event === \"approved\"") : code.length,
+  );
+  assert.ok(branch.length > 200, "could not isolate the requested branch — has it been restructured?");
+
+  const claimAt = branch.indexOf('rpc("stamp_requested_notified"');
+  const firstSendAt = branch.indexOf("await sendEmail(");
+  const keyGuardAt = branch.search(/if\s*\(\s*!RESEND_API_KEY\s*\)/);
+
+  assert.ok(claimAt >= 0, "the requested branch no longer claims via stamp_requested_notified");
+  assert.ok(firstSendAt >= 0, "no sendEmail call in the requested branch — did the scan lose it?");
+  assert.ok(keyGuardAt >= 0, "the !RESEND_API_KEY early return is gone; a keyless deploy would stamp unsent rows");
+
+  assert.ok(
+    claimAt < firstSendAt,
+    "the stamp_requested_notified claim must be taken BEFORE any sendEmail — otherwise it gates nothing",
+  );
+  assert.ok(
+    keyGuardAt < claimAt,
+    "the !RESEND_API_KEY return must precede the claim, or a keyless deploy marks every request notified",
+  );
+});
+
+test("a refused requested-event claim is answered without sending", () => {
+  // The claim returning null means "someone else holds it, or the row moved".
+  // The only correct response is a refusal with no email, so assert the branch
+  // returns 409 on a falsy claim rather than carrying on.
+  assert.ok(
+    /if\s*\(\s*!stamped\s*\)\s*\{[\s\S]{0,400}?already_notified[\s\S]{0,200}?409/.test(code),
+    "a null claim must return 409 already_notified before any send",
+  );
+  assert.ok(
+    /error:\s*"bad_stage",\s*status:\s*row\.status,\s*expected:\s*"requested"/.test(code),
+    "the requested branch lost its bad_stage refusal",
+  );
+});
