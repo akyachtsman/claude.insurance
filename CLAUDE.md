@@ -1602,6 +1602,61 @@ contents** — the exact string, twice, on two projects — and the filter is
 verified against that exact string. Both ends are measured; the middle is the
 one CI already executed.
 
+### ⚠️ OPEN (owner decision) — STAFF CAN RESET EITHER NOTIFIED STAMP, so the claim gates retries but not intent
+
+Raised by an automated security review of the round-2 commit on PR #256, and it
+also corrects a piece of reasoning in this repo's own migration.
+
+**Measured 2026-10-13:** `authenticated` holds UPDATE on **every column** of
+`enhancement_requests`, both notified stamps included
+(`information_schema.column_privileges`), while `er_broker_update` and
+`er_underwriter_update` constrain only `status` in their `with check`. So:
+
+| who | can do what |
+|---|---|
+| underwriter | `set approved_notified_at = null` on an approved row (status unchanged, so the check passes) → re-POST → both approval emails resend |
+| broker or underwriter | the same to `requested_notified_at` on **any** client's row |
+| the client / owner | **nothing** — there is no owner UPDATE policy at all |
+
+So `notify-enhancement`'s claim-before-send gate is real against **retries,
+double submits and concurrent invocations** — one email, not two — and is **not**
+a gate against a deliberate staff account. The code says exactly that now; it
+previously said "the gate", which is the fourth comment-overclaims-code instance
+on this branch pair.
+
+**The fix is a privilege change, not more handler code**, and it is the owner's
+call because it narrows staff:
+```sql
+revoke update on public.enhancement_requests from authenticated;
+grant  update (status, approved_at) on public.enhancement_requests to authenticated;
+```
+plus a second SECURITY DEFINER function for the approved stamp, mirroring
+`stamp_requested_notified`. `(status, approved_at)` is the whole of what any
+legitimate writer touches — `js/` only ever writes `status` (via
+`advanceRequest`), the function writes `approved_at`, and the client needs no
+UPDATE whatsoever — so the narrowing breaks nothing that works today.
+
+⚠️ **This also corrects the migration's own reasoning.**
+`20261013120000_stamp_requested_notified.sql` said a column grant was "the
+obvious answer and is wrong here" and stopped there. Wrong *for that one
+column* — granting only `requested_notified_at` would leave it the only writable
+column for everyone — but a column grant is precisely the right tool for this
+half. The owner still needs the SECURITY DEFINER function regardless, because
+the owner has no UPDATE **policy**, which is a different question from which
+**columns** the role holds. Both halves are now stated in the file.
+
+**Not applied here** because it narrows staff privileges and cannot be verified
+end-to-end from a session: there is no HTTPS egress to the project, and the
+in-database substitute does not enforce RLS (see below). A privilege revocation
+that silently breaks the request lifecycle — which, per the Backend section, had
+never been exercised by anyone until 2026-10-09 — is worth measuring before
+shipping.
+
+**Context for weighing it:** staff are already able to rewrite `owner`,
+`subject` and `body` on any client's request, recorded above and accepted. An
+underwriter resending an approval email is a smaller harm than that, which is
+why this is a decision rather than a stop-ship.
+
 ### ⚠️ A GATE THAT RUNS AFTER THE SIDE EFFECT IS NOT A GATE (notify-enhancement, 2026-10-13)
 
 Codex #256 round 1, P1, and it is the same shape as the `help_queries`

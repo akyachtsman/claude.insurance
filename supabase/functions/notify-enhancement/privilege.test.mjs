@@ -157,49 +157,98 @@ test("the RPC the code calls exists in an applied migration, under that exact na
   }
 });
 
-test("the requested-event gate runs BEFORE any email is sent", () => {
-  // ⚠️ THE ORDERING IS THE GATE (Codex #256 round 1, P1). The first version sent
-  // both emails and only then called the RPC, so its stage/idempotency clauses
-  // ran after the side effect and prevented nothing: an owner could re-POST
-  // `requested` for their own row indefinitely, including after it advanced to
-  // approved or declined, where the client email still said the request had just
-  // been received. Unbounded broker email and unbounded provider spend.
-  //
-  // This asserts the shape that fixes it, inside the requested branch only: the
-  // claim is taken first, and the provider-key early return precedes the claim
-  // so a keyless deployment cannot stamp rows it never emailed.
-  const branch = code.slice(
-    code.indexOf('if (event === "requested")'),
-    code.indexOf("event === \"approved\"") >= 0 ? code.indexOf("event === \"approved\"") : code.length,
-  );
-  assert.ok(branch.length > 200, "could not isolate the requested branch — has it been restructured?");
+// ⚠️ BOTH BRANCHES, NOT JUST THE ONE THAT WAS REPORTED. The round-1 version of
+// this test checked the requested branch only, and the approved branch carried
+// the identical defect for a round (Codex #256 round 2, P1): it accepted
+// `approved` by design, never read `approved_notified_at`, and stamped only
+// after the sends, so an underwriter could resend indefinitely. A defect that
+// exists in two arms of one function is ONE defect, and a per-branch test is how
+// the second arm stays open. These are table-driven for that reason: a third
+// event would have to be added to the table or the isolation assertion fails.
+const BRANCHES = [
+  {
+    name: "requested",
+    from: 'if (event === "requested")',
+    to: 'event === "approved"',
+    claim: 'rpc("stamp_requested_notified"',
+    refusal: "already_notified",
+    // Literal fragments that must be PRESENT and positioned before the first
+    // send. ⚠️ Presence of the refusal STRING is not enough: a mutation to
+    // `if (false) {` left "already_notified" sitting in a dead block, still
+    // before the sends, and the position-only assertion passed. These pin the
+    // guard EXPRESSION, which a dead branch cannot satisfy.
+    requires: ["if (!stamped)"],
+  },
+  {
+    name: "approved",
+    from: 'if (row.status !== "underwriting" && row.status !== "approved")',
+    to: null, // to end of file
+    claim: '.is("approved_notified_at", null)',
+    refusal: "already_notified",
+    // `.select(` is load-bearing, not style: without it PostgREST returns no
+    // body, `claimed` is empty on success as well as on a lost race, and the
+    // two become indistinguishable. A mutation deleting it survived the first
+    // version of this test.
+    requires: ['.select(', "if (!claimed || claimed.length === 0)"],
+  },
+];
 
-  const claimAt = branch.indexOf('rpc("stamp_requested_notified"');
-  const firstSendAt = branch.indexOf("await sendEmail(");
-  const keyGuardAt = branch.search(/if\s*\(\s*!RESEND_API_KEY\s*\)/);
+for (const b of BRANCHES) {
+  test(`the ${b.name}-event gate runs BEFORE any email is sent`, () => {
+    const a = code.indexOf(b.from);
+    assert.ok(a >= 0, `could not find the ${b.name} branch — has it been restructured?`);
+    const z = b.to ? code.indexOf(b.to, a) : code.length;
+    const branch = code.slice(a, z > a ? z : code.length);
+    assert.ok(branch.length > 200, `could not isolate the ${b.name} branch`);
 
-  assert.ok(claimAt >= 0, "the requested branch no longer claims via stamp_requested_notified");
-  assert.ok(firstSendAt >= 0, "no sendEmail call in the requested branch — did the scan lose it?");
-  assert.ok(keyGuardAt >= 0, "the !RESEND_API_KEY early return is gone; a keyless deploy would stamp unsent rows");
+    const claimAt = branch.indexOf(b.claim);
+    const firstSendAt = branch.indexOf("await sendEmail(");
+    const keyGuardAt = branch.search(/if\s*\(\s*!RESEND_API_KEY\s*\)/);
 
-  assert.ok(
-    claimAt < firstSendAt,
-    "the stamp_requested_notified claim must be taken BEFORE any sendEmail — otherwise it gates nothing",
-  );
-  assert.ok(
-    keyGuardAt < claimAt,
-    "the !RESEND_API_KEY return must precede the claim, or a keyless deploy marks every request notified",
+    assert.ok(claimAt >= 0, `the ${b.name} branch no longer claims (${b.claim})`);
+    assert.ok(firstSendAt >= 0, `no sendEmail in the ${b.name} branch — did the scan lose it?`);
+    assert.ok(keyGuardAt >= 0, `the ${b.name} branch lost its !RESEND_API_KEY early return`);
+
+    assert.ok(
+      claimAt < firstSendAt,
+      `${b.name}: the claim must be taken BEFORE any sendEmail — otherwise it gates nothing`,
+    );
+    assert.ok(
+      keyGuardAt < claimAt,
+      `${b.name}: the !RESEND_API_KEY return must precede the claim, or a keyless deploy marks rows it never emailed`,
+    );
+
+    // A refused claim must answer without sending. Asserted inside the branch,
+    // so one branch cannot satisfy it on the other's behalf.
+    const refusalAt = branch.indexOf(b.refusal);
+    assert.ok(refusalAt >= 0, `${b.name}: no ${b.refusal} refusal`);
+    assert.ok(refusalAt < firstSendAt, `${b.name}: the refusal must precede the first send`);
+
+    // And the guard EXPRESSION itself, because the refusal string survives in a
+    // dead block. Each must appear before the first send.
+    for (const frag of b.requires) {
+      const at = branch.indexOf(frag);
+      assert.ok(at >= 0, `${b.name}: missing required guard \`${frag}\``);
+      assert.ok(at < firstSendAt, `${b.name}: \`${frag}\` must appear before the first send`);
+    }
+  });
+}
+
+test("every event the handler accepts is covered by a branch in the table above", () => {
+  // The isolation assertion. Without it, adding a third event would leave it
+  // ungated and every test here would still pass.
+  const accepted = [...code.matchAll(/event\s*!==\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.ok(accepted.length > 0, "could not read the accepted event names from the guard clause");
+  const covered = new Set(BRANCHES.map((b) => b.name));
+  const missing = accepted.filter((e) => !covered.has(e));
+  assert.deepEqual(missing, [], `these accepted events have no gate assertion: ${missing.join(", ")}`);
+  assert.equal(
+    accepted.length, BRANCHES.length,
+    `the handler accepts ${accepted.length} events but this table covers ${BRANCHES.length}`,
   );
 });
 
-test("a refused requested-event claim is answered without sending", () => {
-  // The claim returning null means "someone else holds it, or the row moved".
-  // The only correct response is a refusal with no email, so assert the branch
-  // returns 409 on a falsy claim rather than carrying on.
-  assert.ok(
-    /if\s*\(\s*!stamped\s*\)\s*\{[\s\S]{0,400}?already_notified[\s\S]{0,200}?409/.test(code),
-    "a null claim must return 409 already_notified before any send",
-  );
+test("the requested branch keeps its bad_stage refusal", () => {
   assert.ok(
     /error:\s*"bad_stage",\s*status:\s*row\.status,\s*expected:\s*"requested"/.test(code),
     "the requested branch lost its bad_stage refusal",

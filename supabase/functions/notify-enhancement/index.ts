@@ -146,7 +146,7 @@ Deno.serve(async (req: Request) => {
   // used to probe which request ids exist.
   const { data: row, error: rowErr } = await caller
     .from("enhancement_requests")
-    .select("id, owner, subject, message, context, status, requested_notified_at")
+    .select("id, owner, subject, message, context, status, requested_notified_at, approved_notified_at")
     .eq("id", requestId)
     .maybeSingle();
   if (rowErr || !row) return json({ error: "not_found" }, 404);
@@ -304,6 +304,93 @@ Deno.serve(async (req: Request) => {
     return json({ error: "bad_stage", status: row.status, expected: "underwriting|approved" }, 409);
   }
 
+  // ⚠️ THE SAME CLAIM-BEFORE-SEND GATE AS THE REQUESTED BRANCH, AND IT WAS
+  // MISSING HERE FOR A ROUND (Codex #256 round 2, P1).
+  //
+  // Round 1 fixed the requested path and this branch kept the identical defect:
+  // it accepts `approved` by design, never read `approved_notified_at`, and
+  // overwrote that timestamp only AFTER the sends. So with a provider key
+  // configured, any authenticated underwriter could POST `event: "approved"` for
+  // an already-approved request and resend both emails indefinitely, and
+  // ordinary retries or concurrent invocations duplicated them too.
+  // Worth recording why it survived: the round-1 fix was written as a fix to
+  // "the gate", and the review request that followed asked whether anything
+  // could reach `sendEmail` in the REQUESTED branch without claiming. Both
+  // framings were one branch wide. A defect that exists in two arms of the same
+  // function is one defect.
+  //
+  // 1. No provider key -> return before claiming, for the same reason as the
+  //    requested branch: claiming what cannot be sent makes the column lie.
+  if (!RESEND_API_KEY) {
+    return json({ ok: true, event, broker: { sent: false, reason: "no_provider_key" },
+                  client: { sent: false, reason: "no_provider_key" } });
+  }
+
+  // 2. Pre-read check, for a useful error only. It races; the claim is the gate.
+  if (row.approved_notified_at) {
+    return json({ error: "already_notified", at: row.approved_notified_at }, 409);
+  }
+
+  // 3. The status transition, now guarded on the status we actually read. Two
+  //    concurrent invocations both saw 'underwriting' before; both wrote, and the
+  //    second clobbered `approved_at` with a later timestamp. `.eq("status",
+  //    "underwriting")` makes it a no-op for the loser.
+  if (row.status === "underwriting") {
+    const { error } = await caller.from("enhancement_requests")
+      .update({ status: "approved", approved_at: new Date().toISOString() })
+      .eq("id", requestId)
+      .eq("status", "underwriting");
+    if (error) {
+      console.error(JSON.stringify({ where: "approve_update", code: error.code, message: error.message }));
+      return json({ error: "update_failed" }, 500);
+    }
+  }
+
+  // 4. THE CLAIM — atomic, and the gate AGAINST RETRIES AND RACES ONLY.
+  //    ⚠️ IT IS NOT A GATE AGAINST A DELIBERATE UNDERWRITER, and saying so here
+  //    rather than letting the word "gate" carry more than it earns. Measured
+  //    2026-10-13: `authenticated` holds UPDATE on EVERY column of this table,
+  //    including both notified stamps, and `er_underwriter_update`'s `with
+  //    check` constrains only `status`. So an underwriter can
+  //    `update enhancement_requests set approved_notified_at = null` on an
+  //    approved row — status unchanged, so the check passes — and then re-POST,
+  //    resending both emails. Staff can do the same to `requested_notified_at`
+  //    on any client's row, so the RPC-backed claim on the other branch is
+  //    resettable by staff too (not by the owner, who has no UPDATE policy).
+  //    Closing that needs a privilege change, not more handler code: revoke
+  //    table-wide UPDATE from `authenticated` and grant `update (status,
+  //    approved_at)` — the whole of what staff legitimately writes — then stamp
+  //    both notified columns through SECURITY DEFINER functions. Recorded as an
+  //    owner decision in CLAUDE.md rather than smuggled in here, because it
+  //    narrows staff privileges and cannot be verified end-to-end from a session
+  //    (no egress; the in-database harness does not enforce RLS).
+  //    What this claim DOES buy, and it is worth having: a retry, a double
+  //    submit and two concurrent invocations each produce one email, not two.
+  //    ⚠️ NO RPC IS NEEDED ON THIS PATH, and
+  //    the asymmetry with the requested branch is the point: the OWNER has no
+  //    UPDATE policy on this table, which is why the requested stamp needs a
+  //    SECURITY DEFINER function; the UNDERWRITER has `er_underwriter_update`,
+  //    whose `with check` admits a row at 'approved', so a plain conditional
+  //    update is available and is the narrower tool. `.is(..., null)` makes it a
+  //    claim: evaluated under a row lock, so a second concurrent invocation
+  //    blocks, re-reads the committed row and matches nothing. `.select("id")`
+  //    is what lets us SEE that it matched nothing — without it PostgREST
+  //    returns no body and a lost race is indistinguishable from a win.
+  const { data: claimed, error: claimErr } = await caller.from("enhancement_requests")
+    .update({ approved_notified_at: new Date().toISOString() })
+    .eq("id", requestId)
+    .is("approved_notified_at", null)
+    .select("id");
+  if (claimErr) {
+    console.error(JSON.stringify({ where: "stamp_approved", code: claimErr.code, message: claimErr.message }));
+    return json({ error: "claim_failed" }, 500);
+  }
+  if (!claimed || claimed.length === 0) {
+    // Lost the race, or it was already notified between the read and here.
+    // Nothing sent, which is the correct outcome rather than a failure.
+    return json({ error: "already_notified" }, 409);
+  }
+
   // The client's email — the one place the service key is still needed, and not
   // a table read. See the header comment.
   const { data: ownerData } = await authAdmin.auth.admin.getUserById(row.owner);
@@ -311,19 +398,6 @@ Deno.serve(async (req: Request) => {
   const clientName =
     (ownerData?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || clientEmail || "your client";
 
-  // Only write when the transition has not already happened, so the UI's
-  // approved_at is not clobbered with a later timestamp on the normal path.
-  // Written as the caller: er_underwriter_update's `with check` admits
-  // 'approved', so this succeeds for an underwriter and for nobody else.
-  if (row.status === "underwriting") {
-    const { error } = await caller.from("enhancement_requests")
-      .update({ status: "approved", approved_at: new Date().toISOString() })
-      .eq("id", requestId);
-    if (error) {
-      console.error(JSON.stringify({ where: "approve_update", code: error.code, message: error.message }));
-      return json({ error: "update_failed" }, 500);
-    }
-  }
   const brokerMail = await sendEmail(
     BROKER_EMAIL,
     `Enhancement approved: ${row.subject}`,
@@ -341,13 +415,13 @@ Deno.serve(async (req: Request) => {
       `Your broker will follow up with the updated policy details.`,
     ]),
   );
-  // Also as the caller. The row's status is 'approved' by now, which the
-  // underwriter's `with check` admits, so writing only this timestamp passes.
-  if (brokerMail.sent || clientMail.sent) {
-    const { error } = await caller.from("enhancement_requests")
-      .update({ approved_notified_at: new Date().toISOString() })
-      .eq("id", requestId);
-    if (error) console.error(JSON.stringify({ where: "stamp_approved", code: error.code, message: error.message }));
+  // Same residual as the requested branch, and the same reasoning: the claim is
+  // taken before the send, so a provider configured-but-erroring leaves the row
+  // marked notified with nothing delivered. Logged so it is findable.
+  if (!brokerMail.sent && !clientMail.sent) {
+    console.error(JSON.stringify({
+      where: "approved_send", broker: brokerMail.reason, client: clientMail.reason,
+    }));
   }
   return json({ ok: true, event, broker: brokerMail, client: clientMail });
 });

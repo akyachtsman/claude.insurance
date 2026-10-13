@@ -11,15 +11,29 @@
 -- broker/underwriter UPDATE pair. So the owner cannot write
 -- `requested_notified_at` on their own row, and the stamp had nowhere to go.
 --
--- ⚠️ WHY NOT A COLUMN GRANT, which is the obvious answer and is wrong here.
--- Column privileges are per ROLE. Client, broker and underwriter are all the
--- same Postgres role — `authenticated` — distinguished only by RLS predicates.
--- Measured 2026-10-13: `has_table_privilege('authenticated',
--- 'public.enhancement_requests', 'UPDATE')` is TRUE and the gate is RLS alone.
--- So `grant update (requested_notified_at)` cannot mean "the owner may write
--- only this column": narrowing the role's columns would narrow them for the
--- broker and underwriter too, breaking the status transitions their policies
--- exist to allow.
+-- ⚠️ WHY NOT A COLUMN GRANT **FOR THIS COLUMN**. Column privileges are per
+-- ROLE. Client, broker and underwriter are all the same Postgres role —
+-- `authenticated` — distinguished only by RLS predicates. Measured 2026-10-13:
+-- `authenticated` holds UPDATE on EVERY column of this table. So
+-- `grant update (requested_notified_at)` cannot mean "the owner may write only
+-- this column": it would be the only column ANY authenticated caller could
+-- write, breaking the status transitions the broker and underwriter policies
+-- exist to allow. The owner still needs the SECURITY DEFINER function below,
+-- because the owner has no UPDATE POLICY at all — a separate question from
+-- which columns the role holds.
+--
+-- ⚠️ BUT A COLUMN GRANT IS THE RIGHT TOOL FOR A DIFFERENT, STILL-OPEN HALF, and
+-- an earlier version of this comment invited the wrong conclusion by stopping
+-- at "wrong here". Because `authenticated` holds UPDATE on every column while
+-- the staff policies constrain only `status`, a broker or underwriter can set
+-- EITHER notified stamp back to null on ANY client's row and make the function
+-- re-send. The correct narrowing is not this column but the union of what
+-- legitimate writers need — `grant update (status, approved_at)` — since the
+-- client needs no UPDATE whatsoever and staff change only those two. Then both
+-- notified columns go through SECURITY DEFINER functions and neither is
+-- resettable. Raised by an automated security review of the applying commit;
+-- recorded as an owner decision in CLAUDE.md rather than applied here, because
+-- it narrows staff privileges and cannot be verified end-to-end from a session.
 --
 -- ⚠️ WHY NOT AN OWNER UPDATE POLICY. RLS evaluates whole rows, and
 -- `authenticated` holds table-wide UPDATE, so any owner UPDATE policy also lets
