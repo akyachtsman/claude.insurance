@@ -76,8 +76,10 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   `pages-retry.yml`. `.github/actions/` holds the shared composite actions
   (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
   `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
-  and ACTIVE, with its source in `supabase/functions/`. The `notify-lead` /
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013120000_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+  and ACTIVE — ⚠️ **but was NON-FUNCTIONAL from the day it shipped until the
+  2026-10-13 rewrite, and "ACTIVE" is what hid that.** See the `service_role`
+  constraint below for the measurement and the fix. The `notify-lead` /
   `notify-renewal` functions are still to come.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
     endpoint. **Deploy with the DEFAULT — `verify_jwt` ON.**
@@ -614,15 +616,45 @@ profile**, never by listing a directory.
   is not "unverified" — it is **non-functional**, and this file lists it as
   "deployed and ACTIVE", which reads as working. No enhancement-request email has
   ever been sent.
-  **The remedy is one statement**, and it is deliberately NOT applied here:
-  `grant select, update on public.enhancement_requests to service_role;`
-  Widening `service_role`'s reach over a client table is a security decision, not
-  a bug fix — and feature 003 deliberately went the other way, reading client
-  records through the **caller's own** client so RLS still scopes them. The same
-  question applies here and should be answered on purpose: whether this function
-  needs cross-client reach at all, or should take the caller's JWT like
-  `help-ask` does. Outside feature 003's scope; recorded so it is a decision
-  rather than a surprise.
+  **✅ FIXED 2026-10-13 — and NOT with the one-statement grant.** The decision
+  this paragraph asked to be made on purpose was put to the owner as two options
+  and they chose the narrow one. For the record, the rejected remedy was
+  `grant select, update on public.enhancement_requests to service_role;` —
+  widening a service key's reach over a client table, which is a security
+  decision rather than a bug fix.
+  **What shipped instead:** every table access in `notify-enhancement` now goes
+  through the **caller's own client** (anon key + their JWT), so RLS scopes it —
+  the same shape feature 003 chose for `help-ask`, and stronger than the grant
+  because RLS cannot be removed by editing a `.eq()` out of the handler. The
+  underwriter's role is read from their **own** `profiles` row, so a caller can
+  only assert their own role; and on the `requested` path the client's email now
+  comes from their own JWT, removing a cross-user Auth Admin call outright.
+  **One service-key use remains and it is deliberately not a table:**
+  `auth.admin.getUserById`, to resolve the client's address on the `approved`
+  path, where the caller is the underwriter and `profiles` has no email column
+  (checked: `id, full_name, role, created_at, reminder_email,
+  reminder_schedule`). That is the **GoTrue admin API** — authorised by the
+  service-role JWT and unaffected by Postgres table grants, which is exactly why
+  it still works where the table reads did not. `privilege.test.mjs` pins it to
+  that one call and fails on any `authAdmin.from(`.
+  ⚠️ **The service-role CALLER path was removed too.** The function used to
+  accept the service-role key in the `Authorization` header as an alternative to
+  a signed-in underwriter. Nothing used it — the only callers are
+  `js/keep/views/policies-view.js` (`requested`, as the client) and
+  `approveEnhancement()` in `js/supabase.js` (`approved`, as the underwriter),
+  both browser-side with a user JWT — and it could never have worked for the
+  privilege reason above. That retired the stated reason for `verify_jwt =
+  false`, so `supabase/config.toml` no longer pins it. ⚠️ **It is still `false`
+  on the LIVE deployment until the function is redeployed** — only the CLI reads
+  that file, and this project deploys through the MCP, which takes `verify_jwt`
+  as an explicit parameter.
+  ⚠️ **STILL NOT PROVEN TO SEND EMAIL, and the rework does not change that.**
+  Whether `RESEND_API_KEY`, `BROKER_EMAIL` and `FROM_EMAIL` are set is unknown —
+  there is no MCP tool to list Edge Function secrets and HTTPS egress to the
+  project is blocked from a session (see below), so it could not be checked.
+  With the key unset `sendEmail` returns `{sent:false,
+  reason:"no_provider_key"}` and the function answers 200, so **a green response
+  from this endpoint is not evidence that mail left the building.**
 - **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
   (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
   `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.
@@ -1569,6 +1601,64 @@ cannot reach. What closes the loop is that **CI handed over the actual array
 contents** — the exact string, twice, on two projects — and the filter is
 verified against that exact string. Both ends are measured; the middle is the
 one CI already executed.
+
+### ⚠️ TWO WAYS A MUTATION TEST LIES, both hit on 2026-10-13
+
+Found while gating the `notify-enhancement` rewrite. Neither is about the code
+under test — both are about the *harness* — and each one produced a confident
+green that meant nothing. This file already records that a green DOM assertion
+does not prove the guard you wrote is holding the line; these are the same
+lesson one level down, in the tool used to check it.
+
+**1. `git checkout --` CANNOT REVERT A BASELINE YOU HAVE NOT COMMITTED.** The
+mutation loop was: apply a mutation with `sed`, run the test, `git checkout --
+<file>` to restore. But the rewritten `index.ts` was still **uncommitted**, so
+every "restore" reverted it to the ORIGINAL service-role version — not to the
+new baseline. Mutations 2 through 7 were therefore all run against the old file,
+and six of seven reported "all tests fail", which reads like a thorough catch and
+is actually the harness testing the wrong file. Untracked files are worse: `git
+checkout --` errors out and the mutation **stays applied**, so the next mutation
+stacks on top of it. Two mutations to the new migration were silently left in
+place and had to be reversed by hand.
+**The rule: commit the baseline BEFORE mutating, and verify the working tree is
+clean between mutations.** A baseline you cannot restore is not a baseline.
+
+**2. AN ASSERTION OVER CONCATENATED FILES CANNOT FAIL.** The gate checked that
+the SECURITY DEFINER function still carries `owner = auth.uid()` — its entire
+authorisation — by testing that regex against **every migration joined
+together**. A dozen unrelated RLS policies in this repo contain that exact
+string, so deleting the gate from the function under test **passed**. It was
+caught only by running the mutation; nothing about the green run looked wrong.
+Now scoped to the function's own body, matched from `create … function
+public.<name>(` to its closing `$$;` — which also made room for two guards the
+unscoped version could never have expressed (SECURITY INVOKER, unpinned
+`search_path`). 9/9 mutations caught after the fix.
+**The rule: scope a source assertion to the smallest unit that owns the
+property.** Same class as the `.k-h1` visibility assertion and the inverted
+`contract.test.mjs` finding already recorded above.
+
+### ⚠️ HTTPS EGRESS TO THE SUPABASE PROJECT IS BLOCKED FROM A SESSION (measured 2026-10-13)
+
+`curl https://bdsegmjcgfmgzuxwiplj.supabase.co/...` fails with
+`connect_rejected` — "the egress proxy denied the CONNECT (organization policy)
+or could not reach the destination". So from a session there is **no way to run a
+real client session over PostgREST or `/auth/v1/token`**, and no way to invoke a
+deployed Edge Function. `akyachtsman.github.io` is reachable, so this is
+host-specific, not general.
+
+**What that costs, and the workaround's exact limit.** The in-database substitute
+is `set local role authenticated` plus `set local "request.jwt.claims"`, and it
+is only partly faithful: ⚠️ **it does NOT enforce RLS.** Checked rather than
+assumed — acting as `authenticated` with a FOREIGN uid, `select count(*) from
+public.enhancement_requests` returned **1** where `er_select_own` should give 0;
+`session_user` is `postgres` and the MCP evidently executes in a privileged
+context. So that harness can measure anything not depending on RLS
+(`auth.uid()` resolution, a SECURITY DEFINER function's own WHERE clause, grants,
+privileges) and **nothing that does**.
+This is the same false-pass trap this file already records for service-role
+probes, arrived at from a different direction — and it means the earlier
+"verified as a real client session" records in this file were made when egress
+was available, not with this substitute. Re-measure before assuming either state.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
