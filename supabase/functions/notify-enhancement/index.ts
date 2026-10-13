@@ -238,9 +238,17 @@
 //   -- A filter on the caller's privileges therefore cannot be sound here. The
 //   -- privileges are reported as COLUMNS for the operator to read, and the row
 //   -- set is every non-internal definer trigger in `public` — which is small.
-//   -- EXPECT: the write-once trigger on enhancement_requests, and nothing that
-//   -- touches enhancement_notifications. Each row is a definer body a client
-//   -- may be able to cause to run without holding EXECUTE on it.
+//   -- EXPECT TODAY: **ZERO ROWS**. ⚠️ This said "the write-once trigger on
+//   -- enhancement_requests", which CANNOT appear: `enforce_notified_write_once()`
+//   -- is declared WITHOUT `security definer` (20261013013743), so it is an
+//   -- INVOKER trigger and this query filters on `p.prosecdef`. An operator
+//   -- reading the old line would have taken a correct empty result for a FAILED
+//   -- APPLY — a checklist that cries wolf is one that stops being run, which
+//   -- makes a wrong EXPECT worse than a missing one. Codex round 27.
+//   -- The filter is right and stays: an INVOKER trigger runs with the CALLER's
+//   -- privileges, so it is not an escalation path and does not belong here.
+//   -- Each row that does appear is a definer body a client may be able to cause
+//   -- to run without holding EXECUTE on it. A FIRST row appearing is the signal.
 //   -- Then, as a NARROWER aid and not a proof, the substring search:
 //   select p.proname, p.prosecdef, p.proacl
 //     from pg_proc p join pg_namespace n on n.oid = p.pronamespace

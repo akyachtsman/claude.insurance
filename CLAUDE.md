@@ -2394,6 +2394,40 @@ mis-graded because the script replaced the **first** occurrence in the file,
 which for both of these words lay outside the list under test. Mutating "the
 word" is not the same as mutating "the word where it carries the claim".
 
+### ⚠️ ROUND 27 — A WRONG `EXPECT` IS WORSE THAN A MISSING ONE
+
+One P2, and it is a factual error in the deploy checklist rather than a bypass.
+The (d2) trigger query filters on `p.prosecdef`, and
+`enforce_notified_write_once()` is declared **without** `security definer`
+(`20261013013743`) — so it is an INVOKER trigger and the query correctly returns
+**zero rows**. The header said to expect the write-once trigger in that result.
+An operator following it would have read a correct empty result as a **failed
+apply**.
+
+**Why that is worse than having no EXPECT at all:** a checklist that cries wolf
+on its first run is a checklist that stops being run, and the whole reason this
+header exists is that the source scanner could not be trusted. A false alarm in
+the replacement is a direct attack on the replacement's usefulness.
+
+**The filter is right and stays.** An INVOKER trigger runs with the CALLER's
+privileges, so it is not an escalation path and does not belong in a query about
+definer bodies. The *prose* was wrong, not the SQL — consistent with rounds
+23–26, where the claims kept being the defect.
+
+**And the EXPECT is now tied to the source**, so it cannot drift again: a test
+counts the SECURITY DEFINER trigger functions this repo declares and requires
+the header to say "zero rows" while that count is zero — or, if one is ever
+added, to **name it**, so an operator can tell an expected row from a new one.
+Mutation-tested 3/3: reverting the EXPECT fails; adding a definer trigger
+function to a migration fails until the header names it; adding an **invoker**
+one correctly stays clean.
+
+⚠️ Recorded also because of what it says about the last five rounds: 23 through
+27 produced **ten findings, and nine were about claims rather than code.** The
+function, the migration and the suite's behaviour have been unchanged since
+`da86e83`; what kept being wrong was what the documentation asserted about them.
+That is worth knowing the next time a section of this file reads as confident.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it

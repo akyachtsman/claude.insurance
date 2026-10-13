@@ -2242,3 +2242,50 @@ test("the deploy header's catalog queries name only real relations", () => {
     );
   }
 });
+
+test("the deploy header's EXPECTed trigger rows match what the migrations declare", () => {
+  // ⚠️ A WRONG `EXPECT` IS WORSE THAN A MISSING ONE, and this one was wrong:
+  // the header said to expect the write-once trigger in (d2)'s result, but
+  // `enforce_notified_write_once()` is declared WITHOUT `security definer`,
+  // and (d2) filters on `prosecdef`. The correct result is zero rows, which an
+  // operator would have read as a failed apply. A checklist that cries wolf
+  // stops being run. Codex round 27.
+  //
+  // So the EXPECT is tied to the source: count the SECURITY DEFINER trigger
+  // functions this repo declares, and require the header to say zero rows while
+  // that count is zero. It is a source-level check with the usual caveat — see
+  // the retraction section in CLAUDE.md — but it is exact for the one thing it
+  // claims: what THIS REPO declares, versus what the header says to expect.
+  const definerTriggerFns = new Set();
+  for (const m of orderedMigrations()) {
+    for (const st of sqlStatements(stripSqlComments(m.sql))) {
+      const hit = /create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)\s*\(\s*\)[\s\S]*?returns\s+trigger/i.exec(st.text);
+      if (!hit) continue;
+      if (/security\s+definer/i.test(st.text)) definerTriggerFns.add(hit[1].toLowerCase());
+      else definerTriggerFns.delete(hit[1].toLowerCase());   // a later replace can drop it
+    }
+  }
+
+  const src = readFileSync(join(here, "index.ts"), "utf8");
+  const from = src.indexOf("BEFORE DEPLOYING THIS FUNCTION");
+  const lines = src.slice(from).split("\n");
+  const end = lines.findIndex((l, i) => i > 0 && !/^\s*\/\//.test(l) && l.trim() !== "");
+  const header = lines.slice(0, end === -1 ? lines.length : end).join("\n");
+  const d2 = header.slice(header.indexOf("pg_trigger"));
+  const expect = d2.slice(0, d2.search(/EXPECT/i) + 700);
+
+  if (definerTriggerFns.size === 0) {
+    assert.ok(
+      /EXPECT\s+TODAY:\s*\*\*ZERO ROWS\*\*|EXPECT[^\n]*zero rows/i.test(expect),
+      "this repo declares NO security-definer trigger function, so the (d2) query returns zero rows — the header must say so. " +
+      "Naming a row that cannot appear teaches an operator to read a correct result as a failed apply",
+    );
+  } else {
+    for (const fn of definerTriggerFns) {
+      assert.ok(
+        expect.toLowerCase().includes(fn),
+        `public.${fn} IS a security-definer trigger function, so it WILL appear in (d2)'s result — the header's EXPECT must name it, or the operator cannot tell an expected row from a new one`,
+      );
+    }
+  }
+});
