@@ -539,7 +539,18 @@ function privilegeStatements(sql, table) {
   for (const m of sql.matchAll(re)) {
     const [, verb, privList, onTable, , roles] = m;
     if (onTable.toLowerCase() !== table.toLowerCase()) continue;
-    if (!/\bauthenticated\b/i.test(roles)) continue;
+    // ⚠️ TWO CHANNELS, NOT ONE. `authenticated` holds a privilege if it was
+    // granted DIRECTLY to it **or** granted to PUBLIC, which every role
+    // inherits — and a revoke only closes the channel it names, so
+    // `revoke ... from authenticated` leaves a PUBLIC grant standing and vice
+    // versa. The first version of this filter required `authenticated` in the
+    // grantee text, so `grant update on public.profiles to public` was ignored
+    // entirely and the replay stayed green while any client could again set
+    // their own role to 'underwriter'. Codex #256 round 12.
+    const channels = new Set();
+    if (/\bauthenticated\b/i.test(roles)) channels.add("authenticated");
+    if (/\bpublic\b/i.test(roles)) channels.add("public");
+    if (channels.size === 0) continue;
     // Split the privilege list on commas at paren depth 0, so a column list
     // cannot be mistaken for a privilege separator.
     const items = [];
@@ -559,7 +570,7 @@ function privilegeStatements(sql, table) {
         .replace(/^all privileges$/, "all");
       privs.set(name, { tableWide: !item.includes("(") });
     }
-    out.push({ verb: verb.toLowerCase(), privs });
+    out.push({ verb: verb.toLowerCase(), privs, channels });
   }
   return out;
 }
@@ -628,28 +639,36 @@ test("every table these RPCs trust has its client write surface narrowed IN SOUR
       // clients able to self-assign `underwriter` with this test still green.
       // Codex #256 round 11; it is the mirror of the grant side, where a column
       // list makes a statement harmless, and here it makes one ineffective.
-      let openedBy = null;
+      // One replay PER CHANNEL, because a revoke closes only the channel it
+      // names. `authenticated` ends up holding the privilege if EITHER channel
+      // is still open.
+      const openedBy = { authenticated: null, public: null };
       let everRevoked = false;
       for (const m of migs) {
         for (const stmt of privilegeStatements(m.sql, table)) {
           const held = carries(stmt, priv);
           if (!held) continue;
-          if (stmt.verb === "revoke") {
-            if (!held.tableWide) continue;          // column-scoped: no effect on the table privilege
-            everRevoked = true;
-            openedBy = null;
-          } else if (held.tableWide) openedBy = m.file;
+          for (const ch of stmt.channels) {
+            if (stmt.verb === "revoke") {
+              if (!held.tableWide) continue;      // column-scoped: no effect on the table privilege
+              everRevoked = true;
+              openedBy[ch] = null;
+            } else if (held.tableWide) openedBy[ch] = m.file;
+          }
         }
       }
       assert.ok(
         everRevoked,
-        `no migration revokes table-wide ${priv.toUpperCase()} on public.${table} from authenticated — ` +
+        `no migration revokes table-wide ${priv.toUpperCase()} on public.${table} — ` +
         `the stamp functions trust that table, so a client holding it writes the columns directly`,
       );
-      assert.equal(
-        openedBy, null,
-        `${openedBy} grants table-wide ${priv.toUpperCase()} on public.${table} back to authenticated ` +
-        `after the revoke, undoing the narrowing the stamp functions depend on`,
+      const open = Object.entries(openedBy).filter(([, f]) => f);
+      assert.deepEqual(
+        open, [],
+        open.map(([ch, f]) =>
+          `${f} grants table-wide ${priv.toUpperCase()} on public.${table} to ${ch.toUpperCase()}` +
+          (ch === "public" ? " (which every role inherits, authenticated included)" : "") +
+          " after the revoke, undoing the narrowing the stamp functions depend on").join("; "),
       );
     }
   }
@@ -707,6 +726,22 @@ test("EVERY recipient is resolved and validated before either claim", () => {
       `or a missing address burns a claim that can never be retaken`,
     );
 
+    // ⚠️ AND THE SEND-FAILURE LOG, PER BRANCH. This assertion used to sit
+    // OUTSIDE this loop and search the whole file for one `||`, so it passed
+    // while the requested branch still had `&&` — the approved branch's fix
+    // satisfied it. Codex #256 round 12, and the fourth time in this pair that
+    // an assertion over a wider text than the property belongs to could not
+    // fail. "Branch-generic" has to mean asserted INSIDE each branch's slice.
+    assert.ok(
+      /if \(!brokerMail\.sent \|\| !clientMail\.sent\)/.test(branch),
+      `the ${g.name} branch logs only when BOTH sends fail, so a half-delivered ` +
+      `notification on an unrepeatable claim is invisible`,
+    );
+    assert.ok(
+      !/if \(!brokerMail\.sent && !clientMail\.sent\)/.test(branch),
+      `the ${g.name} branch still has the && form of the send-failure log`,
+    );
+
     // BOTH recipients, in the one call. A gate that checks the client and not
     // the broker is the round-11 finding.
     const call = branch.slice(callAt, branch.indexOf("}", callAt) + 1);
@@ -731,11 +766,4 @@ test("EVERY recipient is resolved and validated before either claim", () => {
     "the approved branch no longer checks the getUserById error, so a transient failure reads as 'no email'",
   );
 
-  // And the send-failure log must fire on EITHER failure. `!broker && !client`
-  // let a successful broker send mask a failed client send, on a claim that
-  // cannot be retaken.
-  assert.ok(
-    /if \(!brokerMail\.sent \|\| !clientMail\.sent\)/.test(code),
-    "a branch logs only when BOTH sends fail, so a half-delivered notification is invisible",
-  );
 });

@@ -372,7 +372,13 @@ Deno.serve(async (req: Request) => {
     // reopens exactly the unbounded re-send this gate closes. It is logged
     // loudly so the condition is findable, and a real retry mechanism is the
     // product answer rather than a weaker gate.
-    if (!brokerMail.sent && !clientMail.sent) {
+    // ⚠️ EITHER failure logs, not both — and this branch kept the `&&` for a
+    // whole round after the approved branch was fixed, because the test that
+    // was supposed to be "branch-generic" searched the WHOLE FILE for one `||`
+    // and found the other branch's. Codex #256 round 12. Fourth time in this
+    // pair that an assertion over a wider text than the property belongs to
+    // could not fail.
+    if (!brokerMail.sent || !clientMail.sent) {
       console.error(JSON.stringify({
         where: "requested_send", claimed: stamped,
         broker: brokerMail.reason, client: clientMail.reason,
