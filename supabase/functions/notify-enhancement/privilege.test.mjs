@@ -238,6 +238,58 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
     );
   }
 
+  // ⚠️ AND THE FENCE IS THE NET EFFECT OF EVERY MIGRATION, NOT OF THE ONE THAT
+  // CREATES THE TABLE. Everything above is scoped to `hit.sql`, which is correct
+  // for the CREATE statement's own shape and WRONG for the grants: a later
+  // migration could grant this table to `authenticated` and every assertion
+  // above would still pass, because none of them looks outside the creating
+  // file. Codex raised exactly this against the previous version of this gate
+  // (it used `.find()` over unsorted migrations, so a later CREATE OR REPLACE of
+  // a stamp function would have been ignored); that gate is gone with the RPCs,
+  // but the class transferred straight into its replacement — which is the
+  // interesting part, and the same "migration ORDER decides" lesson round 12
+  // taught on the other replay. Applied there, not here, until now.
+  //
+  // So: replay every migration in order and assert the END STATE.
+  // Proposed files sort last because that is what they are — not yet applied,
+  // so they land after everything in migrations/ whenever they do.
+  const ordered = [
+    ...applied.slice().sort((a, b) => a.file.localeCompare(b.file)),
+    ...proposed.slice().sort((a, b) => a.file.localeCompare(b.file)),
+  ];
+  const endState = {};   // channel -> priv -> file that last opened it
+  for (const m of ordered) {
+    for (const stmt of privilegeStatements(m.sql.replace(/^\s*--.*$/gm, ""), CLAIM_TABLE)) {
+      for (const ch of stmt.channels) {
+        endState[ch] ??= {};
+        for (const priv of ["select", "insert", "update", "delete"]) {
+          if (!carries(stmt, priv)) continue;
+          endState[ch][priv] = stmt.verb === "revoke" ? null : m.file;
+        }
+      }
+    }
+  }
+  const clientHolds = [];
+  for (const ch of ["authenticated", "public"]) {
+    for (const [priv, file] of Object.entries(endState[ch] ?? {})) {
+      if (file) clientHolds.push(`${ch} holds ${priv.toUpperCase()} (granted by ${file})`);
+    }
+  }
+  assert.deepEqual(
+    clientHolds, [],
+    `the client must end up holding NOTHING on public.${CLAIM_TABLE} — that is the entire fix, and it is what removes the root all four bypasses grew from: ${clientHolds.join("; ")}`,
+  );
+  for (const priv of ["select", "insert"]) {
+    assert.ok(
+      endState.service_role?.[priv],
+      `service_role must end up holding ${priv.toUpperCase()} on public.${CLAIM_TABLE}, or every claim returns 42501 and the function silently sends nothing`,
+    );
+  }
+  assert.equal(
+    endState.service_role?.delete ?? null, null,
+    `nothing may end up holding DELETE on public.${CLAIM_TABLE}: an un-claim reopens the unbounded re-send`,
+  );
+
   if (hit.file.startsWith("proposed/")) {
     const base = hit.file.slice("proposed/".length);
     assert.ok(
@@ -591,6 +643,7 @@ function privilegeStatements(sql, table) {
     const channels = new Set();
     if (/\bauthenticated\b/i.test(roles)) channels.add("authenticated");
     if (/\bpublic\b/i.test(roles)) channels.add("public");
+    if (/\bservice_role\b/i.test(roles)) channels.add("service_role");
     if (channels.size === 0) continue;
     // Split the privilege list on commas at paren depth 0, so a column list
     // cannot be mistaken for a privilege separator.
@@ -692,7 +745,13 @@ test("every table this handler touches has its client write surface narrowed IN 
         for (const stmt of privilegeStatements(m.sql, table)) {
           const held = carries(stmt, priv);
           if (!held) continue;
-          for (const ch of stmt.channels) {
+          // ⚠️ CLIENT CHANNELS ONLY. `service_role` is a channel the parser now
+          // reports (the claim-table gate needs it), and it is irrelevant here:
+          // this test is about what the CLIENT ends up holding. Iterating it
+          // would flag a legitimate service-role grant as "undoing the
+          // narrowing" — a false positive on the one role that is supposed to
+          // hold privileges.
+          for (const ch of [...stmt.channels].filter((c) => c !== "service_role")) {
             if (stmt.verb === "revoke") {
               if (!held.tableWide) continue;      // column-scoped: no effect on the table privilege
               everRevoked = true;
