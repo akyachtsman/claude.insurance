@@ -1979,11 +1979,11 @@ check the grant for each. Narrowing one is not narrowing the column. The same
 applies to a default: a column the client cannot name is still set, so the
 default has to be the safe value.
 
-### ⚠️ THREE WAYS A MUTATION TEST LIES, all hit on 2026-10-13
+### ⚠️ FOUR WAYS A MUTATION TEST LIES, all hit on 2026-10-13
 
-Found while gating the `notify-enhancement` rewrite. Neither is about the code
-under test — both are about the *harness* — and each one produced a confident
-green that meant nothing. This file already records that a green DOM assertion
+Found while gating the `notify-enhancement` rewrite. None of them is about the
+code under test — all four are about the *harness* — and each one produced a
+confident green that meant nothing. This file already records that a green DOM assertion
 does not prove the guard you wrote is holding the line; these are the same
 lesson one level down, in the tool used to check it.
 
@@ -2040,6 +2040,23 @@ assertion inside the script (`assert out != s`), and for an ordering mutation,
 re-grep the two line numbers and check they actually swapped. A green run on an
 unmutated file is not evidence of anything, and it is indistinguishable from the
 guard holding.
+
+**4. A MUTATION THAT APPLIED CLEANLY CAN STILL ENCODE AN IMPOSSIBLE STATE —
+and I hit this TWICE, one round apart, the second time with my own warning
+about it in the file I was editing.** `orderedMigrations()` already carried the
+note: a probe migration dated `29990101` in `migrations/` *cannot exist*, since
+a file in `migrations/` is one that has already run and so sorts before anything
+in `proposed/`. Round 19's mutation — the anon grant Codex described — went into
+`migrations/` again, where the claim migration's own `revoke all … from anon,
+authenticated` correctly cancelled it. Four mutations, four "SURVIVED", and the
+conclusion I nearly drew was that my fix was inert. Placed realistically (a
+LATER file in `proposed/`) it is caught, naming the grantee and the file.
+**The rule: a mutation has to describe a state the system can actually reach.**
+It differs from #3 in that nothing about the run looks wrong — the diff is
+non-empty, the file is read, the replay sees the statement — so the only check
+is asking whether the scenario is possible before believing the verdict. And a
+survivor must be explained before it is accepted: #3 fails loudly under `git
+diff`, this one only fails under thinking about it.
 
 ### ⚠️ HTTPS EGRESS TO THE SUPABASE PROJECT IS BLOCKED FROM A SESSION (measured 2026-10-13)
 

@@ -446,8 +446,14 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
       }
     }
   }
+  // ⚠️ THREE CLIENT CHANNELS. `anon` belongs here for the reason stated at
+  // privilegeStatements: the browser holds the anon key, so anything `anon`
+  // can insert, a client can insert. Codex #256 round 19. The GRANT is the
+  // binding half — RLS is enabled with no policies, but Postgres checks table
+  // privileges first, so a policy added later does nothing without a grant,
+  // while a grant plus a policy is the whole bypass.
   const clientHolds = [];
-  for (const ch of ["authenticated", "public"]) {
+  for (const ch of ["authenticated", "anon", "public"]) {
     for (const [priv, file] of Object.entries(endState[ch] ?? {})) {
       if (file) clientHolds.push(`${ch} holds ${priv.toUpperCase()} (granted by ${file})`);
     }
@@ -817,8 +823,21 @@ function privilegeStatements(sql, table) {
     // grantee text, so `grant update on public.profiles to public` was ignored
     // entirely and the replay stayed green while any client could again set
     // their own role to 'underwriter'. Codex #256 round 12.
+    // ⚠️ AND `anon` IS A FOURTH, added by Codex #256 round 19 — it was MISSING
+    // ENTIRELY, which is worse than being recorded and unchecked. With no
+    // `anon` arm, `grant insert on public.enhancement_notifications to anon`
+    // sets `channels.size === 0` and the statement is SKIPPED, so the replay
+    // never sees it and the end-state gate stays green. `anon` is not a
+    // different person here: the client ships the anon key, so a signed-in
+    // owner who knows their own request id can issue that insert WITHOUT a
+    // JWT and pre-consume `(request_id, event)`, suppressing the real
+    // notification. Same bypass as round 6, through a role the parser could
+    // not see. (It is harmless on the STAMP functions — `auth.uid()` is null
+    // under anon, so their predicates match nothing — which is why the
+    // function-level gate could get away with it and this one could not.)
     const channels = new Set();
     if (/\bauthenticated\b/i.test(roles)) channels.add("authenticated");
+    if (/\banon\b/i.test(roles)) channels.add("anon");
     if (/\bpublic\b/i.test(roles)) channels.add("public");
     if (/\bservice_role\b/i.test(roles)) channels.add("service_role");
     if (channels.size === 0) continue;
@@ -914,9 +933,16 @@ test("every table this handler touches has its client write surface narrowed IN 
       // Codex #256 round 11; it is the mirror of the grant side, where a column
       // list makes a statement harmless, and here it makes one ineffective.
       // One replay PER CHANNEL, because a revoke closes only the channel it
-      // names. `authenticated` ends up holding the privilege if EITHER channel
-      // is still open.
-      const openedBy = { authenticated: null, public: null };
+      // names. `authenticated` ends up holding the privilege if ANY of the
+      // three client channels is still open.
+      // ⚠️ `anon` is listed explicitly rather than left to appear on first
+      // write: the parser gained that channel in round 19, and a reader of a
+      // two-key object would reasonably conclude anon is out of scope here.
+      // It is not — the browser ships the anon key, so a grant to anon is a
+      // grant to the client. Nothing grants it on these tables today
+      // (`rule_settings`/`leads` do, and neither is a clientTables() entry),
+      // so this is a gate on the future, which is what the whole replay is.
+      const openedBy = { authenticated: null, anon: null, public: null };
       let everRevoked = false;
       for (const m of migs) {
         for (const stmt of privilegeStatements(m.sql, table)) {
