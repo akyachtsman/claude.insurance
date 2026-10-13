@@ -179,10 +179,24 @@ function effectiveExecute(name, want) {
       state[ch] = verb === "revoke" ? null : file;
     }
   };
+  // ⚠️ `EXECUTE` IS NOT THE ONLY SPELLING. Postgres accepts
+  // `ALL [PRIVILEGES]` as an alternative to `EXECUTE` for functions, and the
+  // first version of both regexes matched only the literal word — so
+  // `grant all privileges on all functions in schema public to authenticated`
+  // left this gate green while every client could call the claim RPC. Codex,
+  // round 17, with the mutation in hand.
+  // ⚠️ It named the SCHEMA-WIDE form; the PER-FUNCTION one had the identical
+  // hole (`grant all on function public.claim_notification(uuid, text) to
+  // authenticated`), reproduced here before fixing. Fixing only the reported
+  // spelling would have left the other half open — the same instance-not-class
+  // mistake this PR has already paid for twice.
+  const PRIV = "(?:execute|all(?:\\s+privileges)?)";
   const perFn = new RegExp(
-    `\\b(grant|revoke)\\s+execute\\s+on\\s+function\\s+public\\.${name}\\s*\\(([^)]*)\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
+    `\\b(grant|revoke)\\s+${PRIV}\\s+on\\s+function\\s+public\\.${name}\\s*\\(([^)]*)\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
   );
-  const schemaWide = /\b(grant|revoke)\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+(?:to|from)\s+([^;]*)/gi;
+  const schemaWide = new RegExp(
+    `\\b(grant|revoke)\\s+${PRIV}\\s+on\\s+all\\s+(?:functions|routines)\\s+in\\s+schema\\s+public\\s+(?:to|from)\\s+([^;]*)`, "gi",
+  );
   const created = new RegExp(`\\bcreate\\s+(or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
   const dropped = new RegExp(`\\bdrop\\s+function\\s+(?:if\\s+exists\\s+)?public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
 
