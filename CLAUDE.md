@@ -1911,12 +1911,37 @@ as the caller under `er_underwriter_update`. What changed is only that the claim
 STATEMENT stopped being the place that also checks identity — a caller who is not
 entitled cannot reach the claim, and could not move the row if they did.
 
-**The one honest loss:** the old claim checked stage and ownership *atomically
-with* the claim. Now the stage pre-read races the claim, so a request that
-advances in that window could get one "we received your request" email a moment
-late. Bounded to **one** by the primary key — the harm shrank from "unbounded
-re-announcement" to "one possibly-stale email", which is the trade the redesign
-accepts and states rather than hides.
+⚠️ **WHAT I CALLED "the one honest loss" WAS A BAD READING, AND CODEX CAUGHT IT
+ON THE REDESIGN COMMIT (P1).** This paragraph used to say the stage pre-read now
+races the claim, costing at most "one possibly-stale email", and present that as
+the accepted trade. Two things were wrong with it. First, it **averaged two
+different defects into one sentence**: on the requested path a late email is
+merely stale; on the **approved** path the handler asserts something untrue about
+the client's policy — if another underwriter declines the request after the
+guarded transition, the claim still succeeds and a **false final-approval email**
+goes out. The primary key bounds that to one email; it does not prevent it.
+Second, **the old design did this one thing right** — its claim carried `and
+status = 'approved'` in the same statement — so the redesign lost a property the
+thing it replaced had, while fixing four bypasses around it. A redesign can do
+that, and the write-up argued the loss away instead of flagging it.
+**Closed by `public.claim_notification(uuid, text)`:** `insert … select … where
+<status matches> on conflict do nothing returning`, so the predicate and the
+conflict are evaluated in one statement and there is no window. It is **not** a
+return to the shape round 6 bypassed — EXECUTE is `service_role` only (revoked
+from `public, anon, authenticated`), so the client cannot call it, and it reads
+no identity from `auth.uid()`: the caller is already authorized by the RLS-scoped
+reads and the guarded transition.
+
+⚠️ **AND THE RETIRED COLUMNS WERE STILL BEING READ AS A GATE (P2, same review).**
+Two prechecks gated on `row.requested_notified_at` / `row.approved_notified_at`,
+so for any row whose OLD stamp had been set — including by round 6's direct-RPC
+bypass, and including this repo's own probe rows — the handler answered
+`already_notified` **before** consulting the claim table. Because those values
+are write-once and the migration neither clears nor imports them, the suppression
+bypass survived the redesign *permanently* for exactly those rows. Both prechecks
+are gone and the columns are **no longer selected at all**, which makes a relapse
+impossible rather than merely absent. The stage precheck on `row.status` stays —
+that one is about the lifecycle, is still true, and is still not the gate.
 
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
