@@ -2294,6 +2294,60 @@ quoted-string variant; reverting `isClaimRpc` to the whole text; restoring the
 invented relation; and deleting the not-exhaustive label. A legitimate
 replacement of the real claim RPC stays clean.
 
+### ⚠️ ROUND 25 — THE CLAIM WAS THE DEFECT, THREE ROUNDS RUNNING, AND IT IS NOW GATED
+
+Two P2s, both direct answers to questions put to the round, and both confirmed
+the claim was too strong.
+
+**1. "Every escalation path appears as a row" was false, and a trigger shows
+it.** PostgreSQL checks `EXECUTE` on a trigger function **when the trigger is
+created**, not for the role whose DML fires it. So a SECURITY DEFINER trigger
+function with EXECUTE revoked from `anon` and `authenticated` still runs on a
+client's INSERT, `has_function_privilege` is false, and the direct-ACL query
+omits it — even if its body writes the claim table or calls the claim RPC. Codex
+round 25, with the upstream thread cited. Closed by a second query over
+`pg_trigger` ⋈ `pg_proc` for definer trigger functions on client-writable
+tables, and by **naming what is still not covered**: a view with
+`security_invoker` off, `ALTER DEFAULT PRIVILEGES` on later objects, role
+MEMBERSHIP, rules, and dynamic SQL inside a definer body.
+
+**2. The header gate scanned `FROM` and not `JOIN`.** Queries (a), (b) and (d)
+all join catalogs, so mistyping `join pg_namespace n` → `join
+pg_namespace_compat n` stayed green and permitted exactly the unrunnable-query
+class the gate exists to prevent. Reproduced at 22/22. One of two syntaxes for
+the same thing — the enumeration mistake of rounds 17–22, in miniature, inside
+the gate written to end it.
+
+⚠️ **THE REAL FINDING IS WHAT MUTATION TESTING THEN SHOWED: THE NARROWING WAS
+NOT GATED.** Deleting the trigger query failed **nothing**. Deleting the whole
+NOT-COVERED list failed **nothing**. Three consecutive rounds had found the
+header *claiming* more than its queries deliver — "authoritative" (r23), "every
+function that can write the table" (r24), "every escalation path appears as a
+row" (r25) — and each time the correction was **documentation**, which is
+precisely what had been wrong. So the honesty is asserted now: tests require the
+`pg_trigger` query to be present, require the prosrc aid to carry its own
+not-exhaustive disclaimer, and require each of the four known gaps to be named.
+**Prose that nothing checks is the thing that has been wrong every time.**
+
+⚠️ **And my own new assertion had the scoping defect, on a third surface.** The
+not-exhaustive check matched **anywhere in the header** — and the phrase also
+appears in the summary paragraph, so deleting the prosrc query's *own*
+disclaimer left it green. Mutation-tested: that version SURVIVED. It is now
+scoped to the query's own block, on the reasoning that a reader who copies the
+SQL does not read a summary four paragraphs down.
+
+**Measured, 9 mutations.** Both findings caught; the JOIN arm, the trigger
+query, the gap list, the scoped disclaimer and the prosrc query are each proven
+load-bearing; and reverting the gate to FROM-only lets the mistype through,
+which is what makes the JOIN arm the gate rather than decoration.
+
+**What the deploy header now claims, in its own words:** (a)–(c) are sound and
+exact from the catalog; (d1) and (d2) each enumerate **one kind** of path to a
+definer body a client can cause to run; five kinds are listed as not covered.
+*"These queries make the escalation surface SMALL AND LISTED, not empty and
+proven."* That is a weaker claim than any of the three it replaces, and it is
+the first one that is true.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it

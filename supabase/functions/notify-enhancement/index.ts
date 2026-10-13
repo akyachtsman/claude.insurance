@@ -205,6 +205,32 @@
 //   -- you cannot account for is a privilege-escalation path by construction —
 //   -- a definer function runs as its owner, so what it can do is not bounded
 //   -- by what the caller can do.
+//
+//   -- d2. ⚠️ AND THE TRIGGER-MEDIATED PATH, WHICH (d1) CANNOT SEE. PostgreSQL
+//   -- checks EXECUTE on a trigger function when the TRIGGER IS CREATED, not
+//   -- for the role whose DML fires it. So a SECURITY DEFINER trigger function
+//   -- with EXECUTE revoked from anon and authenticated still runs on a
+//   -- client's INSERT/UPDATE, `has_function_privilege` is false, and (d1)
+//   -- omits it entirely — even if its body writes enhancement_notifications or
+//   -- calls the claim RPC. Codex round 25, with the upstream thread cited; it
+//   -- is the direct answer to the question put to that round, and it falsifies
+//   -- the "every escalation path appears as a row" claim (d1) carried alone.
+//   select c.relname as on_table, t.tgname, p.proname, p.prosecdef,
+//          pg_get_userbyid(p.proowner) as fn_owner,
+//          has_table_privilege('authenticated', c.oid, 'INSERT') as client_can_insert,
+//          has_table_privilege('authenticated', c.oid, 'UPDATE') as client_can_update
+//     from pg_trigger t
+//     join pg_class c on c.oid = t.tgrelid
+//     join pg_proc p on p.oid = t.tgfoid
+//     join pg_namespace n on n.oid = c.relnamespace
+//    where n.nspname = 'public' and not t.tgisinternal and p.prosecdef
+//      and (has_table_privilege('authenticated', c.oid, 'INSERT')
+//        or has_table_privilege('authenticated', c.oid, 'UPDATE')
+//        or has_table_privilege('anon', c.oid, 'INSERT')
+//        or has_table_privilege('anon', c.oid, 'UPDATE'));
+//   -- EXPECT: the write-once trigger on enhancement_requests, and nothing that
+//   -- touches enhancement_notifications. Each row is a definer body a client
+//   -- can cause to run without holding EXECUTE on it.
 //   -- Then, as a NARROWER aid and not a proof, the substring search:
 //   select p.proname, p.prosecdef, p.proacl
 //     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -212,14 +238,35 @@
 //   -- It finds direct writers. It does NOT find indirect ones, and must not be
 //   -- read as exhaustive.
 //
-// ⚠️ WHAT THESE CHECKS ARE: (a)-(c) measure the claim table's own end state and
-// the RPC's ACL exactly, from the catalog — those are sound, and they are what
-// no source scan can replace. (d) bounds the REVIEWABLE SURFACE rather than
-// proving it empty: it enumerates every definer function a client can call, so
-// an escalation path must appear as a row, but deciding what a given row's body
-// does is back to reading code. Stated here rather than called authoritative,
-// because calling an incomplete check authoritative is the defect this whole
-// section exists to correct.
+// ⚠️⚠️ WHAT THESE CHECKS ARE, AND WHAT THEY ARE NOT — read this before relying
+// on any of them, because the previous two versions of this paragraph each
+// claimed more than the queries deliver and each was corrected by review.
+//
+// SOUND, from the catalog, no source text involved:
+//   (a) who holds privileges on the claim table, and who OWNS it
+//   (b) RLS enabled, and the claim RPC's security mode, search_path and ACL
+//   (c) the policies on the claim table (expect zero)
+// These are what no source scan can replace.
+//
+// BOUNDED, not exhaustive — each enumerates ONE KIND of path to a definer body
+// a client can cause to run:
+//   (d1) definer functions a client may EXECUTE directly
+//   (d2) definer TRIGGER functions on tables a client may write — which (d1)
+//        cannot see, because EXECUTE is checked at trigger creation
+// Deciding what a given row's body does is back to reading code.
+//
+// ⛔ NOT COVERED, stated so nobody infers it: a view with `security_invoker` off
+// whose owner can read more than the caller; `ALTER DEFAULT PRIVILEGES` taking
+// effect on objects created later; role MEMBERSHIP (a custom role granted to
+// `authenticated` carries its privileges); rules (`CREATE RULE`); and anything
+// a definer body assembles as dynamic SQL. Each is a known gap with no cheap
+// catalog answer, and naming them is the point: the earlier wording said "every
+// escalation path must appear as a row", which Codex round 25 falsified with the
+// trigger case on the first try.
+//
+// The honest summary: these queries make the escalation surface SMALL AND
+// LISTED, not empty and proven. That is a better position than the source
+// scanner was in, and it is not a proof.
 //   PLUS the claim table's own migration, which is NOT on that line because it
 //   is not applied yet — it is supabase/proposed/20261013_enhancement_notifications.sql
 //   and proposed/README.md names it as blocking this deploy. When it is applied

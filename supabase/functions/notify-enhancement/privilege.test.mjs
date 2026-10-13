@@ -2142,6 +2142,7 @@ test("the deploy header's catalog queries name only real relations", () => {
   // project's own and are covered by the migration gates above.
   const KNOWN = new Set([
     "pg_proc", "pg_namespace", "pg_class", "pg_policy", "pg_roles", "pg_authid",
+    "pg_trigger", "pg_rewrite", "pg_depend", "pg_auth_members",
     "information_schema.table_privileges", "information_schema.column_privileges",
     "information_schema.role_table_grants",
   ]);
@@ -2159,7 +2160,14 @@ test("the deploy header's catalog queries name only real relations", () => {
   // rather than hidden; what is covered is the failure mode this gate exists
   // for, with no prose to misclassify.
   const bad = [];
-  for (const m of header.matchAll(/\bfrom\s+(pg_[\w.]*|information_schema\.[\w.]*)/gi)) {
+  // ⚠️ `JOIN` AS WELL AS `FROM`. Codex round 25: queries (a), (b) and (d) all
+  // join catalogs, and the first version scanned only after `from` — so
+  // mistyping `join pg_namespace n` to `join pg_namespace_compat n` left this
+  // green and permitted exactly the class of unrunnable query the gate exists
+  // to prevent. Reproduced at 22/22 before fixing. A gate that covers one of
+  // two syntaxes for the same thing is the enumeration mistake this PR has
+  // paid for repeatedly, in miniature.
+  for (const m of header.matchAll(/\b(?:from|join)\s+(pg_[\w.]*|information_schema\.[\w.]*)/gi)) {
     const rel = m[1].toLowerCase().replace(/[^\w.]+$/, "");
     if (!KNOWN.has(rel)) bad.push(rel);
   }
@@ -2169,11 +2177,34 @@ test("the deploy header's catalog queries name only real relations", () => {
     `it will error instead of answering, which is worse than having no check: ${[...new Set(bad)].join(", ")}`,
   );
 
-  // And the header must not call the function-surface query exhaustive, which
-  // is the claim Codex round 24 disproved: a PUBLIC-executable definer helper
-  // can CALL the claim RPC without naming the table.
+  // ── THE HEADER'S CLAIMS ARE GATED, NOT PROOFREAD.
+  // ⚠️ THIS IS THE ROUND-25 LESSON AND IT IS ABOUT PROSE, NOT SQL. Three
+  // consecutive rounds found the header CLAIMING more than its queries
+  // deliver — "authoritative" (r23), "every function that can write the table"
+  // (r24), "every escalation path appears as a row" (r25). Mutation-testing
+  // showed why that kept happening: deleting the trigger query, or the
+  // not-covered list, failed NOTHING. The narrowing was documentation, and
+  // documentation is what had been wrong each time. So the honesty is asserted.
+  // ⚠️ SCOPED TO THE prosrc QUERY'S OWN BLOCK, not to the whole header. The
+  // first version matched anywhere, and the phrase "not exhaustive" also
+  // appears in the summary paragraph below — so deleting the query's OWN
+  // disclaimer left this green. Mutation-tested: that version SURVIVED. Same
+  // scoping defect as the concatenated-migrations scan, met on a third surface.
+  const prosrcAt = header.indexOf("prosrc ilike");
+  assert.ok(prosrcAt !== -1, "the deploy header no longer contains the prosrc aid query");
+  const prosrcBlock = header.slice(prosrcAt, prosrcAt + 600);
   assert.ok(
-    /not\s+(?:be\s+read\s+as\s+)?exhaustive|NOT find indirect/i.test(header),
-    "the deploy header must state that the prosrc substring search is not exhaustive — calling an incomplete check authoritative is the defect this header exists to correct",
+    /not\s+(?:be\s+read\s+as\s+)?exhaustive|does\s+NOT\s+find\s+indirect/i.test(prosrcBlock),
+    "the prosrc substring query must carry its own not-exhaustive disclaimer, beside the query itself — a reader who copies the SQL does not read the summary four paragraphs down. Calling an incomplete check authoritative is the defect this header exists to correct (Codex round 24)",
   );
+  assert.ok(
+    /pg_trigger/.test(header) && /prosecdef/.test(header),
+    "the deploy header must carry the TRIGGER-MEDIATED definer query. PostgreSQL checks EXECUTE on a trigger function when the TRIGGER is created, not for the role whose DML fires it — so a definer trigger function with EXECUTE revoked still runs for a client and the direct-ACL query cannot see it (Codex round 25). Without this query the header is back to a claim that was falsified on the first try",
+  );
+  for (const gap of ["security_invoker", "DEFAULT PRIVILEGES", "MEMBERSHIP", "dynamic SQL"]) {
+    assert.ok(
+      header.includes(gap),
+      `the deploy header must name "${gap}" among the paths it does NOT cover. The queries make the escalation surface small and LISTED, not empty and proven, and every round that blurred that distinction shipped a false claim`,
+    );
+  }
 });
