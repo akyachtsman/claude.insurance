@@ -65,6 +65,8 @@ function tableAccesses() {
 // whole of it.
 const CLAIM_TABLE = "enhancement_notifications";
 const CLAIM_RPC = "claim_notification";
+// Signature, because Postgres identifies a function by name AND argument types.
+const CLAIM_RPC_ARGS = ["uuid", "text"];
 
 // The CLIENT tables this handler touches — `.from(...)` only, and never the
 // claim table. Used by the gates that ask "what must be narrowed for the client",
@@ -115,37 +117,103 @@ function orderedMigrations() {
   ];
 }
 
+// Argument TYPES of a parameter list, lowercased: "p_request uuid, p_event text"
+// -> ["uuid","text"], and "uuid, text" -> ["uuid","text"]. Both spellings occur:
+// a CREATE names the parameters, a GRANT names only the types.
+function argTypes(params) {
+  return params.split(",").map((a) => {
+    const t = a.trim().replace(/\s+(default|=)[\s\S]*$/i, "").split(/\s+/).pop() || "";
+    return t.toLowerCase().replace(/\[\]$/, "[]");
+  }).filter(Boolean);
+}
+
+// ⚠️ EVERY READER BELOW IS KEYED ON THE FUNCTION'S SIGNATURE, NOT ITS NAME.
+// Postgres identifies a function by name AND argument types, so
+// `claim_notification(text, text)` is a DIFFERENT function from
+// `claim_notification(uuid, text)` and both exist at once. A name-only scan
+// treats an overload as a replacement — so an unsafe replacement of the uuid
+// overload followed by a safe text overload validates the wrong body, and a
+// revoke on one signature masks a grant on the one the handler actually calls.
+// Codex, round 16.
+function sameSignature(params, want) {
+  const got = argTypes(params);
+  return got.length === want.length && got.every((t, i) => t === want[i]);
+}
+
 // The definition Postgres would actually be running: the LAST create-or-replace
-// of this function, across every migration in order — and the last one within a
+// of THIS SIGNATURE, across every migration in order — and the last one within a
 // file, since one file may replace it twice.
-function effectiveFunction(name) {
-  const src = `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`;
+function effectiveFunction(name, want) {
+  const src = `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([^)]*)\\)([\\s\\S]*?)\\$\\$\\s*;`;
   let found = null;
   for (const m of orderedMigrations()) {
     const sql = m.sql.replace(/^\s*--.*$/gm, "");   // this repo documents what it must not contain
-    let last = null;
-    for (const hit of sql.matchAll(new RegExp(src, "ig"))) last = hit[0];
-    if (last) found = { file: m.file, body: last, sql };
+    for (const hit of sql.matchAll(new RegExp(src, "ig"))) {
+      if (!sameSignature(hit[1], want)) continue;   // an overload is not a replacement
+      found = { file: m.file, body: hit[0], sql };
+    }
   }
   return found;
 }
 
-// Net EXECUTE state for a function, per grantee channel, after replaying every
-// migration in order. `null` means nobody granted it, or a later REVOKE closed
-// it; a filename means that migration left it OPEN.
-function effectiveExecute(name) {
+// Net EXECUTE state for ONE SIGNATURE, per grantee channel, after replaying every
+// migration in order. `null` means nobody holds it; a filename means that
+// migration left it OPEN.
+//
+// ⚠️ IT REPLAYS THREE THINGS, NOT JUST EXPLICIT PER-FUNCTION GRANTS. Codex,
+// round 16, naming two ways the explicit-only version stayed green while the
+// client could call the RPC:
+//   · CREATION gives PUBLIC a default EXECUTE privilege. A later DROP + CREATE
+//     that does not repeat the PUBLIC revoke silently restores it. (CREATE OR
+//     REPLACE of an EXISTING function preserves the ACL, so it must NOT reset —
+//     modelling it as a reset would cry wolf on a legitimate replace.)
+//   · `grant execute on all functions in schema public to <role>` hits this
+//     function without ever naming it.
+function effectiveExecute(name, want) {
   const state = { authenticated: null, anon: null, public: null, service_role: null };
-  const re = new RegExp(
-    `\\b(grant|revoke)\\s+execute\\s+on\\s+function\\s+public\\.${name}\\s*\\([^)]*\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
+  let exists = false;
+  const CH = Object.keys(state);
+  const setFrom = (roles, verb, file) => {
+    for (const ch of CH) {
+      if (!new RegExp(`\\b${ch}\\b`, "i").test(roles)) continue;
+      state[ch] = verb === "revoke" ? null : file;
+    }
+  };
+  const perFn = new RegExp(
+    `\\b(grant|revoke)\\s+execute\\s+on\\s+function\\s+public\\.${name}\\s*\\(([^)]*)\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
   );
+  const schemaWide = /\b(grant|revoke)\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+(?:to|from)\s+([^;]*)/gi;
+  const created = new RegExp(`\\bcreate\\s+(or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
+  const dropped = new RegExp(`\\bdrop\\s+function\\s+(?:if\\s+exists\\s+)?public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
+
   for (const m of orderedMigrations()) {
     const sql = m.sql.replace(/^\s*--.*$/gm, "");
-    for (const stmt of sql.matchAll(re)) {
-      const [, verb, roles] = stmt;
-      for (const ch of Object.keys(state)) {
-        if (!new RegExp(`\\b${ch}\\b`, "i").test(roles)) continue;
-        state[ch] = verb.toLowerCase() === "revoke" ? null : m.file;
+    // Statement order within a file matters as much as file order, so walk every
+    // relevant statement by position rather than by category.
+    const events = [];
+    for (const h of sql.matchAll(created)) {
+      if (sameSignature(h[2], want)) events.push({ at: h.index, kind: "create", replace: !!h[1] });
+    }
+    for (const h of sql.matchAll(dropped)) {
+      if (sameSignature(h[1], want)) events.push({ at: h.index, kind: "drop" });
+    }
+    for (const h of sql.matchAll(perFn)) {
+      if (sameSignature(h[2], want)) events.push({ at: h.index, kind: "acl", verb: h[1].toLowerCase(), roles: h[3] });
+    }
+    for (const h of sql.matchAll(schemaWide)) {
+      events.push({ at: h.index, kind: "acl", verb: h[1].toLowerCase(), roles: h[2] });
+    }
+    for (const e of events.sort((a, b) => a.at - b.at)) {
+      if (e.kind === "drop") { exists = false; for (const ch of CH) state[ch] = null; continue; }
+      if (e.kind === "create") {
+        if (!e.replace || !exists) {       // a fresh creation, not a replace of a live function
+          for (const ch of CH) state[ch] = null;
+          state.public = m.file;           // Postgres grants EXECUTE to PUBLIC by default
+        }
+        exists = true;
+        continue;
       }
+      setFrom(e.roles, e.verb, m.file);
     }
   }
   return state;
@@ -329,7 +397,7 @@ test("the CLAIM TABLE is defined in source, fenced, and declared blocking while 
   // re-granting either stamp function to `authenticated` reopens round 6, and a
   // scan of the creating migration alone would never see it.
   for (const fn of ["stamp_requested_notified", "stamp_approved_notified"]) {
-    const ex = effectiveExecute(fn);
+    const ex = effectiveExecute(fn, ["uuid"]);
     assert.equal(
       ex.authenticated, null,
       `EXECUTE on public.${fn} ends up held by authenticated (granted by ${ex.authenticated}) — that is round 6's direct-RPC bypass, reopened`,
@@ -1044,7 +1112,7 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
   // already found on the stamp-RPC gate, reintroduced in its replacement. Third
   // occurrence of that class; see orderedMigrations() for why it is now one
   // shared lookup rather than a third patch.
-  const hit = effectiveFunction(CLAIM_RPC);
+  const hit = effectiveFunction(CLAIM_RPC, CLAIM_RPC_ARGS);
   assert.ok(hit, `the handler calls ${CLAIM_RPC} but no migration defines public.${CLAIM_RPC}`);
   const body = hit.body;   // scoped to the function's own body
 
@@ -1075,7 +1143,7 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
   // the client taking its own claim and permanently suppressing the real
   // notification. Codex raised this as its own finding, in the same review that
   // caught the first-definition half.
-  const exec = effectiveExecute(CLAIM_RPC);
+  const exec = effectiveExecute(CLAIM_RPC, CLAIM_RPC_ARGS);
   for (const ch of ["authenticated", "anon", "public"]) {
     assert.equal(
       exec[ch], null,
@@ -1113,4 +1181,29 @@ test("the retired stamp columns are not read back as a gate", () => {
       `the handler still selects ${col} — don't fetch what must not be trusted`,
     );
   }
+});
+
+test("the claim serializes against a concurrent stage change", () => {
+  // ⚠️ CODEX P1, ROUND 16, on the line its own P1 from round 15 had just added.
+  // The status predicate is a snapshot read under READ COMMITTED: a decline that
+  // has UPDATEd the request but not yet COMMITTED is invisible to it, so the
+  // select still sees `approved`, the claim inserts, the decline commits, and
+  // the client is sent a FALSE APPROVAL EMAIL. Adding the predicate narrowed
+  // that window; only a row lock closes it.
+  //
+  // With `for update` the statement BLOCKS on the uncommitted decline and, when
+  // it commits, READ COMMITTED re-evaluates the predicate against the new row
+  // version (EvalPlanQual) — status is `declined`, nothing is inserted.
+  const hit = effectiveFunction(CLAIM_RPC, CLAIM_RPC_ARGS);
+  assert.ok(hit, `no migration defines public.${CLAIM_RPC}(${CLAIM_RPC_ARGS.join(", ")})`);
+  assert.ok(
+    /\bfor\s+update\b/i.test(hit.body),
+    `public.${CLAIM_RPC} must lock the request row (\`for update\`) — the status predicate alone is a snapshot read, so an uncommitted decline stays invisible and the claim is taken on a row that is about to be declined`,
+  );
+  // The lock has to be on the request, inside the same statement — not a
+  // separate SELECT ... FOR UPDATE before it, which reopens the gap it closes.
+  assert.ok(
+    /insert\s+into[\s\S]*?from\s+public\.enhancement_requests[\s\S]*?for\s+update[\s\S]*?on\s+conflict/i.test(hit.body),
+    `the \`for update\` must be part of the INSERT ... SELECT that takes the claim, between the request table and the ON CONFLICT`,
+  );
 });

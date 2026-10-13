@@ -102,9 +102,14 @@ comment on table public.enhancement_notifications is
 -- while fixing everything around it.
 --
 -- So the claim goes through a function that re-checks the status in the SAME
--- statement that takes it. `insert ... select ... where` evaluates the predicate
--- and the conflict together, so there is no window between the check and the
--- claim.
+-- statement that takes it, AND takes a row lock while doing it. `insert ...
+-- select ... where ... for update` evaluates the predicate, serializes against a
+-- concurrent stage change, and resolves the conflict together.
+--
+-- ⚠️ THE PREDICATE ALONE WAS NOT ENOUGH, and that was a second finding on the
+-- same line. A predicate under READ COMMITTED reads a snapshot: an uncommitted
+-- decline is invisible to it, so the claim could still be taken on a row that is
+-- about to be declined. The lock is what orders the two.
 --
 -- ⚠️ WHY THIS IS NOT A RETURN TO THE THING ROUND 6 BROKE. That bypass existed
 -- because EXECUTE was granted to `authenticated`, so the client could call the
@@ -128,6 +133,20 @@ as $$
        (p_event = 'requested' and r.status = 'requested') or
        (p_event = 'approved'  and r.status = 'approved')
      )
+     -- ⚠️ `for update` IS LOAD-BEARING, NOT A PERFORMANCE HINT. Without it this
+     -- is a plain READ COMMITTED snapshot read: a decline that has UPDATEd the
+     -- row but not yet COMMITTED is invisible, so the select still sees
+     -- `approved`, the claim inserts, the decline then commits, and the client
+     -- is sent a FALSE APPROVAL EMAIL. Adding the status predicate without
+     -- serializing against a concurrent stage change only narrows that window;
+     -- it does not close it. Codex P1, on the commit that added the predicate.
+     --
+     -- With the row lock the statement BLOCKS on the uncommitted decline, and
+     -- when it commits READ COMMITTED re-evaluates this predicate against the
+     -- new row version (EvalPlanQual). The status is then `declined`, the
+     -- predicate fails, nothing is inserted, and the handler answers
+     -- `already_notified` with nothing sent — which is the correct outcome.
+     for update
   on conflict (request_id, event) do nothing
   returning claimed_at;
 $$;
