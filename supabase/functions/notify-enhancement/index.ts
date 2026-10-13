@@ -217,20 +217,30 @@
 //   -- the "every escalation path appears as a row" claim (d1) carried alone.
 //   select c.relname as on_table, t.tgname, p.proname, p.prosecdef,
 //          pg_get_userbyid(p.proowner) as fn_owner,
-//          has_table_privilege('authenticated', c.oid, 'INSERT') as client_can_insert,
-//          has_table_privilege('authenticated', c.oid, 'UPDATE') as client_can_update
+//          t.tgtype,   -- which events: see CREATE TRIGGER; all four are possible
+//          has_table_privilege('authenticated', c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE')
+//            as client_any_dml,
+//          has_table_privilege('anon', c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE')
+//            as anon_any_dml
 //     from pg_trigger t
 //     join pg_class c on c.oid = t.tgrelid
 //     join pg_proc p on p.oid = t.tgfoid
 //     join pg_namespace n on n.oid = c.relnamespace
-//    where n.nspname = 'public' and not t.tgisinternal and p.prosecdef
-//      and (has_table_privilege('authenticated', c.oid, 'INSERT')
-//        or has_table_privilege('authenticated', c.oid, 'UPDATE')
-//        or has_table_privilege('anon', c.oid, 'INSERT')
-//        or has_table_privilege('anon', c.oid, 'UPDATE'));
+//    where n.nspname = 'public' and not t.tgisinternal and p.prosecdef;
+//   -- ⚠️ NO PRIVILEGE FILTER, DELIBERATELY. The first version required the
+//   -- client to hold INSERT or UPDATE on the trigger's table, and that was
+//   -- unsound twice over (Codex round 26, answering the question put to it):
+//   --   · triggers fire on all four DML events, so a client holding only
+//   --     DELETE or TRUNCATE still fires one, and the filter dropped it;
+//   --   · a DELETE trigger also fires on a CASCADE from another table, so the
+//   --     client may hold NO privilege on the trigger's own relation and still
+//   --     cause its definer body to run.
+//   -- A filter on the caller's privileges therefore cannot be sound here. The
+//   -- privileges are reported as COLUMNS for the operator to read, and the row
+//   -- set is every non-internal definer trigger in `public` — which is small.
 //   -- EXPECT: the write-once trigger on enhancement_requests, and nothing that
 //   -- touches enhancement_notifications. Each row is a definer body a client
-//   -- can cause to run without holding EXECUTE on it.
+//   -- may be able to cause to run without holding EXECUTE on it.
 //   -- Then, as a NARROWER aid and not a proof, the substring search:
 //   select p.proname, p.prosecdef, p.proacl
 //     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -258,7 +268,9 @@
 // ⛔ NOT COVERED, stated so nobody infers it: a view with `security_invoker` off
 // whose owner can read more than the caller; `ALTER DEFAULT PRIVILEGES` taking
 // effect on objects created later; role MEMBERSHIP (a custom role granted to
-// `authenticated` carries its privileges); rules (`CREATE RULE`); and anything
+// `authenticated` carries its privileges); rules (`CREATE RULE`); a definer
+// trigger reached by a CASCADE from a table the client CANNOT write (which is
+// why (d2) no longer filters on the caller's privileges at all); and anything
 // a definer body assembles as dynamic SQL. Each is a known gap with no cheap
 // catalog answer, and naming them is the point: the earlier wording said "every
 // escalation path must appear as a row", which Codex round 25 falsified with the

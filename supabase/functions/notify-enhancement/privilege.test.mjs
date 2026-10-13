@@ -2197,13 +2197,47 @@ test("the deploy header's catalog queries name only real relations", () => {
     /not\s+(?:be\s+read\s+as\s+)?exhaustive|does\s+NOT\s+find\s+indirect/i.test(prosrcBlock),
     "the prosrc substring query must carry its own not-exhaustive disclaimer, beside the query itself — a reader who copies the SQL does not read the summary four paragraphs down. Calling an incomplete check authoritative is the defect this header exists to correct (Codex round 24)",
   );
+  // ⚠️ AND THE TRIGGER QUERY MUST NOT FILTER ON THE CALLER'S PRIVILEGES. That
+  // filter is unsound two ways (Codex round 26): triggers fire on all four DML
+  // events, so a client holding only DELETE or TRUNCATE still fires one; and a
+  // DELETE trigger fires on a CASCADE from another table, where the client may
+  // hold nothing at all on the trigger's own relation. The privileges belong in
+  // the SELECT list for the operator to read, never in the WHERE.
+  // Mutation-tested: restoring the filter SURVIVED until this was written —
+  // which is round 25's lesson (gate the claim, not just the SQL) applied to
+  // round 26's own fix.
+  const d2At = header.indexOf("pg_trigger");
+  if (d2At !== -1) {
+    const d2 = header.slice(Math.max(0, d2At - 900), d2At + 900);
+    const where = d2.slice(d2.indexOf("where", d2.indexOf("pg_trigger")));
+    assert.ok(
+      !/\bwhere\b[\s\S]*?has_table_privilege/i.test(where.split(";")[0] || ""),
+      "the trigger-mediated query must not filter on has_table_privilege — a client holding only DELETE or TRUNCATE still fires a definer trigger, and a CASCADE fires one on a relation the client cannot write at all. Report the privileges as columns; do not use them to exclude rows",
+    );
+  }
   assert.ok(
     /pg_trigger/.test(header) && /prosecdef/.test(header),
     "the deploy header must carry the TRIGGER-MEDIATED definer query. PostgreSQL checks EXECUTE on a trigger function when the TRIGGER is created, not for the role whose DML fires it — so a definer trigger function with EXECUTE revoked still runs for a client and the direct-ACL query cannot see it (Codex round 25). Without this query the header is back to a claim that was falsified on the first try",
   );
-  for (const gap of ["security_invoker", "DEFAULT PRIVILEGES", "MEMBERSHIP", "dynamic SQL"]) {
+  // ⚠️ THIS LIST IS CANONICAL, AND IT WAS SHORT BY ONE. The header's prose named
+  // FIVE uncovered kinds and this loop pinned FOUR, so deleting `rules (CREATE
+  // RULE)` from the header stayed green — reproduced at 22/22. That is the exact
+  // mutation-testing failure the assertion was added to prevent, reintroduced by
+  // transcribing the list rather than counting it. Codex round 26.
+  // A new gap goes in THIS array first; the header's prose must then name it.
+  // ⚠️ SCOPED TO THE NOT-COVERED PARAGRAPH, NOT THE WHOLE HEADER — and this is
+  // the SAME scoping defect fixed one round earlier for the not-exhaustive
+  // check, reintroduced in the assertion written directly beside it. Both
+  // "CASCADE" and "dynamic SQL" appear TWICE in the header (once explaining a
+  // query, once in the gap list), so deleting them from the LIST left this
+  // green: mutation-tested, both SURVIVED. Knowing a defect class is not the
+  // same as not writing it again; only the mutation said so.
+  const ncAt = header.indexOf("NOT COVERED");
+  assert.ok(ncAt !== -1, "the deploy header no longer carries a NOT COVERED paragraph naming the gaps");
+  const notCovered = header.slice(ncAt, header.indexOf("The honest summary", ncAt) + 1 || undefined);
+  for (const gap of ["security_invoker", "DEFAULT PRIVILEGES", "MEMBERSHIP", "CREATE RULE", "CASCADE", "dynamic SQL"]) {
     assert.ok(
-      header.includes(gap),
+      notCovered.includes(gap),
       `the deploy header must name "${gap}" among the paths it does NOT cover. The queries make the escalation surface small and LISTED, not empty and proven, and every round that blurred that distinction shipped a false claim`,
     );
   }

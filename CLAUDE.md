@@ -2348,6 +2348,52 @@ definer body a client can cause to run; five kinds are listed as not covered.
 proven."* That is a weaker claim than any of the three it replaces, and it is
 the first one that is true.
 
+### ⚠️ ROUND 26 — KNOWING A DEFECT CLASS IS NOT THE SAME AS NOT WRITING IT AGAIN
+
+Two P2s, both answering the two questions put to the round, and both small. The
+instructive part is what mutation testing then said about my own fixes.
+
+**1. The trigger query filtered on the caller's privileges, and that cannot be
+sound.** It required the client to hold INSERT or UPDATE on the trigger's table.
+Triggers fire on **all four** DML events, so a client holding only DELETE or
+TRUNCATE still fires one; and a DELETE trigger also fires on a **CASCADE** from
+another table, where the client may hold *nothing* on the trigger's own
+relation. Fixed by **deleting the filter**: the privileges are reported as
+columns for the operator to read, and the row set is every non-internal definer
+trigger in `public`, which is small. CASCADE is now named in the gap list too.
+
+**2. The gap-list assertion pinned FOUR of the FIVE gaps the prose named**, so
+deleting `rules (CREATE RULE)` from the header stayed green — the exact
+mutation-testing failure the assertion had been added one round earlier to
+prevent, reintroduced by transcribing the list instead of counting it. The
+array in the test is now canonical: a new gap goes there first.
+
+⚠️ **AND THEN TWO OF MY OWN FIXES SURVIVED THEIR MUTATIONS, FOR THE SAME REASON
+AS EACH OTHER.** Deleting `CASCADE` or `dynamic SQL` from the gap list failed
+nothing, because **both phrases appear twice in the header** — once explaining a
+query, once in the list — and the assertion matched anywhere in the header. That
+is *the same scoping defect fixed one round earlier for the not-exhaustive
+check*, **reintroduced in the assertion written directly beside it**, in the same
+test, by me, one round later.
+It is now scoped to the NOT-COVERED paragraph, and each of the six gaps is
+mutation-tested individually against its **last** occurrence rather than its
+first — because mutating the first occurrence hits the explanatory mention and
+proves nothing. 7/7 caught after that.
+
+**The generalisable lesson, which is why this has its own section:** this repo
+already records the scoping defect three times (the concatenated-migrations
+scan, the `.k-h1` assertion, the round-25 disclaimer). Recording it did not stop
+me writing it a fourth time, in the file where it had just been fixed. What
+caught it was **mutating each item separately**, and nothing else would have —
+the suite was green, the assertion looked scoped, and the prose read correctly.
+**A defect class you can name is still one you will write; only the mutation
+grades it.**
+
+⚠️ One further process note: two mutations in this round were initially
+mis-graded because the script replaced the **first** occurrence in the file,
+which for both of these words lay outside the list under test. Mutating "the
+word" is not the same as mutating "the word where it carries the claim".
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it
