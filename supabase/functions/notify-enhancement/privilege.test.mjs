@@ -436,38 +436,67 @@ test("the deploy header names every RPC the code calls", () => {
   // header's first version listed only the two RPC migrations.
   //
   // SET EQUALITY AGAINST A DERIVED SET, on ONE machine-readable line.
-  // ⚠️ The first version of this check asked `header.includes(version)` and a
-  // mutation deleting 20261013014854 from the checklist SURVIVED, because the
-  // paragraph explaining why it matters still named it. Same class as the two
-  // scans in this file that matched a migration's own prose: an assertion over a
-  // wider text than the property belongs to cannot fail. So the header carries a
+  // ⚠️ An earlier version asked `header.includes(version)` and a mutation
+  // deleting 20261013014854 from the checklist SURVIVED, because the paragraph
+  // explaining why it matters still named it. Same class as the two scans in
+  // this file that matched a migration's own prose: an assertion over a wider
+  // text than the property belongs to cannot fail. So the header carries a
   // single `CONFIRM APPLIED:` line and this compares that line, exactly.
   //
-  // The required set is DERIVED, never a second hand-maintained copy:
-  //   * every migration defining an RPC this code calls, and
-  //   * every migration that REVOKES on public.enhancement_requests.
+  // THE REQUIRED SET IS DERIVED IN TWO HOPS, never hand-maintained:
+  //   1. every migration DEFINING an RPC this code calls;
+  //   2. every migration that REVOKES on a table those RPCs TRUST — read out of
+  //      each function's own body, not listed here.
+  //
+  // ⚠️ HOP 2 USED TO SAY "revokes on public.enhancement_requests", WHICH MISSED
+  // A REAL DEPENDENCY. `stamp_approved_notified` authorizes its caller by
+  // reading `public.profiles` for role = 'underwriter'. If
+  // 20261005120100_profiles_role_not_self_assignable were skipped, the old
+  // grants let any authenticated client UPDATE or INSERT their own
+  // `profiles.role` — so a client makes themselves an underwriter, and both
+  // this function and `er_underwriter_select` believe them: approval capability
+  // and cross-client request access. A hard-coded table name could not see
+  // that; the body scan can, because the trust is written in the SQL.
+  // Codex #256 round 9.
+  //
   // Equality, not containment — so a version left behind after its migration is
   // renamed or dropped fails too, the same inversion lesson as BACK_ELIGIBLE.
   // Comments are stripped before the revoke scan: this file has already been
   // bitten twice by a migration's prose documenting the statement it must not
-  // contain.
+  // contain. `on function` is excluded — an EXECUTE revoke is the functions'
+  // own hygiene, not a table boundary.
   const migDir = join(here, "..", "..", "migrations");
   const migs = readdirSync(migDir)
     .filter((f) => f.endsWith(".sql"))
     .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8") }));
 
   const required = new Set();
+  const trusted = new Set();
   for (const name of called) {
     const defRe = new RegExp(
-      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(`, "i",
+      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([\\s\\S]*?)\\$\\$\\s*;`, "i",
     );
-    for (const m of migs.filter((m) => defRe.test(m.sql))) required.add(m.version);
+    const hits = migs.filter((m) => defRe.test(m.sql));
+    assert.ok(hits.length > 0, `no migration defines public.${name}, so nothing can be required for it`);
+    for (const m of hits) {
+      required.add(m.version);
+      // Every public.<thing> the function body names, minus the RPCs
+      // themselves, is a table it reads or writes — i.e. trusts.
+      for (const t of m.sql.match(defRe)[0].matchAll(/public\.(\w+)/g)) {
+        if (!called.includes(t[1])) trusted.add(t[1]);
+      }
+    }
   }
-  const revokers = migs.filter((m) =>
-    /revoke[^;]*\bon\s+public\.enhancement_requests/i.test(m.sql.replace(/^\s*--.*$/gm, "")));
+  assert.ok(trusted.size > 0, "no trusted tables derived from the RPC bodies — did the body scan lose them?");
+
+  const revokers = migs.filter((m) => {
+    const sql = m.sql.replace(/^\s*--.*$/gm, "");
+    return [...sql.matchAll(/revoke\s+[a-z, ()\w]*?\s+on\s+(?:table\s+)?public\.(\w+)/gi)]
+      .some((r) => trusted.has(r[1]));
+  });
   assert.ok(
     revokers.length > 0,
-    "no migration revokes on public.enhancement_requests — the privilege narrowing that makes the stamp functions a boundary is gone",
+    `no migration revokes on any of the tables these RPCs trust (${[...trusted].sort().join(", ")}) — the privilege narrowing that makes them a boundary is gone`,
   );
   for (const m of revokers) required.add(m.version);
 
@@ -477,7 +506,7 @@ test("the deploy header names every RPC the code calls", () => {
   assert.deepEqual(
     [...listed].sort(), [...required].sort(),
     "the deploy header's CONFIRM APPLIED list does not match the migrations this function actually depends on " +
-    `(defining its RPCs, or revoking on enhancement_requests): listed ${[...listed].sort().join(", ") || "none"}, ` +
-    `required ${[...required].sort().join(", ")}`,
+    `(defining its RPCs, or revoking on a table those RPCs trust: ${[...trusted].sort().join(", ")}): ` +
+    `listed ${[...listed].sort().join(", ") || "none"}, required ${[...required].sort().join(", ")}`,
   );
 });

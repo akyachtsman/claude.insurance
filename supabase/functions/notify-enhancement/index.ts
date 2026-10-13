@@ -96,19 +96,28 @@
 //      today: stamp_requested_notified, stamp_approved_notified
 //   2. run the Supabase MCP `list_migrations` and confirm the migration defining
 //      each one is present — 20261013005250 and 20261013013743 respectively
-//   2b. AND confirm every migration that REVOKES on public.enhancement_requests
-//      is present: 20261013013743 (revoke update) and 20261013014854 (revoke
-//      insert). These are the boundary, not housekeeping. The stamp functions
-//      are decorative without them — a skipped 20261013013743 leaves staff able
-//      to reset either stamp and re-send without bound, and a skipped
-//      20261013014854 leaves the table-wide INSERT grant, so a client can
-//      create a request with a stamp already populated and the legitimate
-//      handler then answers `already_notified` and emails nobody. ⚠️ Unlike the
-//      RPC case this is NOT fail-closed: the function works and the boundary is
-//      simply absent, which is the worse direction. Codex #256 round 8; the
-//      header's first version checked only the two RPC migrations.
-//      `privilege.test.mjs` DERIVES this list (any migration revoking on that
-//      table) and fails if one is missing here, so it cannot go stale.
+//   2b. AND confirm every migration that REVOKES on a table these RPCs TRUST is
+//      present. These are the boundary, not housekeeping — the stamp functions
+//      are decorative without them, and ⚠️ unlike the RPC case this is NOT
+//      fail-closed: the function works and the boundary is simply absent, which
+//      is the worse direction.
+//        20261013013743 — revoke update on enhancement_requests. Skipped: staff
+//          can reset either stamp and re-send without bound.
+//        20261013014854 — revoke insert on enhancement_requests. Skipped: the
+//          table-wide INSERT grant stands, so a client creates a request with a
+//          stamp already populated and the handler then answers
+//          `already_notified` and emails nobody.
+//        20261005120100 — revoke update/insert on profiles. Skipped: any client
+//          can set their own `profiles.role` to 'underwriter', and
+//          stamp_approved_notified AUTHORIZES THE CALLER BY READING THAT COLUMN
+//          — so they gain approval capability, and er_underwriter_select gives
+//          them every client's requests. Codex #256 round 9; the first two
+//          versions of this header missed it because the derivation was
+//          hard-coded to one table.
+//      `privilege.test.mjs` DERIVES this list in two hops — the migrations
+//      defining the called RPCs, then the migrations revoking on any table those
+//      function BODIES name — and compares the next line by set equality, so it
+//      can neither go stale nor keep a version whose migration is gone.
 //
 //   ⚠️ THE MACHINE-CHECKED LIST IS THE NEXT LINE, and it is the only part of
 //   this header `privilege.test.mjs` compares against the migrations. Keeping it
@@ -116,7 +125,7 @@
 //   version ANYWHERE in the header, and a mutation deleting 20261013014854 from
 //   the checklist PASSED because the prose above still mentioned it. An
 //   assertion over a wider text than the property belongs to cannot fail.
-//   CONFIRM APPLIED: 20261013005250 20261013013743 20261013014854
+//   CONFIRM APPLIED: 20261005120100 20261013005250 20261013013743 20261013014854
 //
 //   3. only then deploy. A missing RPC migration is FAIL-CLOSED (the rpc errors and
 //      the branch returns `claim_failed` with nothing sent), so the cost is a
