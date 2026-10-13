@@ -82,9 +82,28 @@ jobs:
             exit 1
           fi
 
-      - uses: supabase/setup-cli@v1
+      # ⚠️ PINNED TO A COMMIT SHA, AND THE VERSION PINNED TOO — not `@v3` and not
+      # `latest`. A tag is mutable: whoever controls it can repoint it at new
+      # code, and this step hands that code a Supabase PAT that reaches every
+      # project on the account. That is the esm.sh lesson from CLAUDE.md on a
+      # second surface — `index.ts` already pins `supabase-js@2.117.2` and
+      # `@anthropic-ai/sdk@0.131.0` for exactly this reason, so a floating action
+      # here contradicted the repo's own standard. Flagged by an automated
+      # security review of this file; the finding was correct.
+      #
+      # Resolved by `git ls-remote` on 2026-10-13, not recalled:
+      #   supabase/setup-cli v3.0.1 -> 45a513f8c64c0bc8e0e3dfe572b5c95be85f6359
+      # ⚠️ The first draft pinned `@v1`, which is THREE majors stale — the
+      # action's own README documents `@v3`. Pinning is not enough on its own;
+      # pinning the wrong thing freezes the wrong code.
+      #
+      # To update: re-run the ls-remote, bump both the SHA and the trailing
+      # comment together, and say in the commit why the bump was needed.
+      - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
-          version: latest
+          # A fixed CLI version, published to npm. `latest` would mean a deploy
+          # path that changes under us between two identical pushes.
+          version: 2.120.0
 
       # The three modules must go together: index.ts imports handler.ts and
       # prompt.ts, so a partial upload fails at bundle time. The CLI sends the
