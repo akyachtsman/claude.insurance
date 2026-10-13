@@ -2646,6 +2646,65 @@ only live proof the answer path works. Flagged so the first "why is the demo des
 rate-limited?" has an answer. (The *flake* half of this finding WAS fixed — S10's
 settle was 45s against the function's own 60s ceiling.)
 
+### `HELP_MODEL` — the model tier is a Supabase secret, allow-listed (2026-10-13)
+
+The Help desk's model is switchable from the Supabase dashboard (Project Settings
+→ Edge Functions → Secrets) without a redeploy or a PR. Unset means
+`claude-opus-5-5`. Accepted values, and nothing else:
+
+| value | $/1M in | $/1M out |
+|---|---|---|
+| `claude-opus-5-5` (default) | $4 | $20 |
+| `claude-sonnet-5-5` | $2 | $10 |
+| `claude-haiku-5-5` | $0.10 | $0.50 |
+
+**It is an allow-list rather than a pass-through, and that is the whole reason
+`resolveModel` exists.** An unrecognised id reaches the provider as an unknown
+model and comes back 400 — which FR-17 renders as the same quiet "not available"
+notice as an outage, a missing key, or an undeployed function. A typo in a secret
+would therefore be indistinguishable from all three, which is this file's most
+frequently repeated defect rather than a hypothetical. An unknown value **falls
+back to the default and logs `where: "model"`** naming what was ignored; falling
+back rather than refusing is deliberate, because a mistyped secret should cost a
+log line, not a dead desk. Case and surrounding whitespace are forgiven (they
+cannot be ambiguous); a **date-suffixed** id is explicitly NOT accepted, since it
+is the most likely wrong value a human types and it is wrong in a way that looks
+right.
+
+⚠️ **The model is never read from the request body**, for the same reason `owner`
+is not: a client-chosen model is a client deciding how much of the owner's money
+an ask costs, and both caps count **asks, not dollars**. A client-facing picker
+was considered and rejected on exactly that ground.
+
+⚠️ **`HELP_MODEL` is deliberately NOT part of `HAS_KEYS`.** A missing model is a
+working default, not a missing secret; conflating them would take the desk down
+over a setting that is correct when absent. `contract.test.mjs` asserts this
+against the `HAS_KEYS` declaration **scoped to the declaration itself**, because
+`HELP_MODEL` legitimately appears elsewhere in `index.ts` and a whole-file check
+could never fail — the same scoping defect this file records four times already.
+
+**Where each claim is gated, since they are not the same claim.** `handler.ts` is
+executable under Node and `index.ts` is not (it imports `jsr:`/`npm:` specifiers),
+so:
+
+| claim | gated by |
+|---|---|
+| the resolver maps values correctly | `handler.test.mjs`, executed |
+| the resolved id **reaches `messages.create`** | `handler.test.mjs`, executed — the fake captures `args.model` |
+| the call site carries no literal | `contract.test.mjs`, **source scan** |
+| `index.ts` reads the env and injects it | `contract.test.mjs`, **source scan** |
+
+The middle row is the one that matters: reverting the call site to a literal
+leaves every resolver test green. **Mutation-tested 8/8** — literal at the call
+site, allow-list accepting anything, deleted rejection log, dropped
+`toLowerCase`, blank no longer meaning unset, `index.ts` not injecting, `index.ts`
+not reading the env, and `HELP_MODEL` folded into `HAS_KEYS`.
+
+⚠️ The source scans claim only what a scan can: they cannot see whether the
+deployed function was built from this source. Nothing here executes `index.ts`,
+which is the exact condition that let seven of eight behaviour-breaking edits
+survive this feature's original suite.
+
 ### ⚠️ Recorded — `max_tokens: 8192` against a 60s non-streaming timeout
 
 The provider call is non-streaming with a 60s request timeout and `max_tokens:
