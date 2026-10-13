@@ -12,7 +12,7 @@
 // on the RESPONSE or on what the fake database was actually asked for.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handle } from "./handler.ts";
+import { handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL } from "./handler.ts";
 
 // ── A PostgREST-shaped fake. It records every query it is asked to run, so a
 //    test can assert what was NOT scoped as easily as what came back.
@@ -968,4 +968,104 @@ test("the own-slot exclusion applies to the OLDEST-row read too", async () => {
   assert.ok(body.retryAfter > 580 && body.retryAfter < 625,
     `expected ~600s (the oldest RETAINED row, 50 min old). Got ${body.retryAfter}; ~240 means the index ` +
     `landed on the caller's own reservation, which is about to be deleted`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE MODEL TOGGLE (`HELP_MODEL`)
+//
+// Two separate claims, and only the second one catches a hardcoded literal left
+// behind at the call site. "Classifying a value is not the same as feeding it to
+// the thing that uses it" is a lesson this repo has already paid for twice.
+// ─────────────────────────────────────────────────────────────────────────────
+test("resolveModel: unset, blank and whitespace all mean the default", () => {
+  for (const raw of [undefined, null, "", "   ", "\t\n"]) {
+    assert.deepEqual(resolveModel(raw), { model: DEFAULT_HELP_MODEL, rejected: null }, `raw=${JSON.stringify(raw)}`);
+  }
+});
+
+test("resolveModel: every allow-listed model is accepted as itself", () => {
+  assert.equal(HELP_MODELS.length, 3, "the toggle is meant to offer three tiers");
+  for (const m of HELP_MODELS) {
+    assert.deepEqual(resolveModel(m), { model: m, rejected: null }, m);
+  }
+  // The default must itself be on the list, or the fallback is unreachable.
+  assert.ok(HELP_MODELS.includes(DEFAULT_HELP_MODEL), "the default is not on the allow-list");
+});
+
+test("resolveModel: case and surrounding space are forgiven", () => {
+  assert.deepEqual(resolveModel("  Claude-Opus-5-5 "), { model: "claude-opus-5-5", rejected: null });
+  assert.deepEqual(resolveModel("CLAUDE-HAIKU-5-5"), { model: "claude-haiku-5-5", rejected: null });
+});
+
+test("resolveModel: an unknown id falls back to the default AND reports itself", () => {
+  // Falling back rather than refusing is the deliberate direction — FR-17 renders
+  // a refusal as the same quiet notice as an outage, so a typo would read as one.
+  // `rejected` is what stops the fallback being silent.
+  for (const bad of ["claude-opus-5-5-20260401", "gpt-4", "opus", "claude-opus-9", "claude-sonnet-5-5 "  + "\u200b"]) {
+    const got = resolveModel(bad);
+    assert.equal(got.model, DEFAULT_HELP_MODEL, bad);
+    assert.equal(got.rejected, bad.trim(), bad);
+  }
+});
+
+test("resolveModel: a date-suffixed id is NOT silently accepted", () => {
+  // Guarded explicitly because a date suffix is the single most likely wrong
+  // value a human will type, and it is wrong in a way that looks right.
+  assert.equal(resolveModel("claude-haiku-5-5-20260301").model, DEFAULT_HELP_MODEL);
+});
+
+test("the configured model is what actually reaches the provider", async () => {
+  // THE WIRING CLAIM. With `model` at the call site reverted to a literal, every
+  // assertion above still passes and this one fails.
+  for (const m of HELP_MODELS) {
+    let sent = null;
+    const { d } = deps({
+      anthropic: { messages: { create: async (a) => { sent = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+      d: { helpModel: m },
+    });
+    const res = await ask(d);
+    assert.equal(res.status, 200, m);
+    assert.equal(sent?.model, m, `HELP_MODEL=${m} did not reach messages.create`);
+  }
+});
+
+test("an unset HELP_MODEL sends the default, and a bad one sends the default too", async () => {
+  for (const raw of [undefined, "", "not-a-model"]) {
+    let sent = null;
+    const { d } = deps({
+      anthropic: { messages: { create: async (a) => { sent = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+      d: { helpModel: raw },
+    });
+    await ask(d);
+    assert.equal(sent?.model, DEFAULT_HELP_MODEL, `raw=${JSON.stringify(raw)}`);
+  }
+});
+
+test("a rejected HELP_MODEL is logged as where:model, naming what was ignored", async () => {
+  const lines = [];
+  const real = console.error;
+  console.error = (x) => lines.push(String(x));
+  try {
+    const { d } = deps({ d: { helpModel: "claude-opus-6" } });
+    await ask(d);
+  } finally {
+    console.error = real;
+  }
+  const hit = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+                   .find((o) => o && o.where === "model");
+  assert.ok(hit, "no where:model log line for a rejected secret");
+  assert.equal(hit.rejected, "claude-opus-6");
+  assert.equal(hit.using, DEFAULT_HELP_MODEL);
+});
+
+test("the model is never taken from the request body", async () => {
+  // Same rule as `owner`: a body-chosen model is a client choosing how much of
+  // the owner's money an ask costs, and both caps count asks, not dollars.
+  let sent = null;
+  const { d } = deps({
+    anthropic: { messages: { create: async (a) => { sent = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+    d: { helpModel: "claude-haiku-5-5" },
+  });
+  await ask(d, { question: "hi", model: "claude-opus-5-5", helpModel: "claude-opus-5-5" });
+  assert.equal(sent?.model, "claude-haiku-5-5", "the request body chose the model");
 });
