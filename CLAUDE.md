@@ -76,7 +76,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   `pages-retry.yml`. `.github/actions/` holds the shared composite actions
   (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
   `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013120000_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013005250_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
   and ACTIVE — ⚠️ **but was NON-FUNCTIONAL from the day it shipped until the
   2026-10-13 rewrite, and "ACTIVE" is what hid that.** See the `service_role`
   constraint below for the measurement and the fix. The `notify-lead` /
@@ -159,8 +159,12 @@ This is the one to follow; the others defer to it.
    published *client* credential: that one reaches its own rows only, because
    every other table keys on `owner = auth.uid()` with no role escape, whereas
    `er_broker_select` / `er_underwriter_select` read **every** client's
-   enhancement requests and the update policies write them (status-constrained
-   since `20261009210000`, still unconstrained on `owner`/`subject`/`body`).
+   enhancement requests. ⚠️ The WRITE half of that exposure is narrower since
+   2026-10-13: `20261013013743_notified_stamps_write_once` leaves
+   `authenticated` able to UPDATE only `(status, approved_at)`, so a leaked staff
+   credential can move a request's stage but can no longer rewrite its `owner`,
+   `subject`, `message` or `context`. The READ exposure is unchanged and is
+   still the reason to rotate.
    Accepted today on a **measured** precondition — `auth.users` holds exactly
    three rows, all `@example.com`, and `enhancement_requests` holds one row owned
    by the demo client, so there is no real client data to expose — and that
@@ -575,9 +579,16 @@ profile**, never by listing a directory.
   the denial would miss); `insert into profiles` → **403 / 42501**;
   `select id, role` → **200, one row**.
   **What the fix did NOT close, and is still live:** `er_broker_update` has no
-  `with check` on `owner`/`subject`/`body`, so a *genuine* broker or underwriter
-  can still rewrite those columns on any client's enhancement request, not just
-  the status. Narrower than before (no client can become one), and recorded in
+  `with check` on `owner`/`subject`/`body`. ⚠️ **That gap is CLOSED as of
+  2026-10-13, by privilege rather than by policy** —
+  `migrations/20261013013743_notified_stamps_write_once.sql` revoked table-wide
+  UPDATE from `authenticated` and re-granted `(status, approved_at)` only, so a
+  genuine broker or underwriter can no longer write `owner`, `subject`,
+  `message` or `context` at all. Measured after apply: `authenticated` may
+  UPDATE **2 of 13 columns**. The missing `with check` is now belt rather than
+  the only thing standing between staff and a client's request text, and it
+  would matter again if the grant were ever widened — which is why the migration
+  also carries a write-once trigger. Recorded in
   `supabase/migrations/20261005120000_enhancement_request_stage_guard.sql`.
 - **⚠️ `service_role` HAS NO TABLE PRIVILEGES IN THIS PROJECT (live, measured
   2026-10-06).** Not a trade-off — a fact that invalidates the obvious way to
@@ -1637,7 +1648,7 @@ legitimate writer touches — `js/` only ever writes `status` (via
 UPDATE whatsoever — so the narrowing breaks nothing that works today.
 
 ⚠️ **This also corrects the migration's own reasoning.**
-`20261013120000_stamp_requested_notified.sql` said a column grant was "the
+`20261013005250_stamp_requested_notified.sql` said a column grant was "the
 obvious answer and is wrong here" and stopped there. Wrong *for that one
 column* — granting only `requested_notified_at` would leave it the only writable
 column for everyone — but a column grant is precisely the right tool for this
@@ -1715,7 +1726,7 @@ which is the comment-stripping trap already handled for the TypeScript scan, met
 again on a second surface.
 
 ⚠️ One consequence for this repo's own habits: the probe in
-`migrations/20261013120000_stamp_requested_notified.sql` ends by restoring the
+`migrations/20261013005250_stamp_requested_notified.sql` ends by restoring the
 demo row's `requested_notified_at` to null. Once this is applied that statement
 is **refused**, correctly. Use the documented disable/enable pair, or leave the
 demo row stamped.
@@ -1818,19 +1829,45 @@ real client session over PostgREST or `/auth/v1/token`**, and no way to invoke a
 deployed Edge Function. `akyachtsman.github.io` is reachable, so this is
 host-specific, not general.
 
-**What that costs, and the workaround's exact limit.** The in-database substitute
-is `set local role authenticated` plus `set local "request.jwt.claims"`, and it
-is only partly faithful: ⚠️ **it does NOT enforce RLS.** Checked rather than
-assumed — acting as `authenticated` with a FOREIGN uid, `select count(*) from
-public.enhancement_requests` returned **1** where `er_select_own` should give 0;
-`session_user` is `postgres` and the MCP evidently executes in a privileged
-context. So that harness can measure anything not depending on RLS
-(`auth.uid()` resolution, a SECURITY DEFINER function's own WHERE clause, grants,
-privileges) and **nothing that does**.
-This is the same false-pass trap this file already records for service-role
-probes, arrived at from a different direction — and it means the earlier
-"verified as a real client session" records in this file were made when egress
-was available, not with this substitute. Re-measure before assuming either state.
+**The workaround, and what it is actually worth.** The in-database substitute is
+`set local role authenticated` plus `set local "request.jwt.claims"`, and it
+**DOES enforce RLS and column privileges** — so it exercises policies, grants and
+a SECURITY DEFINER function's own predicate. Measured 2026-10-13 with a uid
+holding no `profiles` row (`99999999-…`): `enhancement_requests` 0 rows,
+`profiles` 0, `entities` 0.
+
+⚠️ **AN EARLIER VERSION OF THIS SECTION SAID THE OPPOSITE — "it does NOT enforce
+RLS" — AND THE ERROR IS THE INSTRUCTIVE PART.** That claim came from one probe
+which acted as `authenticated` with what it called "a FOREIGN uid" and saw
+`select count(*) from public.enhancement_requests` return **1** where
+`er_select_own` should give 0. The uid used was
+`22222222-2222-4222-8222-222222222222` — **the seeded BROKER's id** — and
+`er_broker_select` legitimately shows a broker every request. So the row it
+returned was RLS working correctly, read as RLS being bypassed, and the wrong
+conclusion then propagated into two migration files, a PR body and three Codex
+threads before anything caught it.
+**The lesson is not about this harness.** It is that a probe's INPUT needs
+checking as carefully as its output: the uid was never verified to belong to
+nobody, and `select id, role from profiles` would have settled it in one call.
+Same family as the `.k-h1` assertion and the concatenated-migrations scan — a
+measurement that cannot mean what it is taken to mean.
+
+⚠️ **What it still cannot do:** run a real PostgREST request or invoke a deployed
+Edge Function, so anything about HTTP status codes, PostgREST's
+return-representation behaviour or gateway `verify_jwt` handling is still
+unmeasurable from here. And `session_user` is `postgres`, so a statement run
+WITHOUT `set local role` bypasses RLS entirely — which is the service-role
+false-pass trap this file records elsewhere, one `set` away.
+
+⚠️ **A DELETE CANNOT BE RUN THROUGH THE MCP EITHER (measured twice, 2026-10-13).**
+`delete from public.enhancement_requests where id = …` hangs 60s and applies
+nothing, the same signature this file records for `DROP POLICY`/`DROP TABLE`; the
+earlier finding was written as a DDL constraint and does not cover DML. Verified
+by re-reading the table after each attempt — the row was still there both times.
+**Consequence:** a probe that inserts a row cannot clean up after itself from a
+session. Wrap probe data in a transaction that rolls back, or probe an existing
+row, or accept that the owner must delete it by hand. One such row is outstanding
+— see `migrations/20261013013743_notified_stamps_write_once.sql`'s probe footer.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 

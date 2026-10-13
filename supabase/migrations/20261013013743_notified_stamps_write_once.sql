@@ -2,9 +2,14 @@
 -- entirely: narrow UPDATE to the lifecycle columns, and write both stamps only
 -- through SECURITY DEFINER functions that authorize caller, status and event.
 --
--- ⚠️ THIS BLOCKS THE notify-enhancement DEPLOY, and the code on PR #256 CALLS
--- the function this file defines — they ship as a pair. Written, not applied:
--- CLAUDE.md requires explicit owner approval for migrations.
+-- ✅ APPLIED 2026-10-13 as version 20261013013743, on the owner's explicit
+-- approval, with the full probe below run and recorded. The `drop trigger if
+-- exists` line was OMITTED from the applied statements: the Supabase MCP hangs
+-- 60s on it and it is a no-op on a first apply. Everything else applied as
+-- written.
+--
+-- It gated the notify-enhancement deploy, and the code on PR #256 calls the
+-- function defined here — they ship as a pair, and this half is now live.
 --
 -- ⚠️ THIS FILE REPLACED A TRIGGER-ONLY DESIGN, AND THE REASON IS THE WHOLE
 -- POINT. The first version added only a BEFORE UPDATE trigger making both
@@ -43,14 +48,24 @@
 -- walk-forward, and no pre-claim, because the privilege is simply gone. That is
 -- what makes the class closed rather than bounded.
 --
--- ⚠️ WHAT THIS STILL DOES NOT FIX, so it is not mistaken for covered: staff can
--- rewrite `owner`, `subject` and `body` on any client's request. Wider,
--- pre-existing, recorded in CLAUDE.md, and untouched here — `(status,
--- approved_at)` is what staff NEED, and the policies' missing `with check` on
--- those columns is a separate migration.
+-- ⚠️ THIS CLOSED MORE THAN IT SET OUT TO, AND THE EARLIER DRAFT OF THIS COMMENT
+-- SAID THE OPPOSITE. It read: "staff can rewrite `owner`, `subject` and `body`
+-- on any client's request — wider, pre-existing, and untouched here." That was
+-- written before the apply and is now false. Measured after:
+--
+--   authenticated may UPDATE: approved_at, status          (2 of 13 columns)
+--   closed: approved_notified_at, asset_id, context, created_at, entity_id,
+--           id, message, owner, policy_id, requested_notified_at, subject
+--
+-- So the long-standing gap CLAUDE.md recorded as accepted — staff rewriting
+-- owner/subject/body on any client's request — is CLOSED by this revoke, as a
+-- side effect of narrowing to what staff actually need. The policies' missing
+-- `with check` on those columns is now belt rather than the only thing between
+-- staff and a client's request text; a `with check` migration would still be
+-- worth having if the grant were ever widened again.
 
 -- ── 1. the approved-event stamp, authorized ─────────────────────────────────
--- Mirrors public.stamp_requested_notified (migrations/20261013120000) and
+-- Mirrors public.stamp_requested_notified (migrations/20261013005250) and
 -- authorizes the three things the handler must not be trusted to check:
 --   the CALLER  — must be the underwriter, read from profiles, not the request
 --   the STATUS  — must be `approved`, so the stamp cannot be laid on a declined
@@ -143,43 +158,71 @@ create trigger enhancement_requests_notified_write_once
   before update on public.enhancement_requests
   for each row execute function public.enforce_notified_write_once();
 
--- ── POST-APPLY PROBE ────────────────────────────────────────────────────────
--- Two halves, and both are needed: the denials are what this is for, and the
--- allows are what prove it did not break the lifecycle instead. A guard
--- tightened one notch too far refuses the underwriter's own approval and looks
--- like it is working — the failure mode CLAUDE.md records against the stage
--- guard's own probe.
+-- ── POST-APPLY PROBE — RUN 2026-10-13, both directions ─────────────────────
 --
--- ⚠️ The PRIVILEGE half needs a real staff session over PostgREST, which cannot
--- be run from the authoring sandbox (HTTPS egress to the project is blocked:
--- connect_rejected). The in-database `set local role` substitute does NOT
--- enforce RLS — measured, a foreign uid still saw the row — but it DOES enforce
--- column privileges, which is what step 2 changes, so the privilege denials are
--- checkable there. The POLICY-dependent parts are not. State which half any
--- recorded run covered.
+-- ⚠️ FIRST, A CORRECTION THAT CHANGES WHAT THIS PROBE IS WORTH. Every earlier
+-- note in this repo — including the draft of this file — said the in-database
+-- harness (`set local role authenticated` + `set local "request.jwt.claims"`)
+-- "does NOT enforce RLS". THAT WAS WRONG, and the cause is worth recording
+-- because it is a measurement error, not a tooling limit: the probe that
+-- "proved" it used uid 22222222-2222-4222-8222-222222222222 as a FOREIGN
+-- CLIENT. That is the seeded BROKER's uid, and `er_broker_select` legitimately
+-- shows a broker every request — so the row it returned was RLS working
+-- correctly, read as RLS being bypassed.
+-- Re-measured with a uid holding no profiles row at all
+-- (99999999-9999-4999-8999-999999999999): enhancement_requests 0 rows,
+-- profiles 0, entities 0. RLS IS ENFORCED HERE. So this probe exercises
+-- policies AND privileges, and the claims below are measured rather than
+-- derived.
 --
--- privilege denials (checkable in-database as `set local role authenticated`):
---   update ... set approved_notified_at  = now()  -> 42501  (no column privilege)
---   update ... set requested_notified_at = now()  -> 42501  (no column privilege)
---   update ... set subject = 'x'                  -> 42501  (no column privilege)
--- lifecycle allows (needs a real broker/underwriter session for the policy half):
---   update ... set status = 'broker_review'       -> 204    (advanceRequest)
---   update ... set status = 'approved',
---                  approved_at = now()            -> 204    (advanceRequest)
--- the functions:
---   as the underwriter, stamp_approved_notified(<approved row>)   -> timestamp
---   again                                                         -> NULL
---   as a client or broker                                         -> NULL
---   on a row at 'declined' or 'underwriting'                      -> NULL
---   as the owner, stamp_requested_notified(<requested row>)       -> timestamp
--- the belt:
---   as postgres: update ... set approved_notified_at = null       -> 42501 (trigger)
+-- Run on a throwaway row (aaaaaaaa-0000-4000-8000-000000000001) so the seeded
+-- demo request was never touched; it was re-read afterwards and is unchanged
+-- (status `requested`, both stamps null).
 --
--- ⚠️ And one consequence for this repo's own habits: the probe in
--- migrations/20261013120000_stamp_requested_notified.sql finishes by restoring
--- the demo row's requested_notified_at to null. That statement will be REFUSED
--- once this is applied — correctly. Use the disable/enable pair below, or leave
--- the demo row stamped.
+-- PRIVILEGE DENIALS — as `authenticated`:
+--   update ... set approved_notified_at = now()   -> 42501 permission denied
+--   update ... set requested_notified_at = now()  -> 42501 permission denied
+--   update ... set subject = 'forged'             -> 42501 permission denied
+--
+-- LIFECYCLE ALLOWS — policy and privilege together, with the REAL staff uids.
+-- ⚠️ The first attempt at this half ran as the CLIENT and matched zero rows; the
+-- client has no UPDATE policy at all, so it demonstrated nothing. Identity is
+-- part of the probe:
+--   broker      -> status = 'underwriting'                  1 row
+--   underwriter -> status = 'approved', approved_at = now()  1 row, approved_at set
+--
+-- THE STAMP FUNCTIONS — one timestamp each, then NULL, and NULL for the wrong
+-- caller:
+--   owner       stamp_requested_notified(row)  -> 2026-10-13 01:40:05+00
+--   owner       again                          -> NULL
+--   client      stamp_approved_notified(row)   -> NULL  (not underwriter)
+--   broker      stamp_approved_notified(row)   -> NULL  (not underwriter)
+--   underwriter stamp_approved_notified(row)   -> 2026-10-13 01:40:22+00
+--   underwriter again                          -> NULL
+--
+-- THE BELT — as `postgres`, which has no exemption, because a write-once column
+-- with an exemption is not write-once:
+--   set approved_notified_at = null  -> 42501 "approved_notified_at is
+--                                       write-once (was ..., attempted <NULL>)"
+--   set approved_notified_at = now() -> 42501 "... attempted 2026-10-13 01:40:35"
+--
+-- ⚠️ ONE PIECE OF LITTER, AND IT NEEDS ONE LINE FROM THE OWNER. The throwaway
+-- probe row could not be removed: **the Supabase MCP hangs 60s on a DELETE and
+-- applies nothing**, exactly as CLAUDE.md records for DROP. Measured twice, and
+-- the row is still present and verified still present after each attempt. It is
+-- owned by the demo client, subject "PROBE ROW - delete me", and it will show up
+-- in the Keep's My-requests list. Remove it in the Dashboard SQL editor:
+--   delete from public.enhancement_requests
+--    where id = 'aaaaaaaa-0000-4000-8000-000000000001';
+-- (This is a NEW constraint on this environment — the recorded DROP finding did
+-- not cover DML. Use a transaction-wrapped probe, or no probe row at all, next
+-- time.)
+--
+-- ⚠️ And one consequence for this repo's own habits, now REAL rather than
+-- predicted: the probe in migrations/20261013005250_stamp_requested_notified.sql
+-- finishes by restoring the demo row's requested_notified_at to null. That
+-- statement is now REFUSED by the trigger above — correctly. Use the
+-- disable/enable pair below, or leave the row stamped.
 --
 -- ── INVERSE (reversible-by-design, per data.md) ─────────────────────────────
 --   grant update on public.enhancement_requests to authenticated;   -- undoes step 2
