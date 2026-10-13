@@ -140,6 +140,47 @@ function sameSignature(params, want) {
   return got.length === want.length && got.every((t, i) => t === want[i]);
 }
 
+// Find the body of a CREATE FUNCTION, reading from its `AS` clause. Walks the
+// text skipping dollar-quoted and single-quoted spans so an `as` appearing
+// INSIDE an earlier option value cannot be mistaken for the clause — which is
+// exactly the round-23 bypass. Handles both `as $tag$ … $tag$` and `as '…'`.
+function asClauseBody(rest) {
+  let i = 0;
+  while (i < rest.length) {
+    const tag = rest.slice(i).match(/^\$[A-Za-z_]*\$/);
+    if (tag) {                                   // skip a dollar-quoted span whole
+      const close = rest.indexOf(tag[0], i + tag[0].length);
+      if (close === -1) return { unterminated: true, tag: tag[0] };
+      i = close + tag[0].length;
+      continue;
+    }
+    if (rest[i] === "'") {                       // skip a quoted span whole
+      let j = i + 1;
+      while (j < rest.length) {
+        if (rest[j] === "'" && rest[j + 1] === "'") { j += 2; continue; }
+        if (rest[j] === "'") break;
+        j += 1;
+      }
+      if (j >= rest.length) return { unterminated: true, tag: "'" };
+      i = j + 1;
+      continue;
+    }
+    if (/^as\b/i.test(rest.slice(i)) && (i === 0 || /[\s)'"]/.test(rest[i - 1]))) {
+      const after = rest.slice(i + 2);
+      const open = after.match(/^\s*(\$[A-Za-z_]*\$|')/);
+      if (!open) { i += 2; continue; }            // `as` in some other role
+      const delim = open[1];
+      const tagAt = i + 2 + open[0].length - delim.length;
+      const start = tagAt + delim.length;
+      const end = rest.indexOf(delim, start);
+      if (end === -1) return { unterminated: true, tag: delim };
+      return { tag: delim, tagAt, start, end };
+    }
+    i += 1;
+  }
+  return null;
+}
+
 // The definition Postgres would actually be running: the LAST create-or-replace
 // of THIS SIGNATURE, across every migration in order — and the last one within a
 // file, since one file may replace it twice.
@@ -164,13 +205,21 @@ function effectiveFunction(name, want) {
     for (const hit of sql.matchAll(head)) {
       if (!sameSignature(hit[1], want)) continue;   // an overload is not a replacement
       const rest = sql.slice(hit.index);
-      // The opening tag is the first $…$ after the parameter list; the body ends
-      // at the MATCHING tag. `$$` and `$body$` go through the same path.
-      const open = rest.match(/\$[A-Za-z_]*\$/);
-      if (!open) { unparsed.push(`${m.file}: no dollar-quoted body found`); continue; }
-      const bodyStart = open.index + open[0].length;
-      const close = rest.indexOf(open[0], bodyStart);
-      if (close === -1) { unparsed.push(`${m.file}: body opened with ${open[0]} and never closed`); continue; }
+      // ⚠️ THE BODY IS THE `AS` CLAUSE'S VALUE, not the first dollar tag after
+      // the parameter list. Codex round 23: a function OPTION can carry its own
+      // dollar-quoted value, and
+      //   `… set app.audit = $safe$ <a correct-looking body> $safe$ as $real$ <an unsafe one> $real$`
+      // made the predicate and `for update` assertions inspect the SET VALUE
+      // while Postgres ran `$real$`. Reproduced: tests 16 and 18 both passed
+      // against the decoy. The first-tag assumption was flagged as uncertain
+      // when this was written, and it was wrong.
+      const at = asClauseBody(rest);
+      if (!at) { unparsed.push(`${m.file}: no AS clause body found`); continue; }
+      if (at.unterminated) { unparsed.push(`${m.file}: body opened with ${at.tag} and never closed`); continue; }
+      const open = [at.tag];
+      open.index = at.tagAt;
+      const bodyStart = at.start;
+      const close = at.end;
       found = {
         file: m.file,
         body: rest.slice(0, close + open[0].length),
@@ -1051,33 +1100,41 @@ function parseGrantees(rolesRaw) {
   return { channels, unknown };
 }
 
-// ── A LITERAL THAT *IS* A GRANT STATEMENT, wherever it appears
+// ── ANY LITERAL NAMING grant/revoke, EXCEPT A COMMENT'S OWN TEXT
 //
-// ⚠️ THE HEAD-BASED VERSION THIS REPLACES WAS WRONG IN BOTH DIRECTIONS, and the
-// second was a real bypass. It asked "is this statement's head executable?",
-// treating `DO` and a function definition's `AS '…'` as code and a documented
-// inert set (COMMENT, SELECT, INSERT, …) as data. Codex round 22:
-// `select public.run_sql('GRANT EXECUTE ON FUNCTION … TO authenticated')`, where
-// `run_sql` is a migration-defined `EXECUTE p_sql` wrapper, has head `select` —
-// on the inert list — so the grant was DISCARDED and 20/20 stayed green.
-// Reproduced before fixing.
+// ⚠️ TWO DESIGNS FAILED HERE BEFORE THIS ONE, in opposite directions, and both
+// were mine:
+//   round 21 — classify by the statement's HEAD. Broken by round 22's
+//     `select public.run_sql('GRANT …')`: `select` was on the inert list.
+//   round 22 — classify by the literal being ANCHORED at a statement start
+//     (its beginning, after `BEGIN`, or just after `;`). Broken by round 23's
+//     `'BEGIN IF true THEN GRANT EXECUTE …; END IF; END'`, a PL/pgSQL body
+//     where the GRANT follows `IF … THEN`. PL/pgSQL permits non-row-returning
+//     SQL commands directly, so a GRANT can sit after arbitrary control flow
+//     and no anchor short of a PL/pgSQL parser finds it.
 //
-// The head was never the right question. **A literal either parses as a GRANT
-// statement or it does not**, and that is decidable without knowing who
-// executes it. So the test is anchored at a statement START — the literal's
-// beginning, after optional `BEGIN`, or just after a `;` — which is what
-// distinguishes
-//     'GRANT EXECUTE ON FUNCTION … TO authenticated'   ← a statement
-//     'BEGIN GRANT … ; END'                            ← a statement
-// from prose that merely contains the word:
-//     '… service_role holds select+insert by explicit grant. Replaces …'
-// Head-independent, so there is no inert list left to be incomplete.
-const ACL_LITERAL = /(?:^|;)\s*(?:begin\s+)?(grant|revoke)\s+[\s\S]*?\s(?:on|to|from)\s/i;
+// So there is no anchor and no head test. **Any literal containing a
+// word-bounded `grant` or `revoke` is reported**, and the single exemption is
+// structural rather than a guess: the argument of a `COMMENT` statement, which
+// is documentation by construction and cannot be executed.
+//
+// ⚠️ MEASURED BEFORE CHOOSING THIS: across every migration and proposal in this
+// repo there is exactly ONE literal containing either word, and it is this
+// repo's own `comment on table public.enhancement_notifications is '…'`. So the
+// exemption covers the only real case and the rule costs no false positives
+// today. If a legitimate literal ever names a grant outside a COMMENT, the
+// answer is to model that statement, not to widen the exemption back into a
+// head or anchor test — those are the two designs that already failed.
+const ACL_WORD = /\b(grant|revoke)\b/i;
 
-function executableLiteralAcl(_head, lits) {
-  const hit = (lits || []).find((l) => ACL_LITERAL.test(l));
-  return hit ?? null;
+function executableLiteralAcl(head, lits) {
+  if (/^comment\s+on\b/i.test((head || "").trim())) return null;
+  return (lits || []).find((l) => ACL_WORD.test(l)) ?? null;
 }
+
+// Tables whose privileges this suite's conclusions rest on. A function body or
+// a rename touching one is a write path to it regardless of any GRANT.
+const PROTECTED_TABLES = ["enhancement_notifications", "help_queries"];
 
 // ── THE OUTERMOST BOUNDARY: EVERY STATEMENT, NOT EVERY GRANT
 //
@@ -1115,13 +1172,26 @@ function executableLiteralAcl(_head, lits) {
 const BENIGN_STATEMENT = new RegExp(
   "^(?:" +
   // DDL that creates or shapes objects without granting anything
-  "create\\s+(?:unique\\s+)?(?:table|index|policy|trigger|view|materialized\\s+view|type|domain|extension|sequence|function|or\\s+replace\\s+function)\\b|" +
+  // ⚠️ `function` IS DELIBERATELY ABSENT HERE and is handled by statementKind
+  // instead. Codex round 23: a later SECURITY DEFINER helper that inserts
+  // straight into the claim table needs no GRANT in its body, and a new
+  // function is EXECUTABLE BY PUBLIC unless revoked — so blanket-allowing
+  // function creation let a client pre-consume a claim with 21/21 green.
+  "create\\s+(?:unique\\s+)?(?:table|index|policy|trigger|view|materialized\\s+view|type|domain|extension|sequence)\\b|" +
   "drop\\s+(?:policy|trigger|index|view|function|table|type|domain|constraint)\\b|" +
   // ALTER TABLE: only the subforms that cannot move ownership or RLS bypass.
   // ⚠️ `owner to` is deliberately NOT here, and neither is `force row level
   // security` — those are the round-22 finding and its nearest neighbour.
   "alter\\s+table\\s+[\\w.]+\\s+(?:enable|disable)\\s+row\\s+level\\s+security\\b|" +
-  "alter\\s+table\\s+[\\w.]+\\s+(?:add|drop|alter|rename)\\b|" +
+  // ⚠️ `rename` IS DELIBERATELY ABSENT. Codex round 23: the privilege replay
+  // is keyed on the table NAME, so a migration can create an open table,
+  // grant it to `authenticated`, rename the protected table away and rename
+  // the open one into its place — the grant is recorded against the old name,
+  // `clientHolds` stays empty, and the handler then writes the replacement
+  // table. Modelling renames means tracking object identity through a text
+  // scan; failing closed costs nothing, because this repo contains no RENAME
+  // at all (measured across all 87 statements).
+  "alter\\s+table\\s+[\\w.]+\\s+(?:add|drop|alter)\\b|" +
   "alter\\s+policy\\b|" +
   // DML and documentation
   "insert\\s+into\\b|update\\s+[\\w.]+\\s+(?:p\\s+)?set\\b|delete\\s+from\\b|" +
@@ -1137,13 +1207,35 @@ const BENIGN_STATEMENT = new RegExp(
 // reported.
 const MODELLED_STATEMENT = /^(?:grant|revoke)\b/i;
 
-function statementKind(head) {
+// ⚠️ `text` IS NOT OPTIONAL SUGAR — a function's BODY lives in a quoted span,
+// and `scan` has every quoted span's contents blanked (that is what stops a word
+// inside a string being read as SQL). So the shape of the statement is decided
+// from `head`/`scan` and anything about the BODY must be read from `text`.
+// Measured the hard way: the first version tested the protected-table reference
+// against `head`, and both the SECURITY DEFINER helper and the string-bodied
+// variant SURVIVED their mutations while the unit pins passed — because the pins
+// called this function with RAW SQL and the sweep calls it with the blanked
+// scan. **A pin that feeds the classifier different input than its caller does
+// is not a pin**; same family as the concatenated-files lesson in CLAUDE.md.
+function statementKind(head, text = head) {
   if (MODELLED_STATEMENT.test(head)) return "modelled";
   if (/^alter\s+(?:table|view|sequence|type|function|schema|materialized\s+view)[\s\S]*\bowner\s+to\b/i.test(head)) {
     return "owner";
   }
   if (/\bforce\s+row\s+level\s+security\b/i.test(head)) return "force-rls";
   if (/^alter\s+default\s+privileges\b/i.test(head)) return "default-privileges";
+  if (/^alter\s+table\s+[\w.]+\s+rename\b/i.test(head)) return "rename";
+  if (/^(?:create|alter)\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i.test(head)) {
+    // A function that touches a table this suite's conclusions rest on is a
+    // write path to it whatever its grants say — and a new function is
+    // EXECUTABLE BY PUBLIC unless revoked. The one function allowed to touch
+    // the claim table is the claim RPC itself, whose body, security mode,
+    // search_path and EXECUTE ACL are each asserted elsewhere.
+    const touches = PROTECTED_TABLES.some((t) => new RegExp(`\\bpublic\\.${t}\\b`, "i").test(text));
+    if (!touches) return "benign";
+    const isClaimRpc = new RegExp(`function\\s+public\\.${CLAIM_RPC}\\s*\\(`, "i").test(text);
+    return isClaimRpc ? "benign" : "function-writes-protected";
+  }
   if (BENIGN_STATEMENT.test(head)) return "benign";
   return "unknown";
 }
@@ -1542,7 +1634,14 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
   // occurrence of that class; see orderedMigrations() for why it is now one
   // shared lookup rather than a third patch.
   const hit = requireFunction(CLAIM_RPC, CLAIM_RPC_ARGS);
-  const body = hit.body;   // scoped to the function's own body
+  // ⚠️ `hit.inner`, NOT `hit.body`. `body` spans the WHOLE create statement,
+  // options included — so with a decoy in `set app.audit = $safe$ … $safe$`
+  // every assertion below passed against the decoy even after
+  // asClauseBody was fixed to find the real `AS` body. Measured: the
+  // attack migration produced ZERO failures until this line changed.
+  // The statement-level options (security definer, search_path) still read
+  // `hit.body`, which is correct — they are properties of the statement.
+  const body = hit.inner;   // the body's own text, nothing else
 
   // The predicate, both directions. A claim for an event may only be taken while
   // the request is at the status that event announces.
@@ -1583,7 +1682,11 @@ test("the claim is BOUND TO THE REQUEST'S STATUS, in the same statement", () => 
     `EXECUTE on public.${CLAIM_RPC} must end up granted to service_role, or every claim fails and nothing is ever sent`,
   );
   assert.ok(
-    /security\s+definer/i.test(body) && /set\s+search_path\s*=\s*''/.test(body),
+    // ⚠️ THE OPTIONS ARE PROPERTIES OF THE STATEMENT, so these two read
+    // `hit.body` (the whole create) while everything above reads
+    // `hit.inner` (the body). Repointing the shared variable moved these
+    // too and broke them, which is how the split got stated explicitly.
+    /security\s+definer/i.test(hit.body) && /set\s+search_path\s*=\s*''/.test(hit.body),
     `public.${CLAIM_RPC} must be SECURITY DEFINER with a pinned search_path (advisor 0011)`,
   );
 });
@@ -1624,13 +1727,13 @@ test("the claim serializes against a concurrent stage change", () => {
   // version (EvalPlanQual) — status is `declined`, nothing is inserted.
   const hit = requireFunction(CLAIM_RPC, CLAIM_RPC_ARGS);
   assert.ok(
-    /\bfor\s+update\b/i.test(hit.body),
+    /\bfor\s+update\b/i.test(hit.inner),
     `public.${CLAIM_RPC} must lock the request row (\`for update\`) — the status predicate alone is a snapshot read, so an uncommitted decline stays invisible and the claim is taken on a row that is about to be declined`,
   );
   // The lock has to be on the request, inside the same statement — not a
   // separate SELECT ... FOR UPDATE before it, which reopens the gap it closes.
   assert.ok(
-    /insert\s+into[\s\S]*?from\s+public\.enhancement_requests[\s\S]*?for\s+update[\s\S]*?on\s+conflict/i.test(hit.body),
+    /insert\s+into[\s\S]*?from\s+public\.enhancement_requests[\s\S]*?for\s+update[\s\S]*?on\s+conflict/i.test(hit.inner),
     `the \`for update\` must be part of the INSERT ... SELECT that takes the claim, between the request table and the ON CONFLICT`,
   );
 });
@@ -1822,8 +1925,16 @@ test("every GRANT/REVOKE in every migration is one this suite can account for", 
       true, "a function body given as a string literal is code too"],
     [`comment on table public.${CLAIM_TABLE} is 'held by explicit grant; revoke lives elsewhere';`,
       false, "prose in a COMMENT is inert — a gate that fails on a comment gets deleted"],
+    // ⚠️ THIS ROW WAS `false` UNDER THE ROUND-22 ANCHOR and is `true` now, which
+    // is the design changing rather than a regression. Round 23 removed the
+    // anchor (a PL/pgSQL body can place a GRANT after `IF … THEN`), so the only
+    // exemption left is a COMMENT's own argument. A row value that names a
+    // grant is therefore reported — the deliberate conservative direction
+    // already recorded in CLAUDE.md: no such table exists here, and if a
+    // job-queue table ever does, the fix is to model it, not to re-widen the
+    // exemption into the head or anchor tests that have now failed twice.
     [`insert into public.audit (note) values ('we grant nothing on this table');`,
-      false, "a row value is inert"],
+      true, "a literal naming a grant is reported outside a COMMENT, even in a row value"],
     [`refresh materialized view public.x with data; -- unrecognised head`,
       false, "no literal at all, so nothing to report"],
   ]) {
@@ -1874,10 +1985,10 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
   // claim directly and suppress the real notification.
   const findings = [];
   for (const m of orderedMigrations()) {
-    for (const { scan, lits } of sqlStatements(stripSqlComments(m.sql))) {
+    for (const { scan, text, lits } of sqlStatements(stripSqlComments(m.sql))) {
       const head = scan.trim();
       if (!head) continue;
-      const kind = statementKind(head);
+      const kind = statementKind(head, text);
       const where = `${m.file}: ${head.slice(0, 110).replace(/\s+/g, " ")}`;
       if (kind === "owner") {
         findings.push(`${where}  ← OWNERSHIP TRANSFER: the new owner inherits the old owner's privileges, and a table owner bypasses RLS unless FORCE ROW LEVEL SECURITY is set`);
@@ -1885,6 +1996,10 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
         findings.push(`${where}  ← FORCE ROW LEVEL SECURITY changes whether the owner is subject to policies, which this replay does not model`);
       } else if (kind === "default-privileges") {
         findings.push(`${where}  ← ALTER DEFAULT PRIVILEGES applies to objects created LATER, which a per-statement replay cannot see`);
+      } else if (kind === "rename") {
+        findings.push(`${where}  ← RENAME: this replay is keyed on the table NAME, so renaming a protected table away (and another into its place) moves every grant it recorded onto a different object`);
+      } else if (kind === "function-writes-protected") {
+        findings.push(`${where}  ← this function touches a protected table, so it is a write path to it whatever its grants say — and a new function is EXECUTABLE BY PUBLIC unless revoked`);
       } else if (kind === "unknown") {
         findings.push(`${where}  ← unrecognised statement kind`);
       }
@@ -1916,6 +2031,14 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
     ["alter table public.x add column y text", "benign"],
     ["create policy p on public.x for select using (true)", "benign"],
     ["create or replace function public.f() returns void language sql as $$ select 1 $$", "benign"],
+    // ── round 23: the two kinds that left the benign list
+    ["alter table public.enhancement_notifications rename to retired", "rename"],
+    ["alter table public.open_notifications rename to enhancement_notifications", "rename"],
+    ["create function public.preclaim(p uuid) returns void language sql security definer as $f$ insert into public.enhancement_notifications (request_id) values (p) $f$", "function-writes-protected"],
+    ["create function public.peek() returns int language sql as $f$ select count(*) from public.help_queries $f$", "function-writes-protected"],
+    // the claim RPC itself is allowed to touch it — its body, security mode,
+    // search_path and EXECUTE ACL are each asserted elsewhere
+    ["create or replace function public.claim_notification(p_request uuid, p_event text) returns timestamptz language sql security definer as $$ insert into public.enhancement_notifications (request_id, event) select 1 $$", "benign"],
     ["comment on table public.x is 'hi'", "benign"],
     ["update public.entities set label = 'x'", "benign"],
     ["select public.f()", "benign"],
@@ -1926,31 +2049,48 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
     ["create event trigger t on ddl_command_end execute function public.f()", "unknown"],
     ["security label for selinux on table public.x is 'x'", "unknown"],
   ]) {
+    // ⚠️ FED THROUGH sqlStatements, NOT RAW. The sweep classifies the BLANKED
+    // scan plus the verbatim text, so a pin passing raw SQL exercises a path no
+    // caller takes — which is precisely how two round-23 bypasses survived
+    // their mutations with these pins green.
+    const [st] = sqlStatements(stripSqlComments(`${sql};`));
+    assert.ok(st, `sqlStatements produced nothing for ${JSON.stringify(sql.slice(0, 60))}`);
     assert.equal(
-      statementKind(sql), kind,
+      statementKind(st.scan.trim(), st.text), kind,
       `statementKind(${JSON.stringify(sql.slice(0, 70))}) must be ${kind} — the sweep above is only as good as this classification`,
     );
   }
 
-  // The literal test is anchored on the STATEMENT shape, not on the head, which
-  // is the round-22 fix. Both directions.
+  // ⚠️ THIS TABLE IS THE THIRD VERSION OF ITSELF, and each previous one pinned a
+  // design the next round retired — which is expected here, not a smell, but is
+  // worth saying out loud: a pin that outlives its reason can only pass while
+  // the thing it was written beside is still wrong.
+  //   round 21: classify by the statement's HEAD        → broken by `select run_sql('GRANT …')`
+  //   round 22: classify by an ANCHOR at a statement start → broken by `'BEGIN IF … THEN GRANT …'`
+  //   round 23: ANY literal naming grant/revoke, exempting only a COMMENT's own
+  //             argument. No head test and no anchor left to get wrong.
+  // So rows that were `false` under the anchor are `true` now. The COMMENT rows
+  // are exercised through the statement-level pins above, since the exemption
+  // is now a property of the STATEMENT rather than of the literal.
   for (const [lit, isAcl] of [
     ["GRANT EXECUTE ON FUNCTION public.claim_notification(uuid, text) TO authenticated", true],
     ["BEGIN GRANT EXECUTE ON FUNCTION public.f() TO anon; END", true],
     ["select 1; revoke all on public.x from anon", true],
-    ["service_role holds select+insert by explicit grant. Replaces the claim on a client-writable row", false],
-    // ⚠️ THIS ROW WAS WRONG IN MY FIRST VERSION (expected reported) and the pin
-    // caught it. It contains `grant`, `on` and `to` and is still prose, which
-    // is exactly what the statement anchor exists to tell apart: a literal that
-    // is EXECUTED must begin a statement, so a grant inside one sits at the
-    // start or just after a `;`. Nothing valid hides a GRANT mid-sentence.
-    ["we grant nothing on this table to anyone", false],
-    ["a grant was discussed", false],
+    // The round-23 bypass: a GRANT after procedural control flow, which no
+    // anchor finds.
+    ["BEGIN IF true THEN GRANT EXECUTE ON FUNCTION public.f() TO authenticated; END IF; END", true],
+    ["BEGIN FOR r IN SELECT 1 LOOP REVOKE ALL ON public.x FROM anon; END LOOP; END", true],
+    // Prose is reported too, OUTSIDE a comment — deliberately conservative, and
+    // measured to cost nothing: the only literal in this repo naming either
+    // word is its own COMMENT, which the statement-level exemption covers.
+    ["we grant nothing on this table to anyone", true],
+    ["a grant was discussed", true],
+    ["nothing to see here", false],
   ]) {
     assert.equal(
       Boolean(executableLiteralAcl("select public.run_sql($1)", [lit])),
       isAcl,
-      `a literal that parses as a GRANT statement must be reported wherever it sits: ${JSON.stringify(lit.slice(0, 60))}`,
+      `a literal naming a grant must be reported wherever it sits, outside a COMMENT: ${JSON.stringify(lit.slice(0, 60))}`,
     );
   }
 });

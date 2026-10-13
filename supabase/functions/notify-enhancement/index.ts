@@ -130,6 +130,57 @@
 //   the checklist PASSED because the prose above still mentioned it. An
 //   assertion over a wider text than the property belongs to cannot fail.
 //   CONFIRM APPLIED: 20261005120100 20261013013743 20261013014854
+//
+// ⚠️⚠️ 3. AND MEASURE THE EFFECTIVE STATE, NOT ONLY THAT THE FILES ARE APPLIED.
+// Six consecutive Codex rounds (17, 19, 20, 21, 22, 23) found a construct the
+// source scanner in privilege.test.mjs was not reading: `all privileges`, a
+// grantee it did not model, `on routine`, `on all tables in schema`, a quoted
+// role, a `do '…'` body, `alter table … owner to`, `alter table … rename`, a
+// SECURITY DEFINER helper, a PL/pgSQL body with the GRANT after `if … then`,
+// and a decoy body hidden in a function OPTION. Each was fixed; the pattern is
+// the finding. **A text scan over SQL cannot soundly decide who can write a
+// table** — privileges can arrive through grants, ownership, renames, default
+// privileges, role membership, a function body or dynamic SQL, and SQL has a
+// procedural sublanguage inside it. The scanner is a net, not a proof.
+//
+// So run this against the project (Supabase MCP `execute_sql`) and read the
+// four answers. It measures the END STATE, however it was reached:
+//
+//   -- a. who holds anything on the claim table, and who owns it
+//   select 'priv' kind, grantee, privilege_type
+//     from information_schema.table_privileges
+//    where table_schema = 'public' and table_name = 'enhancement_notifications'
+//   union all
+//   select 'owner', pg_get_userbyid(c.relowner), case when c.relrowsecurity then 'rls on' else 'RLS OFF' end
+//     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+//    where n.nspname = 'public' and c.relname = 'enhancement_notifications'
+//   union all
+//   select 'policy', polname, '' from pg_policies_compat;   -- see (c)
+//   -- EXPECT: grantee service_role only (select, insert); owner NOT
+//   -- authenticated/anon; 'rls on'. Any other grantee, or an owner that a
+//   -- client can authenticate as, is the hole — a table owner is not subject
+//   -- to its policies unless FORCE ROW LEVEL SECURITY is set.
+//
+//   -- b. who may call the claim RPC
+//   select p.proname, p.prosecdef as security_definer, p.proconfig, p.proacl
+//     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+//    where n.nspname = 'public' and p.proname = 'claim_notification';
+//   -- EXPECT: security_definer true, proconfig {search_path=}, and proacl
+//   -- naming service_role ONLY. An empty/null proacl means PUBLIC may execute.
+//
+//   -- c. policies on the claim table (expect ZERO rows)
+//   select polname, polcmd, polroles::regrole[] from pg_policy
+//     where polrelid = 'public.enhancement_notifications'::regclass;
+//
+//   -- d. EVERY function that can write the claim table (expect exactly one)
+//   select p.proname, p.prosecdef, p.proacl
+//     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+//    where n.nspname = 'public'
+//      and p.prosrc ilike '%enhancement_notifications%';
+//   -- EXPECT: claim_notification and nothing else. A second SECURITY DEFINER
+//   -- function here is a second write path, executable by PUBLIC by default.
+//
+// (a) and (d) are the ones no source scan can replace, and they are cheap.
 //   PLUS the claim table's own migration, which is NOT on that line because it
 //   is not applied yet — it is supabase/proposed/20261013_enhancement_notifications.sql
 //   and proposed/README.md names it as blocking this deploy. When it is applied

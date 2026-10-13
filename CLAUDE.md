@@ -2070,7 +2070,7 @@ semantics, and deleting one is not cosmetic. This is the third time on this PR
 that the thing catching a regression was not the thing it looked like: see also
 the schema-wide table wiring, and S22's console-log assertion.
 
-### ⛔ ROUND 22 — THE TERMINATING INVERSION: every STATEMENT, not every GRANT
+### ⛔ ROUND 22 — every STATEMENT, not every GRANT (⚠️ CALLED "TERMINATING" AND IT WAS NOT — see round 23 below)
 
 **Five rounds, one shape.** Each one found a construct that changes what a client
 can do and that the scanner was not looking at. Rounds 20 and 21 were already
@@ -2150,6 +2150,89 @@ match restores finding 2.
 grant statement is reported. No such table exists here; if a legitimate
 job-queue table ever does, the reported-not-silent direction is still the right
 one and the fix is to model that table, not to loosen the anchor.
+
+### ⛔ ROUND 23 — THE RETRACTION: a text scan over SQL cannot decide who can write a table
+
+⚠️ **THE ROUND-22 ENTRY ABOVE CLAIMS IT "ends the regress structurally rather
+than postponing it". THAT CLAIM IS FALSE AND THIS SECTION RETRACTS IT.** Codex
+round 23 found four more, all at 21/21 green, and **all four were items I had
+explicitly asked to have challenged** in the round-23 request — the benign list,
+the `alter table … alter|rename` arm, the literal anchor, and the first-dollar-tag
+assumption. Every line I flagged as uncertain was in fact wrong.
+
+| # | the bypass | why it was invisible |
+|---|---|---|
+| A | a decoy body in a function OPTION: `set app.audit = $safe$ <correct-looking> $safe$ as $real$ <unsafe> $real$` | `effectiveFunction` took the FIRST dollar tag after the parameter list, so the predicate and `for update` assertions inspected the SET value |
+| B | create an open table, grant it to `authenticated`, `rename` the protected table away and the open one in | the replay is keyed on the table NAME, so every grant it recorded moved to a different object |
+| C | a later SECURITY DEFINER helper that inserts straight into the claim table | `create function` was blanket-benign, and a new function is EXECUTABLE BY PUBLIC unless revoked |
+| D | `'BEGIN IF true THEN GRANT … ; END IF; END'` | round 22's anchor required the GRANT at a statement start; PL/pgSQL permits it after arbitrary control flow |
+
+**What the six rounds actually establish.** The statement boundary was the right
+*level* — but classification *within* it is itself open-ended: dollar tags with
+arbitrary names, `AS` clauses that are not the first quoted span, PL/pgSQL
+bodies, renames, ownership, default privileges, role membership, and function
+bodies that can do anything. **Privileges do not arrive only through GRANT
+statements, and SQL has a procedural sublanguage inside it.** So:
+
+⛔ **`privilege.test.mjs` is a NET, not a proof** — the same language this repo
+already uses for `check-keep-back-routes.js`, and it should have been used here
+from the start instead of three successive claims to have closed the class.
+What bounds the harm is that a construct it cannot read now **fails by name**,
+so the cost of a novel one is a loud failure rather than a silent hole.
+
+✅ **THE AUTHORITATIVE CHECK IS A CATALOG QUERY, AND IT IS NOW WRITTEN DOWN.**
+`index.ts`'s deploy header previously said only "confirm the migrations are
+applied". It now carries, as step 3, four runnable queries that measure the END
+STATE however it was reached: who holds privileges on the claim table and **who
+owns it** (an owner is not subject to its own policies unless FORCE is set);
+whether RLS is on and that there are **zero** policies; `pg_proc.prosecdef` /
+`proconfig` / `proacl` for the claim RPC (a null `proacl` means PUBLIC may
+execute); and **every function whose source names the claim table**, which must
+be exactly one. (a) and (d) are the two no source scan can replace.
+
+**The four fixes, since they are real regardless:**
+- the function body is located from its **`AS` clause**, walking the statement
+  while skipping dollar- and single-quoted spans so an `as` inside an option
+  value cannot be mistaken for the clause;
+- `alter table … rename` leaves the benign list and **fails closed** (this repo
+  contains no RENAME at all, measured, so it costs nothing);
+- `create|alter function` is classified by **what its body touches** — a
+  function naming a protected table is a write path to it whatever its grants
+  say, and only the claim RPC itself is allowed to;
+- the literal test has **no anchor and no head test left**: any literal naming
+  `grant`/`revoke` is reported, with one structural exemption — the argument of
+  a `COMMENT`, which is documentation by construction. Measured: exactly one
+  literal in this repo names either word and it is that COMMENT.
+
+⚠️ **FIXING THE REPORTED BUG WAS NOT ENOUGH FOR (A), AND THE FIRST FIX WAS GREEN
+AND INERT.** `asClauseBody` correctly returned the `$real$` body — and the
+attack still produced **zero failures**, because `hit.body` spans the WHOLE
+create statement, decoy included, and that is what the assertions read. The
+reported parse bug and the consumer were two defects. It surfaced only on a
+re-check with a probe footer added, so the incidental "no probe documented" gate
+could not mask it: **a repro that fails for a different reason than the attack
+is not a repro.** `hit.inner` is now the body and `hit.body` the statement, and
+the split is stated at both.
+
+⚠️ **AND TWO OF MY PINS WERE TESTING A PATH NO CALLER TAKES.** The sweep
+classifies the BLANKED scan plus the verbatim text; the pins passed RAW SQL. So
+C and a string-bodied variant **survived their mutations while the pins were
+green** — a function body lives in a quoted span, which `scan` blanks by design.
+The pins now go through `sqlStatements` exactly as the sweep does. **A pin that
+feeds the classifier different input than its caller does is not a pin** — the
+same family as the concatenated-files lesson recorded below.
+
+**Measured, 15 mutations.** 9 bypasses caught — the four reported plus a function
+that only READS a protected table, a GRANT inside a `LOOP`, a rename with no
+replacement, a string-bodied writer, and the decoy with a probe footer. One
+control clean. All six fix-mutations caught, including the COMMENT exemption in
+the other direction (removing it cries wolf on this repo's own comment).
+
+⚠️ **One harness error worth keeping:** a mutation helper lost its `"$1" "$2"`
+arguments, so six mutations reported `!! DID NOT APPLY`. That is the *good*
+failure mode — compare the round-20 version, which lost its `return 0` and
+printed six names with silence under each. **Make the applied-check loud, never
+inferential.**
 
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
