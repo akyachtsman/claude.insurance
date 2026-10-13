@@ -147,7 +147,7 @@ function effectiveFunction(name, want) {
   const src = `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([^)]*)\\)([\\s\\S]*?)\\$\\$\\s*;`;
   let found = null;
   for (const m of orderedMigrations()) {
-    const sql = m.sql.replace(/^\s*--.*$/gm, "");   // this repo documents what it must not contain
+    const sql = stripSqlComments(m.sql);   // this repo documents what it must not contain
     for (const hit of sql.matchAll(new RegExp(src, "ig"))) {
       if (!sameSignature(hit[1], want)) continue;   // an overload is not a replacement
       found = { file: m.file, body: hit[0], sql };
@@ -169,7 +169,15 @@ function effectiveFunction(name, want) {
 //     modelling it as a reset would cry wolf on a legitimate replace.)
 //   · `grant execute on all functions in schema public to <role>` hits this
 //     function without ever naming it.
-function effectiveExecute(name, want) {
+// ⚠️ `migs` IS INJECTABLE FOR ONE REASON: without it this function could not be
+// tested at all. It read orderedMigrations() directly, so the only way to
+// exercise it was to drop a file into the repo — and a mutation removing the
+// schema-wide arm (`grant execute on all routines in schema public to
+// authenticated`) therefore SURVIVED, measured. The claim-table replay's own
+// wiring had the same gap and is pinned the same way. A reader should not infer
+// that the end-state gates prove the wiring: they prove the end state of what
+// they are FED, and what feeds them is a separate claim needing its own test.
+function effectiveExecute(name, want, migs = orderedMigrations()) {
   const state = { authenticated: null, anon: null, public: null, service_role: null };
   let exists = false;
   const CH = Object.keys(state);
@@ -190,18 +198,22 @@ function effectiveExecute(name, want) {
   // authenticated`), reproduced here before fixing. Fixing only the reported
   // spelling would have left the other half open — the same instance-not-class
   // mistake this PR has already paid for twice.
-  const PRIV = "(?:execute|all(?:\\s+privileges)?)";
-  const perFn = new RegExp(
-    `\\b(grant|revoke)\\s+${PRIV}\\s+on\\s+function\\s+public\\.${name}\\s*\\(([^)]*)\\)\\s+(?:to|from)\\s+([^;]*)`, "gi",
-  );
-  const schemaWide = new RegExp(
-    `\\b(grant|revoke)\\s+${PRIV}\\s+on\\s+all\\s+(?:functions|routines)\\s+in\\s+schema\\s+public\\s+(?:to|from)\\s+([^;]*)`, "gi",
-  );
+  // ⚠️ NO TARGET REGEX HERE ANY MORE. Round 20 found `grant execute on ROUTINE
+  // public.claim_notification(uuid, text) to authenticated` walking past an
+  // `on function` matcher — the third spelling in three rounds. The target is
+  // now classified once, by aclStatements, which fails the suite on anything it
+  // cannot read instead of skipping it. `EXECUTE` is still not the only
+  // privilege spelling (`all [privileges]`, Codex round 17), and that lives in
+  // `carries` via aclPrivs' `all` normalisation rather than in a regex.
+  const execPriv = (st) => {
+    const p = aclPrivs(st.privList);
+    return p.has("execute") || p.has("all");
+  };
   const created = new RegExp(`\\bcreate\\s+(or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
   const dropped = new RegExp(`\\bdrop\\s+function\\s+(?:if\\s+exists\\s+)?public\\.${name}\\s*\\(([^)]*)\\)`, "gi");
 
-  for (const m of orderedMigrations()) {
-    const sql = m.sql.replace(/^\s*--.*$/gm, "");
+  for (const m of migs) {
+    const sql = stripSqlComments(m.sql);   // the SAME stripper aclStatements uses, so offsets agree
     // Statement order within a file matters as much as file order, so walk every
     // relevant statement by position rather than by category.
     const events = [];
@@ -211,11 +223,13 @@ function effectiveExecute(name, want) {
     for (const h of sql.matchAll(dropped)) {
       if (sameSignature(h[1], want)) events.push({ at: h.index, kind: "drop" });
     }
-    for (const h of sql.matchAll(perFn)) {
-      if (sameSignature(h[2], want)) events.push({ at: h.index, kind: "acl", verb: h[1].toLowerCase(), roles: h[3] });
-    }
-    for (const h of sql.matchAll(schemaWide)) {
-      events.push({ at: h.index, kind: "acl", verb: h[1].toLowerCase(), roles: h[2] });
+    for (const st of aclStatements(m.sql)) {
+      if (!execPriv(st)) continue;
+      const hits = st.targets.some(
+        (t) => t.kind === "all-funcs" ||
+          (t.kind === "function" && t.name === name.toLowerCase() && sameSignature(t.args, want)),
+      );
+      if (hits) events.push({ at: st.at, kind: "acl", verb: st.verb, roles: st.roles });
     }
     for (const e of events.sort((a, b) => a.at - b.at)) {
       if (e.kind === "drop") { exists = false; for (const ch of CH) state[ch] = null; continue; }
@@ -803,64 +817,245 @@ test("the deploy header names every RPC the code calls", () => {
 // `all` / `all privileges` counts as carrying every privilege. A per-privilege
 // column list (`grant update (status, approved_at)`) is column-scoped, which is
 // the re-grant the narrowing depends on and must NOT be flagged.
+// ── ONE CLASSIFIER FOR EVERY GRANT/REVOKE, AND IT FAILS ON WHAT IT CANNOT READ
+//
+// ⛔ THIS IS A REDESIGN AFTER THREE ROUNDS ON ONE MECHANISM, not a fourth
+// tightening. `global.md` → *Review Rounds Have to Terminate* says the third
+// failure of a mechanism gets reverted or redesigned. The mechanism was "match
+// the grant spellings I thought of", and it failed on a different spelling each
+// time, every time found by Codex and never by this suite:
+//
+//   | round | spelling that walked straight past |
+//   |-------|------------------------------------|
+//   | 17    | `all [privileges]` where the regex wanted the word `execute`   |
+//   | 19    | `anon` — not a channel at all, so the statement was SKIPPED    |
+//   | 20    | `on routine f(...)`, and `on all tables in schema public`      |
+//
+// Enumerating spellings cannot terminate: Postgres has more target forms than
+// anyone recalls, and a missed one is SILENT — the statement is skipped and the
+// replay stays green while the privilege is live in the database.
+//
+// So the question is inverted, exactly as `BACK_ELIGIBLE` and
+// `check-keep-back-routes.js` were inverted after their second failure: instead
+// of asking "does this look like a grant I know?", every GRANT/REVOKE is parsed
+// and its TARGET classified, and anything unclassifiable **fails the suite by
+// name** (see the completeness test below). A spelling nobody thought of now
+// costs a loud failure naming the file and the statement, instead of a hole.
+//
+// Target kinds that matter to the two replays:
+//   table        `on [table] public.x`                         (also a list)
+//   all-tables   `on all tables in schema public`
+//   function     `on {function|routine|procedure} public.f(…)`
+//   all-funcs    `on all {functions|routines|procedures} in schema public`
+// Kinds reasoned about and deliberately IGNORED (they cannot carry a table or
+// routine privilege): sequences, schemas, types/domains, languages, large
+// objects, tablespaces, databases, foreign servers/data wrappers, parameters.
+// Everything else is `unknown`.
+
+// ⚠️ ONE comment stripper, shared, because the OFFSETS have to agree. The
+// function replay interleaves ACL events with CREATE/DROP by position, so if
+// one side indexed into raw SQL and the other into stripped SQL, the ordering
+// would be silently wrong — and ordering is what rounds 12 and 15 were about.
+function stripSqlComments(sql) {
+  return sql.replace(/^\s*--.*$/gm, "");
+}
+
+// Split ALREADY-STRIPPED SQL into statements on `;` at paren depth 0 and
+// outside quoting, carrying each statement's offset in that text.
+//
+// Each statement comes back with TWO views, and the distinction is load-bearing:
+//   text — verbatim.
+//   scan — the same, with the CONTENTS of every quoted region blanked. All
+//          detection and classification runs on this, so a word inside a
+//          string cannot be read as SQL.
+// ⚠️ WITHOUT `scan` THE COMPLETENESS GATE CRIED WOLF ON ITS FIRST RUN: the
+// claim migration's `comment on table ... is '... by explicit grant. ...'`
+// was read as a GRANT statement whose target could not be parsed. A gate that
+// fails on prose is a gate that gets deleted, so this is not cosmetic.
+//
+// The two quoting forms are treated DIFFERENTLY on purpose:
+//   '...'      data. Blanked and forgotten — it is never executed as SQL.
+//   $tag$...$  a body (function, DO). Blanked for parsing, but if it CONTAINS
+//              grant/revoke the statement is reported as unreadable, because a
+//              privilege change built inside a body is real and this parser
+//              does not model it. Fail closed, loudly — and note CLAUDE.md
+//              already forbids routing DDL through a DO block to get past a
+//              classifier, so a hit here is a finding either way.
+function sqlStatements(src) {
+  const out = [];
+  let text = "", scan = "", start = 0, depth = 0, i = 0, tag = null, inStr = false;
+  let body = "", bodyHadAcl = false;
+  const push = () => {
+    if (text.trim()) out.push({ text, scan, at: start, bodyHadAcl });
+    text = ""; scan = ""; bodyHadAcl = false;
+  };
+  while (i < src.length) {
+    if (tag) {                                   // inside $tag$ ... $tag$
+      if (src.startsWith(tag, i)) {
+        if (/\b(grant|revoke)\b/i.test(body)) bodyHadAcl = true;
+        body = ""; text += tag; scan += " ".repeat(tag.length); i += tag.length; tag = null;
+        continue;
+      }
+      body += src[i]; text += src[i]; scan += " "; i += 1;
+      continue;
+    }
+    if (inStr) {                                 // inside '...', '' escapes
+      if (src[i] === "'" && src[i + 1] === "'") { text += "''"; scan += "  "; i += 2; continue; }
+      if (src[i] === "'") { inStr = false; text += "'"; scan += " "; i += 1; continue; }
+      text += src[i]; scan += " "; i += 1;
+      continue;
+    }
+    const open = src.slice(i).match(/^\$[A-Za-z_]*\$/);
+    if (open) { tag = open[0]; text += tag; scan += " ".repeat(tag.length); i += tag.length; continue; }
+    if (src[i] === "'") { inStr = true; text += "'"; scan += " "; i += 1; continue; }
+    const ch = src[i];
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (ch === ";" && depth === 0) { push(); i += 1; start = i; continue; }
+    text += ch; scan += ch; i += 1;
+  }
+  push();
+  return out;
+}
+
+// Split on commas at paren depth 0 — a column list or an argument list must not
+// be read as a separator. Used for both privilege lists and target lists.
+function topLevelSplit(s) {
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of s) {
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (ch === "," && depth === 0) { out.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+const IGNORED_TARGET = new RegExp(
+  "^(?:all\\s+)?(?:sequences?|schemas?|types?|domains?|languages?|large\\s+objects?|" +
+  "tablespaces?|databases?|foreign\\s+servers?|foreign\\s+data\\s+wrappers?|parameters?)\\b",
+  "i",
+);
+
+// Classify one target phrase (the text between `on` and `to`/`from`).
+function classifyTarget(raw) {
+  const t = raw.trim().replace(/\s+/g, " ");
+  let m;
+  if (/^all\s+tables\s+in\s+schema\s+public$/i.test(t)) return { kind: "all-tables" };
+  if (/^all\s+(?:functions|routines|procedures)\s+in\s+schema\s+public$/i.test(t)) return { kind: "all-funcs" };
+  if ((m = t.match(/^(?:function|routine|procedure)\s+public\.(\w+)\s*\(([^)]*)\)$/i))) {
+    return { kind: "function", name: m[1].toLowerCase(), args: m[2] };
+  }
+  if ((m = t.match(/^(?:table\s+)?public\.(\w+)$/i))) return { kind: "table", table: m[1].toLowerCase() };
+  // `all tables in schema <other>` / `all functions in schema <other>` cannot
+  // reach public.*, so they are safely out of scope — but say so explicitly
+  // rather than letting them fall into `unknown` and cry wolf.
+  if (/^all\s+(?:tables|functions|routines|procedures)\s+in\s+schema\s+\w+$/i.test(t)) return { kind: "other", what: t };
+  if (IGNORED_TARGET.test(t)) return { kind: "other", what: t };
+  return { kind: "unknown", what: t };
+}
+
+// Every GRANT/REVOKE in one migration, classified. `targets` is never empty:
+// an unreadable one is reported as {kind:"unknown"} so the completeness test
+// can fail by name instead of this returning nothing.
+function aclStatements(sql) {
+  const out = [];
+  for (const { scan, at, bodyHadAcl } of sqlStatements(stripSqlComments(sql))) {
+    const head = scan.trim();
+    if (bodyHadAcl) {
+      out.push({
+        verb: "grant", privList: "", roles: "",
+        targets: [{ kind: "unknown", what: `a GRANT/REVOKE inside a quoted body: ${head.slice(0, 100)}` }],
+        indirect: true, at,
+      });
+      continue;
+    }
+    if (!/\b(grant|revoke)\b/i.test(head)) continue;
+    // A grant that is not the statement's own verb is something this parser
+    // does not model: `alter default privileges ... grant ...`, or a grant
+    // built inside a dollar-quoted body or an EXECUTE string. Reported so the
+    // completeness test names it; never skipped.
+    const lead = head.match(/^(grant|revoke)\b/i);
+    if (!lead) {
+      out.push({
+        verb: /\brevoke\b/i.test(head) ? "revoke" : "grant",
+        privList: "", roles: "", targets: [{ kind: "unknown", what: head.slice(0, 120).replace(/\s+/g, " ") }],
+        indirect: true, at,
+      });
+      continue;
+    }
+    const m = head.match(/^(grant|revoke)\s+([\s\S]*?)\s+on\s+([\s\S]*?)\s+(?:to|from)\s+([\s\S]*)$/i);
+    if (!m) {
+      out.push({
+        verb: lead[1].toLowerCase(), privList: "", roles: "",
+        targets: [{ kind: "unknown", what: head.slice(0, 120).replace(/\s+/g, " ") }],
+        indirect: false, at,
+      });
+      continue;
+    }
+    const [, verb, privList, targetList, roles] = m;
+    out.push({
+      verb: verb.toLowerCase(),
+      privList,
+      roles,
+      targets: topLevelSplit(targetList).map(classifyTarget),
+      indirect: false,
+      at,
+    });
+  }
+  return out;
+}
+
+// The privilege list of an ACL statement, as name -> {tableWide}.
+function aclPrivs(privList) {
+  const privs = new Map();
+  for (const raw of topLevelSplit(privList)) {
+    const item = raw.trim();
+    if (!item) continue;
+    const name = (item.match(/^([a-z ]+?)\s*(\(|$)/i)?.[1] || item).trim().toLowerCase()
+      .replace(/^all privileges$/, "all");
+    privs.set(name, { tableWide: !item.includes("(") });
+  }
+  return privs;
+}
+
+// The client/server channels an ACL statement names. PUBLIC is its own channel
+// because every role inherits it and a revoke closes only the channel it names.
+function aclChannels(roles) {
+  const channels = new Set();
+  for (const ch of ["authenticated", "anon", "public", "service_role"]) {
+    if (new RegExp(`\\b${ch}\\b`, "i").test(roles)) channels.add(ch);
+  }
+  return channels;
+}
+
+// Statements touching ONE table, as the two replays consume them. A schema-wide
+// grant is included: `grant insert on all tables in schema public to anon`
+// reaches an already-created table without ever naming it, which is precisely
+// what walked past the per-table regex this wrapper replaced (Codex round 20).
+//
+// ⚠️ `[^;]*?` FOR THE PRIVILEGE LIST was the old fix here, and the statement
+// splitter makes it structural instead: a match can no longer run across a
+// semicolon into the next statement, because statements are split first.
+//
+// ⚠️ FOUR CHANNELS. `authenticated` holds a privilege if it was granted
+// DIRECTLY to it **or** granted to PUBLIC, which every role inherits — and a
+// revoke closes only the channel it names, so `revoke ... from authenticated`
+// leaves a PUBLIC grant standing and vice versa (Codex round 12). `anon` is a
+// client channel too: the browser ships the anon key, so a grant to anon is a
+// grant to the client (Codex round 19).
 function privilegeStatements(sql, table) {
   const out = [];
-  // ⚠️ `[^;]*?` FOR THE PRIVILEGE LIST, NOT `[\s\S]*?`. With the latter a match
-  // starting at an earlier statement's `revoke execute on function public.x(...)
-  // from ...` ran ACROSS the semicolon and swallowed the real
-  // `revoke update on public.enhancement_requests from authenticated` into its
-  // privilege list — so the file's own revoke went unseen and the test failed
-  // claiming nothing revokes it. Statement-scoped by construction instead.
-  const re = /\b(grant|revoke)\s+([^;]*?)\s+on\s+(?:table\s+)?public\.(\w+)\s+(to|from)\s+([^;]*)/gi;
-  for (const m of sql.matchAll(re)) {
-    const [, verb, privList, onTable, , roles] = m;
-    if (onTable.toLowerCase() !== table.toLowerCase()) continue;
-    // ⚠️ TWO CHANNELS, NOT ONE. `authenticated` holds a privilege if it was
-    // granted DIRECTLY to it **or** granted to PUBLIC, which every role
-    // inherits — and a revoke only closes the channel it names, so
-    // `revoke ... from authenticated` leaves a PUBLIC grant standing and vice
-    // versa. The first version of this filter required `authenticated` in the
-    // grantee text, so `grant update on public.profiles to public` was ignored
-    // entirely and the replay stayed green while any client could again set
-    // their own role to 'underwriter'. Codex #256 round 12.
-    // ⚠️ AND `anon` IS A FOURTH, added by Codex #256 round 19 — it was MISSING
-    // ENTIRELY, which is worse than being recorded and unchecked. With no
-    // `anon` arm, `grant insert on public.enhancement_notifications to anon`
-    // sets `channels.size === 0` and the statement is SKIPPED, so the replay
-    // never sees it and the end-state gate stays green. `anon` is not a
-    // different person here: the client ships the anon key, so a signed-in
-    // owner who knows their own request id can issue that insert WITHOUT a
-    // JWT and pre-consume `(request_id, event)`, suppressing the real
-    // notification. Same bypass as round 6, through a role the parser could
-    // not see. (It is harmless on the STAMP functions — `auth.uid()` is null
-    // under anon, so their predicates match nothing — which is why the
-    // function-level gate could get away with it and this one could not.)
-    const channels = new Set();
-    if (/\bauthenticated\b/i.test(roles)) channels.add("authenticated");
-    if (/\banon\b/i.test(roles)) channels.add("anon");
-    if (/\bpublic\b/i.test(roles)) channels.add("public");
-    if (/\bservice_role\b/i.test(roles)) channels.add("service_role");
+  for (const st of aclStatements(sql)) {
+    const hits = st.targets.some(
+      (t) => t.kind === "all-tables" || (t.kind === "table" && t.table === table.toLowerCase()),
+    );
+    if (!hits) continue;
+    const channels = aclChannels(st.roles);
     if (channels.size === 0) continue;
-    // Split the privilege list on commas at paren depth 0, so a column list
-    // cannot be mistaken for a privilege separator.
-    const items = [];
-    let depth = 0, cur = "";
-    for (const ch of privList) {
-      if (ch === "(") depth += 1;
-      if (ch === ")") depth -= 1;
-      if (ch === "," && depth === 0) { items.push(cur); cur = ""; continue; }
-      cur += ch;
-    }
-    items.push(cur);
-    const privs = new Map();
-    for (const raw of items) {
-      const item = raw.trim();
-      if (!item) continue;
-      const name = (item.match(/^([a-z ]+?)\s*(\(|$)/i)?.[1] || item).trim().toLowerCase()
-        .replace(/^all privileges$/, "all");
-      privs.set(name, { tableWide: !item.includes("(") });
-    }
-    out.push({ verb: verb.toLowerCase(), privs, channels });
+    out.push({ verb: st.verb, privs: aclPrivs(st.privList), channels });
   }
   return out;
 }
@@ -1311,4 +1506,108 @@ test("the migration documents a real-client probe of the claim RPC", () => {
     /00000000-0000-0000-0000-000000000000/.test(block),
     `the ${CLAIM_RPC} probe must use a nonexistent UUID, so that if EXECUTE is unexpectedly held it reveals the privilege without creating a claim — a probe for a suppression bug must not be able to suppress`,
   );
+});
+
+test("every GRANT/REVOKE in every migration is one this suite can account for", () => {
+  // ⛔ THE GATE THAT MAKES THE SPELLING CLASS TERMINATE. Three consecutive
+  // rounds (17, 19, 20) were the same defect: a grant written in a spelling the
+  // matcher did not enumerate was SILENTLY SKIPPED, and every assertion above
+  // stayed green while the privilege was live. `global.md` → *Review Rounds
+  // Have to Terminate* says the third failure of a mechanism gets a redesign,
+  // not a fourth patch — so the enumeration is inverted here.
+  //
+  // This test asks the only question that closes the class: is there any
+  // GRANT or REVOKE in this repo whose TARGET the classifier cannot read? If
+  // so it FAILS BY NAME, with the file and the statement. A spelling nobody
+  // thought of now costs a loud failure instead of a hole, which is the same
+  // inversion `BACK_ELIGIBLE` and `check-keep-back-routes.js` took after their
+  // second failure — and the reason the harm is bounded in the right direction.
+  //
+  // ⚠️ IT CANNOT BE REPLACED BY "add ROUTINE to the regex". That is the fourth
+  // patch. The point is not that `ROUTINE` was missing; it is that the suite
+  // could not tell it was missing.
+  const unreadable = [];
+  for (const m of orderedMigrations()) {
+    for (const st of aclStatements(m.sql)) {
+      for (const t of st.targets) {
+        if (t.kind !== "unknown") continue;
+        unreadable.push(
+          `${m.file}: ${st.indirect ? "a GRANT/REVOKE that is not the statement's own verb" : "unreadable target"} — ${t.what}`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(
+    unreadable, [],
+    "a GRANT or REVOKE in this repo has a target this suite cannot classify, so it is being SKIPPED rather than replayed — " +
+    "the privilege is live in the database and every gate above is green regardless. Either teach classifyTarget this target " +
+    "kind (and say which replay it feeds), or, if it genuinely cannot reach a public table or routine, add it to the ignored " +
+    `list with the reason: ${unreadable.join("; ")}`,
+  );
+
+  // ⚠️ AND THE CLASSIFIER ITSELF IS PINNED, in both directions. Without this, a
+  // later edit could make classifyTarget return `other` for everything and the
+  // check above would pass vacuously — the empty-set failure mode this repo has
+  // already recorded twice (check-keep-back-routes.js fails closed for the same
+  // reason, and the concatenated-migrations scan did not).
+  const cases = [
+    ["table public.enhancement_notifications", "table"],
+    ["public.enhancement_notifications", "table"],
+    ["all tables in schema public", "all-tables"],
+    ["function public.claim_notification(uuid, text)", "function"],
+    ["routine public.claim_notification(uuid, text)", "function"],
+    ["procedure public.claim_notification(uuid, text)", "function"],
+    ["all functions in schema public", "all-funcs"],
+    ["all routines in schema public", "all-funcs"],
+    ["all procedures in schema public", "all-funcs"],
+    ["all sequences in schema public", "other"],
+    ["schema public", "other"],
+    ["all tables in schema auth", "other"],
+    // The fail-closed arm. An UNQUALIFIED table name resolves through
+    // search_path and is a real spelling this parser deliberately refuses to
+    // guess at, rather than assuming `public`.
+    ["enhancement_notifications", "unknown"],
+    ["materialized view public.x", "unknown"],
+  ];
+  for (const [phrase, kind] of cases) {
+    assert.equal(
+      classifyTarget(phrase).kind, kind,
+      `classifyTarget("${phrase}") must be ${kind} — the completeness check above is only as good as this classification`,
+    );
+  }
+
+  // And the two spellings round 20 found must now REACH their replays, which is
+  // a different claim from being classified.
+  const routine = aclStatements("grant execute on routine public.claim_notification(uuid, text) to authenticated;");
+  assert.equal(routine.length, 1, "an ON ROUTINE grant must be seen as one ACL statement");
+  assert.deepEqual(routine[0].targets.map((t) => t.kind), ["function"]);
+  const schemaWide = privilegeStatements("grant insert on all tables in schema public to anon;", "enhancement_notifications");
+  assert.equal(
+    schemaWide.length, 1,
+    "a schema-wide table grant must reach the per-table replay — it applies to every already-created table without naming one",
+  );
+  assert.ok(schemaWide[0].channels.has("anon"));
+
+  // ⚠️ AND THE SAME WIRING ON THE FUNCTION SIDE, which went unpinned until a
+  // mutation removing it SURVIVED. Classifying a target is not the same as
+  // feeding it to the replay, and only one of those two claims was tested.
+  const synth = [
+    { file: "synth/a.sql", version: "a", sql: `create function public.${CLAIM_RPC}(p_request uuid, p_event text) returns timestamptz as $$ select now() $$ language sql; revoke execute on function public.${CLAIM_RPC}(uuid, text) from public, anon, authenticated;` },
+  ];
+  assert.equal(
+    effectiveExecute(CLAIM_RPC, CLAIM_RPC_ARGS, synth).authenticated, null,
+    "a per-function revoke must close the authenticated channel — the control for the two cases below",
+  );
+  for (const spelling of [
+    `grant execute on all routines in schema public to authenticated;`,
+    `grant all privileges on all functions in schema public to authenticated;`,
+    `grant execute on routine public.${CLAIM_RPC}(uuid, text) to authenticated;`,
+    `grant execute on procedure public.${CLAIM_RPC}(uuid, text) to authenticated;`,
+  ]) {
+    const withGrant = [...synth, { file: "synth/b.sql", version: "b", sql: spelling }];
+    assert.ok(
+      effectiveExecute(CLAIM_RPC, CLAIM_RPC_ARGS, withGrant).authenticated,
+      `the function replay must see \`${spelling.trim()}\` as leaving EXECUTE open to authenticated — it reaches the RPC, and a spelling it does not feed through is a silent hole`,
+    );
+  }
 });

@@ -1943,6 +1943,80 @@ are gone and the columns are **no longer selected at all**, which makes a relaps
 impossible rather than merely absent. The stage precheck on `row.status` stays —
 that one is about the lifecycle, is still true, and is still not the gate.
 
+### ⛔ REDESIGNED, ROUND 20 — a source scanner that enumerates spellings cannot terminate
+
+**Three consecutive rounds on one mechanism**, all on `privilege.test.mjs`, all
+found by Codex and never by this suite, every one of them SILENT (the statement
+was skipped and every gate stayed green while the privilege was live):
+
+| round | the spelling that walked past | what it would have allowed |
+|---|---|---|
+| 17 | `all [privileges]` where the regex wanted the word `execute` | the client calls the claim RPC |
+| 19 | `anon` — not a channel at all, so the statement was **skipped** | an anon-key insert pre-consumes the claim |
+| 20 | `on routine f(…)`, and `on all tables in schema public` | both of the above, by another spelling |
+
+`global.md` → *Review Rounds Have to Terminate* says the third failure gets a
+redesign, not a fourth patch. **Adding `ROUTINE` to the regex is the fourth
+patch.** The defect is not that `ROUTINE` was missing; it is that the suite
+could not tell it was missing.
+
+**So the question is inverted**, exactly as `BACK_ELIGIBLE` and
+`check-keep-back-routes.js` were inverted after their second failures. Every
+`GRANT`/`REVOKE` in every migration is parsed and its TARGET classified, and
+anything unclassifiable **fails the suite by name** with the file and the
+statement. A spelling nobody thought of now costs a loud failure instead of a
+hole. Four target kinds feed the replays (`table`, `all-tables`, `function`,
+`all-funcs`); a documented set that cannot carry a table or routine privilege
+(sequences, schemas, types, languages, large objects, databases, …) is ignored
+*explicitly*; everything else is `unknown`.
+
+**Measured, 13 mutations.** 9 bypasses caught — the two Codex reported plus
+seven nobody did: `on procedure`, `all procedures in schema public`,
+`all tables … to PUBLIC`, a two-target statement with the claim table second, an
+**unqualified** table name (refused rather than guessed as `public`),
+`ALTER DEFAULT PRIVILEGES`, and a grant built inside a `DO` body. 4 controls
+stay clean, including a `COMMENT … IS '… explicit grant …'` whose prose contains
+the word.
+
+⚠️ **THE HEADLINE MUTATION IS THE ONE THAT PROVES THE REDESIGN RATHER THAN THE
+FIX:** delete the `routine|procedure` arm *and* leave the `ON ROUTINE` grant in
+place, and it is **still caught** — by the completeness gate, naming the
+statement. That exact state was 19/19 green before.
+
+⚠️ **TWO THINGS THE REDESIGN GOT WRONG FIRST, both found by mutation.**
+1. **The completeness gate cried wolf on prose.** Its first run failed on the
+   claim migration's own `comment on table … is '… by explicit grant. …'`. A
+   gate that fails on a comment is a gate that gets deleted, so the statement
+   splitter now blanks the CONTENTS of quoted regions before anything is
+   classified — and treats the two quoting forms differently on purpose: `'…'`
+   is data, blanked and forgotten; `$tag$…$tag$` is an executable body, blanked
+   for parsing but **reported as unreadable if it contains grant/revoke**,
+   because a privilege change built inside a body is real and is not modelled.
+   (CLAUDE.md already forbids routing DDL through a `DO` block past a
+   classifier, so a hit there is a finding either way.)
+2. **Classifying a target is NOT the same as feeding it to a replay, and only
+   one of those was tested.** A mutation stopping `effectiveExecute` from
+   consuming schema-wide routine grants **SURVIVED** — the end-state gates prove
+   the end state of what they are FED, and what feeds them is a separate claim.
+   `effectiveExecute` now takes its migrations as an injectable parameter purely
+   so that claim can be tested at all (it read `orderedMigrations()` directly,
+   so the only way to exercise it was to drop a file into the repo). Both
+   wirings are now pinned, with a control assertion so the positive cases cannot
+   pass vacuously.
+   ⚠️ Relatedly: the schema-wide **table** wiring is caught ONLY by its own
+   direct assertion, not by the end-state replay — measured. Do not read a green
+   replay as proof that the thing feeding it is correct.
+
+⚠️ **And two harness errors in this one round, both of the kind already recorded
+below.** A `python3` splice with `replace(..., 1)` landed on
+`effectiveFunction` instead of `effectiveExecute` — the edit applied, to the
+wrong function, caught by `migs is not defined` rather than by reading the diff.
+And a mutation loop printed **no grades at all** because the helper lost its
+explicit `return 0`, so `git diff --quiet`'s exit code (1 = changes present)
+suppressed every grade through an `&&`. Nothing looked wrong: five mutation
+names printed with silence under each. **An applied-check that can swallow the
+grade is worse than no applied-check** — read the output, not the exit status.
+
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
 Second time on one PR that closing a direction opened or deepened another, so it
