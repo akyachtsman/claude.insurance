@@ -2799,10 +2799,30 @@ makes it worth recording rather than just red:
 | 6. **Deploy help-ask** | **failure**, exit 1 |
 | 7. Smoke — the worker boots, and the gateway gates it | skipped, correctly (gated on the deploy) |
 
-**The attribution is sound rather than assumed**, because the comparison is
-controlled: run `38498409976` on `86aae05` was **green** at 01:56:37Z, and the
-only change to this workflow between the two is **19 added and 6 removed COMMENT
-lines**. Same executable code, same step, token revoked in between.
+**This CORROBORATES the prediction; it does not measure the cause.** Run
+`38498409976` on `86aae05` was **green** at 01:56:37Z, and the only change to
+this workflow between the two is **19 added and 6 removed COMMENT lines** — so a
+change in the workflow's own logic is ruled OUT, and the observed failure is
+*consistent with* the known revocation. That is all it is.
+
+⚠️ **AN EARLIER VERSION OF THIS PARAGRAPH CALLED THE ATTRIBUTION "CONTROLLED",
+AND THAT WAS THE OVERCLAIM — in the section written to replace a prediction with
+a measurement, which is this file's most-repeated defect arriving one layer out
+again.** Codex, #261 round 2, answering a question put to it directly. The diff
+controls the workflow logic and **nothing else that feeds the deploy step**: the
+runner image, network egress, and Supabase's own service state are all
+uncontrolled, and an `exit 1` with no error text does not distinguish between
+them. One alternative explanation eliminated is not a cause established.
+
+✅ **WHAT WOULD SETTLE IT, and it is already on the owner list:** the CLI's error
+text — unobtainable from a session, the logs endpoint redirects to blob storage
+this `gh` will not contact and says in terms that no flag changes that — **or,
+better, the restore itself.** Replacing the token with nothing else changed and
+watching this step go green is a cleaner proof than the log would be, because it
+tests the hypothesis rather than reading an error message. So the restore step
+below doubles as the measurement; until it runs, read this section as
+"predicted, then observed to fail at the predicted step", not as "proven to be
+the token".
 
 ⚠️ **BOTH ENDPOINTS ARE PINNED TO COMMITS, and the first version of this used
 `origin/main`** — Codex, #261. `git diff 86aae05 origin/main -- …` reproduced
@@ -2821,8 +2841,9 @@ Those are the two runs' own `head_sha`s — `38498409976` ran on `86aae05`
 API rather than assumed — so the diff is between exactly the two files that
 executed, for good. ⚠️ The raw job log is
 not readable from a session — the logs endpoint redirects to blob storage this
-`gh` will not follow — so the diagnosis rests on the step ladder plus that
-controlled diff, not on the CLI's error text.
+`gh` will not contact, and it says in terms that no flag changes that — so what
+there is to go on is the step ladder plus that diff, which together narrow the
+cause without isolating it. See the qualification above.
 
 ⚠️ **AND IT FIRED ON A COMMENT-ONLY EDIT, which the path filter's own comment
 says it is trying to avoid** (*"A README or CLAUDE.md edit must not redeploy a
