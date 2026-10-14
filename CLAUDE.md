@@ -160,13 +160,33 @@ This is the one to follow; the others defer to it.
    unrun is its `drop policy` line, which is redundant (the policy is now
    narrower *and* dormant) and cannot be issued through the Supabase MCP — see
    the DROP note at the end of this list.
-3. ⏳ **OWNER ACTION — not doable from a session.** Turn public sign-up off in
-   Supabase Auth. Measured ON (`disable_signup: false`), which makes the Security
-   page's "Invite-only access" card untrue. There is no Supabase MCP tool for
-   auth config and the Management API needs a PAT no session holds. ⚠️ Step 2
-   *has* closed the spend half of this (a self-signed-up account can no longer
-   obtain a `profiles` row, so it can never reach a paid ask); what is still
-   untrue is the product's own claim.
+3. ✅ **DONE 2026-10-14 (owner, Supabase dashboard) — and MEASURED, not taken
+   from the toggle.** `GET /auth/v1/settings` now returns `disable_signup: true`
+   with `external.email: true` and `external.anonymous_users: false` — so public
+   sign-up is closed, email login still works, and the anonymous-sign-in door is
+   shut too. The Security page's "Invite-only access — there is no public sign-up
+   to your portal" card is true for the first time.
+   Was: ⏳ OWNER ACTION — not doable from a session. Measured ON
+   (`disable_signup: false`) on 2026-10-06. There is still no Supabase MCP tool
+   for auth config, and HTTPS egress to the project is blocked from a session
+   (`CONNECT tunnel failed, 403`, re-measured 2026-10-14) — so neither the change
+   nor its verification can be done from here, and both were the owner's.
+   ⚠️ **The settings endpoint needs the publishable key**, which is the one piece
+   of this that is not guessable: a bare
+   `GET https://<ref>.supabase.co/auth/v1/settings` answers *"No API key found in
+   request"*. Append `?apikey=<the publishable key from `js/supabase.js`>`. That
+   key is public by construction — it ships in the browser bundle and RLS is the
+   guard — so putting it in a URL discloses nothing.
+   ⚠️ **AND THE FIRST ATTEMPT TURNED OFF THE WRONG TOGGLE**, which is worth more
+   than the fix. Supabase's **Email provider** dialog has no sign-up control at
+   all; its top switch is "Enable email provider", described as *"email-based
+   sign up **and log in**"*, and turning that off breaks `signInWithPassword` for
+   all three demo accounts — the Keep, S9 and `qa-live` with it. The control that
+   is wanted is on the **Authentication → Sign In / Up** page itself, in a
+   **"User Signups"** card *above* the provider list: **"Allow new users to sign
+   up"**. The provider dialog is the wrong place and looks like the right one.
+   (Caught and reverted the same minute; `auth_logs` then showed ten `200`
+   password grants, and `auth.users` was untouched — a config flag, not data.)
 4. ✅ **DONE — already true, verified 2026-10-09, nothing to do for the demo.**
    All three seeded accounts hold a `profiles` row with the right role
    (`user@example.com` → `client`, `broker@` → `broker`, `underwriter@` →
@@ -543,8 +563,12 @@ profile**, never by listing a directory.
     is still billed, so recording usage on success only is a bypass. A throttle
     that cannot count **fails closed**. The aggregate cap is not redundant: the
     per-client one is keyed on `owner`, and this file publishes three demo
-    credentials — while Supabase Auth **self-signup, if enabled, makes the number
-    of accounts unbounded and that cap with it. Check before deploying.** The
+    credentials — while Supabase Auth self-signup, if enabled, would make the
+    number of accounts unbounded and that cap with it. ✅ **Measured OFF
+    2026-10-14** (`disable_signup: true`), so the account count is bounded by the
+    invite runbook today; ⚠️ it is a project *setting* rather than schema, so
+    nothing in this repo fails if it is switched back on — **re-check it before
+    deploying**, and see the sign-up constraint below for how. The
     trade-off is stated in the code: one abuser can take the desk down for
     everyone, which is the same trade the Console spend limit makes, earlier.
   - **Neither channel is sanitise-then-concatenate any more**, and the history is
@@ -733,12 +757,28 @@ profile**, never by listing a directory.
   With the key unset `sendEmail` returns `{sent:false,
   reason:"no_provider_key"}` and the function answers 200, so **a green response
   from this endpoint is not evidence that mail left the building.**
-- **⚠️ OPEN — public sign-up is ENABLED, so "invite-only" is not true today
-  (live, measured 2026-10-06).** `GET /auth/v1/settings` on the project returns
-  `disable_signup: false`, `external.email: true`, `mailer_autoconfirm: false`.
-  No trigger or policy in `supabase/migrations/` enforces invitation. So anyone
-  can create an account against this project, confirm a mailbox, and sign in —
-  and `js/main.js`'s Keep guard only requires a session.
+- **✅ CLOSED 2026-10-14 — public sign-up is OFF, and "invite-only" is true for
+  the first time.** `GET /auth/v1/settings?apikey=<publishable>` returns
+  `disable_signup: true`, `external.email: true`,
+  `external.anonymous_users: false`, `mailer_autoconfirm: false` — so no account
+  can be created against this project, email login still works, and the
+  anonymous-sign-in route is shut as well. Turned off by the owner in
+  **Authentication → Sign In / Up → User Signups → "Allow new users to sign
+  up"**; see owner-gate step 3 for the dialog that does *not* contain that
+  control and the outage that followed from assuming it did.
+  **Kept rather than deleted, because the SHAPE of the gap is the lesson:** it is
+  still true that *no trigger or policy in `supabase/migrations/` enforces
+  invitation*. The gate is a **project configuration setting, not schema**, so it
+  is invisible to every instrument this repo trusts — it is not in
+  `list_migrations`, not in `pg_policies`, not in a source scan, and not in CI.
+  Nothing in this repository would go red if it were switched back on. The only
+  check is re-measuring the endpoint, and it is nobody's job on a schedule.
+  ⚠️ So **re-measure it at every `/refresh-repo`**, and treat a reading of
+  `disable_signup: false` as a regression rather than a surprise.
+  **What it was, measured 2026-10-06:** `disable_signup: false`,
+  `external.email: true`, `mailer_autoconfirm: false`. So anyone could create an
+  account against this project, confirm a mailbox, and sign in — and
+  `js/main.js`'s Keep guard only requires a session.
   **What it contradicts, in the product's own words:** the Security page card
   "Invite-only access — Accounts exist only by broker invitation. There is no
   public sign-up to your portal." (`js/keep/views/keep.js`), this file's own
@@ -760,13 +800,16 @@ profile**, never by listing a directory.
   INSERT on the table either — so a self-signed-up account can authenticate, see
   an empty Keep, and **never reach a paid ask**. The check is a boundary now, not
   defence in depth.
-  ⚠️ **What is still open is the PRODUCT CLAIM, and only an owner can close it:**
-  turn off "Allow new users to sign up" in Supabase Auth, or the Security card
-  stays untrue. There is no Supabase MCP tool for auth config and the Management
-  API needs a PAT no session holds — so this cannot be done from here, and
-  re-measuring `GET /auth/v1/settings` is the way to confirm it when it is.
-  Deliberately NOT reworded to match the current setting — the wording describes
-  the intended state, and the config is what is wrong.
+  ✅ **AND THE PRODUCT CLAIM IS NOW CLOSED TOO (2026-10-14).** The Security card,
+  this file's "invite-only client portal", and `content/help-guide.json`'s
+  security topic — which the Help desk is grounded on, so the desk repeats it to
+  any client who asks — all now describe the live configuration. Nothing in that
+  copy changed; the config moved to meet it.
+  ⚠️ Still not doable *or verifiable* from a session: there is no Supabase MCP
+  tool for auth config, and HTTPS egress to the project is blocked
+  (`CONNECT tunnel failed, 403`, re-measured 2026-10-14), so a session cannot
+  even read `/auth/v1/settings`. Both halves were the owner's, and the reading
+  above is theirs.
 - **⚠️ Shared Supabase account — FOUR projects, not two, and the grant is ACCOUNT-level; the `postgres`/BYPASSRLS role is measured for `insurance` ONLY (2026-10-14).** This entry said "`insurance` and `apfp` share one account … so the MCP credential can reach both", which understated it on both counts.
   **What a session's Supabase connection actually is:** NOT a personal access token — the Access Tokens page was EMPTY while all of this session's migrations and probes ran. It is the **Management API** (`application_name = 'mgmt-api'`), authorized by the account's OAuth grant to Claude, and it lands as `current_user = session_user = postgres`, `rolbypassrls = true`, `rolsuper = false`. That is why a session can apply migrations, read `auth.users`, and `set local role` to probe as any persona. Revoking it is done where it was granted (the Supabase ↔ Claude integration), not on the Access Tokens page.
   **What it reaches** (`list_projects`, one org `akyachtsman`): `trading dashboard` (`kwugzhyfjevzwgplhtsd`), **`insurance`** (`bdsegmjcgfmgzuxwiplj`), `property dashboard` (`yucnxlimmrgzbqtdizle`), `apfp` (`qnjrwbgxywkdfbfuzwas`). Accepted for now (same owner).
