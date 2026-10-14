@@ -2750,13 +2750,37 @@ check would be the obvious way to tell gateway from worker, and it would be
 guessing at a name no session here can verify — HTTPS egress to the project is
 blocked. The body shapes are read off source.
 
-**Freshness, for finding 2, compares SHAs rather than run ids** — the question is
-"is the code I checked out still what `main` says", which is answered directly
-whichever order the runs started. Skipping loses nothing here, and that is the
-asymmetry with `pages-retry.yml`: this workflow fires on every qualifying push,
-so a superseded run always has a newer run behind it. The retry workflow has no
-successor, which is why it PROCEEDS where this one SKIPS. `workflow_dispatch` is
-exempt, being the manual escape hatch.
+**Finding 2's fix asks whether a SUCCESSOR DEPLOY RUN EXISTS**, via the runs API
+on this workflow's own file name. `workflow_dispatch` is exempt (the manual
+escape hatch), and an API failure PROCEEDS — the stale overwrite then needs a
+double failure whose recovery is one dispatch, which is `pages-retry.yml`'s
+direction for the same reason.
+
+⚠️ **AND THE FIRST VERSION OF THAT FIX WAS A P1, found by asking for the review
+BEFORE merging rather than after.** It compared SHAs against `main`'s absolute
+head, on the stated reasoning that "this workflow fires on every qualifying push,
+so a superseded run always has a newer run behind it". **That is true only of
+commits touching the watched PATHS, and `main`'s head need not be one.** Push a
+function change, then push a CLAUDE.md edit: the second fires nothing while
+making the first look stale, so the first SKIPS and the function change sits
+undeployed until a manual dispatch. Two changes in the same commit — tightening
+the path filter (finding 1) and adding this check — producing a hole neither had
+alone. The error was in the reasoning, not the code.
+
+The runs API has no second copy of the path list to drift, which is why it is
+the right question: a run of this workflow exists exactly when a qualifying push
+or a dispatch happened, so the filter is consulted by construction.
+⚠️ **Keyed on the workflow's FILE NAME, which is not the `pages-retry.yml`
+trap.** That one is about a workflow's two DISPLAY names
+(`pages-build-deployment` in the workflows API vs `pages build and deployment`
+in the runs API), where the wrong one silently matches nothing. A file name is a
+documented exact identifier, and it is this file.
+
+**Measured against a stubbed `gh`, six cases:** newest run == mine → proceed
+(this is the P1 scenario: a docs-only push creates no run, so nothing supersedes
+me); newest > mine → skip with a notice; API failure → proceed with a warning;
+`workflow_dispatch` → exempt; and the two unreachable cases (newest < mine, no
+runs at all) proceed, correctly.
 
 ⚠️ **AND THERE IS NOW A CHANGE WAITING ON IT.** `handler.ts` reads the broker's
 stored model tier from `help_settings` (2026-10-14). The LIVE function predates
