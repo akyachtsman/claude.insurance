@@ -58,8 +58,14 @@ export function renderKeepLogin() {
     // client's records to Anthropic when they use the Help desk, so an absolute
     // privacy claim on the way in is one the product no longer keeps. The Security
     // page carries the detail; this is pre-auth, so it cannot link there.
-    // "invite-only" is left as-is deliberately — CLAUDE.md records public sign-up
-    // as measured ON and the CONFIG as the thing that is wrong, not this wording.
+    // "invite-only" is TRUE as of 2026-10-14: `GET /auth/v1/settings` returns
+    // `disable_signup: true` with `external.email: true` and
+    // `anonymous_users: false`. It was left here deliberately while that was
+    // still aspirational (sign-up measured ON 2026-10-06, the CONFIG being the
+    // thing that was wrong rather than this wording), and the config has since
+    // been changed to match. ⚠️ The gate is a project SETTING, not schema — no
+    // migration, policy or CI check here can see it, so nothing in this repo
+    // goes red if it is switched back on. CLAUDE.md carries the re-check.
     el("p", { class: "k-secure" }, [icon("lock", { size: 16 }), el("span", { text: "Encrypted · invite-only access" })]),
   ]);
   form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });

@@ -773,8 +773,33 @@ profile**, never by listing a directory.
   `list_migrations`, not in `pg_policies`, not in a source scan, and not in CI.
   Nothing in this repository would go red if it were switched back on. The only
   check is re-measuring the endpoint, and it is nobody's job on a schedule.
-  ⚠️ So **re-measure it at every `/refresh-repo`**, and treat a reading of
-  `disable_signup: false` as a regression rather than a surprise.
+  ⚠️ **SO THE RE-CHECK IS THE OWNER'S, AND IT IS WRITTEN AS THEIRS.** An earlier
+  version of this line said "re-measure it at every `/refresh-repo`" — and
+  `/refresh-repo` is run by a SESSION, which cannot do it: HTTPS egress to the
+  project is blocked (`CONNECT tunnel failed, 403`, measured 2026-10-14) and
+  there is no auth-config MCP tool. So every refresh would have had to either
+  skip a required check or rely on an undocumented handoff. Found by review on
+  the very change that introduced it.
+
+  | who | what | evidence |
+  |---|---|---|
+  | **owner**, at each `/refresh-repo` or before any invite | open `https://bdsegmjcgfmgzuxwiplj.supabase.co/auth/v1/settings?apikey=<publishable key from js/supabase.js>` in a browser | paste the JSON into the session; `disable_signup: true` AND `external.email: true` |
+  | **session** | ask for that reading, and say plainly that it could not be taken if none is given | never claim the setting from this file alone |
+
+  ⚠️ **The publishable key is required** — a bare GET answers *"No API key found
+  in request"*. It is public by construction (it ships in the browser bundle),
+  so putting it in a URL discloses nothing.
+
+  ⚠️ **AND THERE IS NO SESSION-SIDE SUBSTITUTE — measured, not assumed.** The
+  `auth` schema holds 27 tables and **none of them is a config table**
+  (`information_schema.tables where table_schema='auth'`, 2026-10-14): GoTrue
+  keeps this setting in its own config, not in Postgres. The nearest thing a
+  session CAN read is `auth.users`, and it is worth being precise about what that
+  does and does not show: a row whose email is outside the three seeded
+  `@example.com` accounts proves sign-up **was** possible at some point, so it is
+  a lagging **detector of a breach**, not a reading of the **setting**. An empty
+  result is consistent with sign-up being wide open and simply unused — which is
+  exactly what it was from 2026-10-06 to 2026-10-14.
   **What it was, measured 2026-10-06:** `disable_signup: false`,
   `external.email: true`, `mailer_autoconfirm: false`. So anyone could create an
   account against this project, confirm a mailbox, and sign in — and
