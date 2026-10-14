@@ -2721,6 +2721,25 @@ place and had to be reversed by hand.
 **The rule: commit the baseline BEFORE mutating, and verify the working tree is
 clean between mutations.** A baseline you cannot restore is not a baseline.
 
+⚠️ **AND THAT RULE AS WRITTEN WAS NOT ENOUGH — IT COST A WHOLE ARTIFACT ON
+2026-10-14, WITH THIS PARAGRAPH ALREADY IN THE FILE AND ALREADY READ.** What it
+says is "commit the baseline before mutating", which reads as a thing you do
+ONCE. **The baseline MOVES.** The sequence was: commit a baseline, run mutations
+R1–R6 (safe), then **write a new assertion and run R7/R8 without committing it**.
+The harness ends every mutation with `git checkout -- .`, so the new assertion
+was reverted along with the mutation — and R7 had already graded it **"caught"**,
+honestly, moments before the artifact it graded was destroyed. The squash then
+carried a file that did not contain it, every other test stayed green, and the
+PR body described an assertion that was not there. Found by Codex on #269, on the
+very commit whose message explains the precondition.
+**So: commit before EVERY run, not before the first.** The giveaway is free —
+`git status --porcelain` must be empty when the harness starts, and a harness
+that destroys uncommitted work should refuse to run rather than silently eat it.
+⚠️ Note what did NOT catch it: a green suite (the assertion's absence breaks
+nothing), the mutation grades (honest, and about a file that no longer existed),
+and re-reading the diff. Only an independent reader comparing the claim to the
+file did.
+
 **2. AN ASSERTION OVER CONCATENATED FILES CANNOT FAIL.** The gate checked that
 the SECURITY DEFINER function still carries `owner = auth.uid()` — its entire
 authorisation — by testing that regex against **every migration joined
