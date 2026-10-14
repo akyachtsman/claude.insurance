@@ -2807,17 +2807,49 @@ Pages deploy" record, now observed rather than counted from `--list`**), one
 `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe, behaving as
 designed), and the proving ask at 03:21:17.
 
-⚠️ **A KEPT RESERVATION IS A WEAK BILLING SIGNAL, NOT A STRONG ONE — do not read
-it as proof an answer was generated.** `releaseAnd` deletes the `help_queries`
-row when nothing was billed, so a `DELETE` is the signature of a release. The
-2026-10-14 window holds **`POST | 201` reservations and zero `DELETE`s**, which
-rules out a provider **HTTP error**; it does **not** rule out a timeout, because
-a timeout deliberately keeps the reservation ("billing unknown resolves as
-billed"). What separates those two is the latency: each response landed **6-7s**
-after its reservation, against a 60s provider ceiling. Reservation kept **and**
-fast is an answer. Reservation kept **and** ~60s is a billed timeout — the
-failure mode the `max_tokens: 8192` note predicts, and this is the query that
-would find it.
+⚠️ **A KEPT RESERVATION PROVES THE PROVIDER WAS BILLED AND NOTHING MORE. IT IS
+NOT EVIDENCE THAT AN ANSWER RENDERED, and the first version of this paragraph
+said it was.** `releaseAnd` deletes the `help_queries` row when nothing was
+billed, so a `DELETE` is the signature of a release. The 2026-10-14 window holds
+**`POST | 201` reservations and zero `DELETE`s**, each with a response **6-7s**
+later against a 60s ceiling. From that, exactly one thing follows: **the provider
+call was made and billed.**
+
+⚠️ **This paragraph claimed "reservation kept AND fast is an answer". It is not,
+and `handler.ts` says so in terms** — *"The reservation is NOT released on any
+path below: the call was made and therefore billed, whatever came back."* Past
+the billing line there are **three** paths that keep the row, return **HTTP 200**
+with `answer: null`, and render FR-17's notice:
+
+| path | trigger |
+|---|---|
+| `stop_reason !== "end_turn"` → `unavailable("incomplete")` | a refusal, or a `max_tokens` cut |
+| `!answer` → `unavailable("incomplete")` | no text blocks |
+| `!split.answer` → `unavailable("incomplete")` | a trailer-only reply |
+
+None of them is slow, so the latency test does not separate them. And a
+`max_tokens` cut is the very outcome the `max_tokens: 8192` note calls realistic
+— the comment beside the check says so — so the claim was **falsified by the
+failure mode it was written to detect.**
+
+⚠️ **AND THOSE THREE PATHS ARE COMPLETELY SILENT.** `unavailable()` is
+`json({ answer: null, reason, … })` with **no `console.error`**, so unlike the
+provider-error path (`where: "provider"`) they leave no log line anywhere. In the
+logs they are **indistinguishable from a successful answer**: same 201, same
+absent DELETE, same fast 200. ⚠️ `qa-live`'s S10 does not separate them either —
+it accepts an answer **or** the notice by design.
+
+**So the logs bound the SPEND exactly and say nothing about the OUTCOME.** What
+the latency still does separate is a billed **timeout** (no status, row kept,
+~60s) from everything else, which is worth the query. To learn whether an answer
+rendered you need the response body, the UI, or answer-specific telemetry the
+function does not currently emit — a `reason` on the `incomplete` exits would be
+the cheap fix, and is deliberately not smuggled in here.
+
+⚠️ Recorded because of *where* this happened: it was written in the same commit
+that retracts an overclaim, in the section about not overclaiming from logs, and
+it is the third instance on this branch pair. Found by Codex on #264 (P2),
+verified against `handler.ts` rather than taken on the bot's word.
 
 ### ✅ DEPLOY PROVENANCE — CLOSED, AND THE DEPLOY PATH IS RESTORED (2026-10-14, both measured)
 
@@ -2849,7 +2881,10 @@ tick: **version 3 → 4**, ACTIVE, `verify_jwt: true`, `entrypoint_path` under
 `/home/runner/work/…`, and all three modules byte-identical to the repo
 (`index.ts` `ba21d49f53714a95`, `handler.ts` `913ad1226458dbd5`, `prompt.ts`
 `92f13c9868b5ada8`), 1,040 comment lines intact. `qa-live` then asked four real
-questions against it and all four answered `POST | 200`.
+questions against it, all four returning `POST | 200` with the reservation kept
+— i.e. **four billed provider calls**. ⚠️ That is a spend measurement, NOT four
+answers: the three `incomplete` exits also return 200 with the row kept and no
+log line. See the kept-reservation note above.
 
 
 ✅ **AND THIS IS THE CONTROLLED EXPERIMENT THE RED RUN WAS NOT.** The section
