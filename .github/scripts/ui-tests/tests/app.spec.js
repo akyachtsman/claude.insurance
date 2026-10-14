@@ -4458,5 +4458,25 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
   await expect(page.locator('.k-phead .k-exp')).toHaveText(/Cancelled/);
   await expect(page.locator('.k-phead .k-exp')).not.toHaveText(/Active/);
 
+  // ── THE ASSET PAGE IS A FOURTH READER, via policySummaryCard in shell.js.
+  // ⚠️ IT WAS ADDED BECAUSE A MUTATION SURVIVED, not because it was planned:
+  // reverting THAT call site to `expiryBadge(policy.renewalInDays)` passed every
+  // other assertion here. I had assumed the `.k-phead` badge covered it; two
+  // different functions in two different files both call `expiryBadge`, and only
+  // one of them is on the policy detail page. Three readers asserted, one
+  // unasserted, and the mutation grade is the only thing that said so.
+  await page.goto('./#/keep/asset/a1');
+  // `.k-ahero h1`, not `.k-h1` — a THIRD heading convention in this app, after
+  // `.k-h1` on the list pages and `.k-phead__t h1` on policy detail. Named
+  // exactly, because a `.k-h1` assertion here matches nothing and one on a page
+  // that has it would match the page being LEFT (CLAUDE.md records that trap).
+  await expect(page.locator('.k-ahero h1')).toHaveText(/harbour house/i, { timeout: 15_000 });
+  const card = page.locator('.k-pcard').filter({ hasText: 'Windstorm' });
+  await expect(card.locator('.k-exp')).toHaveText(/Cancelled/);
+  await expect(card.locator('.k-exp'), 'the asset page still shows a cancelled policy as active').not.toHaveText(/Active/);
+  // The card's own treatment, which is a second thing that call site decides.
+  await expect(card).toHaveClass(/lapsed/);
+  await expect(page.locator('.k-pcard').filter({ hasText: 'Home' }).locator('.k-exp')).toHaveText(/Active · renews/);
+
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
