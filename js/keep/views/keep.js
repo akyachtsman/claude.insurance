@@ -10,6 +10,7 @@ import { s } from "../../svg.js";
 import {
   fetchRules, getUser, getEntities, signIn, addEntity,
   ensureData, DEMO_CREDENTIAL, addRelationship, loadEnhancementRequests,
+  getHelpModel, setHelpModel,
 } from "../../supabase.js";
 import { entitySummary } from "../logic/analysis.js";
 import { renewalBand, renewalCounts, annualPremium, formatPremium } from "../logic/policies.js";
@@ -17,6 +18,7 @@ import { statusDisplay, stageInfo, isPending } from "../logic/requests.js";
 import { docName } from "../logic/docfile.js";
 import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../logic/ownership.js";
 import { ENTITY_TYPE_GROUPS, kindForType } from "../logic/entity-types.js";
+import { HELP_MODEL_CHOICES, PRICES_AS_AT, priceLine, helpModelLabel } from "../logic/help-model.js";
 import { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity } from "./entities.js";
 export { renderKeepEntityList, renderKeepEntityGrid, renderKeepEntities, renderKeepEntity };
 export { renderKeepAssets, renderKeepAsset, renderKeepAddAsset } from "./assets.js";
@@ -470,6 +472,133 @@ const SECURITY_CARDS = [
   { ic: "briefcase", t: "Never sold", b: "Your information is used only to advise you on coverage. We never sell or share it for marketing." },
 ];
 
+// ── The Help desk model tier — BROKER ONLY ───────────────────────────────────
+//
+// WHY IT LIVES HERE. The tier has been switchable since `HELP_MODEL` shipped,
+// from Project Settings -> Edge Functions -> Secrets. That needs Supabase
+// credentials, it is invisible from the product, and nothing in the Keep can
+// show what it is currently set to. This is the same switch in the place the
+// person who makes the decision already works.
+//
+// ⚠️ THE ROLE CHECK HERE DECIDES WHAT TO RENDER, NOT WHO MAY WRITE. The
+// boundary is `hs_broker_select` / `hs_broker_update` in the database, keyed on
+// the caller's own `profiles.role`: a client's read returns zero rows and their
+// write matches none. Deleting this function would hide the control and change
+// nothing about who can move the tier. CLAUDE.md's standing lesson — a UI gate
+// is never the gate — is why that is stated rather than assumed.
+//
+// ⚠️ AND IT MAKES NO CLAIM THAT A SAVE HAS TAKEN EFFECT, which is the one thing
+// it would be easy and wrong to say. FR-17 renders every Help-desk failure as
+// one quiet notice, so "saved" proves the ROW moved and nothing more: if the
+// deployed function predates the change that reads this row, the switch saves
+// and the answers do not move. The note below therefore points at the only
+// honest proof — ask a question, and a broker's answer names the model that
+// produced it.
+function helpTierCard() {
+  if ((getUser()?.role || "") !== "broker") return null;
+
+  const status = el("p", { class: "k-tier__status", attrs: { role: "status", "aria-live": "polite" }, text: "Reading the current tier…" });
+  const opts = el("div", { class: "k-tier__opts", attrs: { role: "radiogroup", "aria-label": "Help desk model" } });
+
+  // `null` until the read lands, and NOT the default: showing a broker "Opus"
+  // before anyone knows what is stored is the three-outcomes defect `getHelpModel`
+  // exists to avoid. Nothing is checked while this is null.
+  let current = null;
+  let busy = false;
+
+  const buttons = HELP_MODEL_CHOICES.map((c) => {
+    const btn = el("button", {
+      class: "k-tier__opt",
+      attrs: { type: "button", role: "radio", "aria-checked": "false", disabled: "disabled" },
+    }, [
+      el("b", { text: c.label }),
+      el("span", { class: "k-tier__blurb", text: c.blurb }),
+      el("em", { class: "k-tier__price", text: priceLine(c) }),
+    ]);
+    btn.addEventListener("click", () => choose(c.id));
+    return { id: c.id, btn };
+  });
+  for (const { btn } of buttons) opts.appendChild(btn);
+
+  function paint() {
+    for (const { id, btn } of buttons) {
+      const on = current === id;
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-checked", String(on));
+      // Disabled while a write is in flight, and while the tier is unknown —
+      // offering a choice against an unread state invites a broker to "confirm"
+      // a value nobody has read.
+      if (busy || current === null) btn.setAttribute("disabled", "disabled");
+      else btn.removeAttribute("disabled");
+    }
+  }
+
+  async function choose(id) {
+    if (busy || id === current) return;
+    const previous = current;
+    busy = true;
+    current = id;                                  // optimistic, reverted below
+    paint();
+    status.textContent = `Switching to ${helpModelLabel(id)}…`;
+    const res = await setHelpModel(id);
+    busy = false;
+    if (!res.ok) {
+      // ⚠️ REVERT. Leaving the clicked tier selected after a failed write is the
+      // "appears to work" failure in its smallest form: the screen would say
+      // Haiku while the row says Opus.
+      current = previous;
+      paint();
+      status.textContent = `Could not switch tier — ${res.error || "the write was refused."} The stored tier is unchanged.`;
+      return;
+    }
+    current = res.model;
+    paint();
+    status.textContent = `${helpModelLabel(res.model)} is now the stored tier. Ask a question on the Help desk to confirm it is in use.`;
+  }
+
+  getHelpModel().then((res) => {
+    if (!res.ok) {
+      // Honest, and deliberately leaves every option unchecked: a broker who
+      // cannot read the tier must not be shown a guess as the current state.
+      status.textContent = `Could not read the current tier — ${res.error || "the read was refused."} Nothing has been changed.`;
+      return;
+    }
+    if (!res.model) {
+      status.textContent = "No tier is stored, so the desk is using its built-in default. Pick one to store it.";
+      // The table is readable and empty — a legitimate state, and a broker can
+      // write into it, so the options are enabled with nothing checked.
+      current = "";
+      paint();
+      return;
+    }
+    current = res.model;
+    paint();
+    const label = helpModelLabel(res.model);
+    // An unrecognised stored value is possible only if the CHECK constraint was
+    // changed or the row was written as `postgres`; say what is there rather
+    // than silently rounding it to a tier that is not stored.
+    status.textContent = label
+      ? `${label} is the stored tier.`
+      : `The stored tier is "${res.model}", which this version does not recognise. The desk will fall back to its default.`;
+  });
+
+  return el("div", { class: "k-tier" }, [
+    el("div", { class: "k-tier__hd" }, [
+      el("span", { class: "k-cic" }, [icon("spark", { size: 26 })]),
+      el("div", {}, [
+        el("h3", {}, [el("span", { text: "Help desk model " }), el("span", { class: "opt", text: "Admin" })]),
+        el("p", { text: "Which Claude model answers clients on the Help desk. Higher tiers reason better on nuanced questions; lower tiers cost far less per answer." }),
+      ]),
+    ]),
+    opts,
+    status,
+    el("p", { class: "k-tier__fine" }, [
+      el("span", { text: `List prices as at ${PRICES_AS_AT}; check the Anthropic Console for current rates. ` }),
+      el("span", { text: "The desk reads this when a client asks a question — there is nothing to deploy. To confirm a change is in use, ask a question yourself: an answer shown to a broker names the model that produced it." }),
+    ]),
+  ]);
+}
+
 export function renderKeepSecurity() {
   // 2FA is not live on the stub yet — the button reveals an honest explanation
   // rather than pretending to enable it.
@@ -494,6 +623,9 @@ export function renderKeepSecurity() {
         el("p", { text: "How the Keep keeps your information private and secure." }),
       ]),
     ]),
+    // Broker-only, and `page()` drops a null child — a client's Security page is
+    // byte-for-byte what it was.
+    helpTierCard(),
     el("div", { class: "twofa" }, [
       el("span", { class: "k-cic" }, [icon("lock", { size: 26 })]),
       el("div", {}, [

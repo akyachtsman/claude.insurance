@@ -492,6 +492,50 @@ export async function savePrefs(prefs) {
   return { ok: true };
 }
 
+// ── The Help desk's model tier (help_settings) ──────────────────────────────
+//
+// Broker-only, in the database and not only in the UI: `hs_broker_select` and
+// `hs_broker_update` key on the caller's `profiles.role`, so a client's read
+// returns zero rows and their write matches none. The role check in the view is
+// for what to RENDER; this is where the boundary actually is.
+//
+// ⚠️ NOT PART OF `cache`. Every Keep read goes through `loadTree`, which caches
+// for the length of the login — and a tier a broker just changed must not be
+// read back from a snapshot taken before they changed it. CLAUDE.md records what
+// that class of staleness has already cost here; a settings row is read when the
+// control renders and written when it moves, and that is all.
+
+export async function getHelpModel() {
+  const { data, error } = await supabase.from("help_settings").select("model, updated_at, updated_by").maybeSingle();
+  // ⚠️ THREE OUTCOMES, NOT TWO, and collapsing them is the defect to avoid: a
+  // broker whose read FAILED must not be shown the default as though it were
+  // the stored value — they would conclude the switch says Opus when nobody
+  // knows what it says. `ok: false` is for "could not read"; a null `model` with
+  // `ok: true` is a genuinely empty table.
+  if (error) return { ok: false, error: error.message, model: null };
+  return { ok: true, model: data ? data.model : null, updatedAt: data ? data.updated_at : null, updatedBy: data ? data.updated_by : null };
+}
+
+export async function setHelpModel(model) {
+  // The singleton row has no id a caller should have to know, and `authenticated`
+  // holds UPDATE on `model` ALONE — `updated_at`/`updated_by` are stamped by a
+  // trigger, and sending them here would be refused with 42501 rather than
+  // ignored. `eq("id", true)` names the one row without asserting anything the
+  // policy does not already enforce.
+  const { data, error } = await supabase.from("help_settings")
+    .update({ model })
+    .eq("id", true)
+    .select("model, updated_at")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  // ⚠️ A ROW COUNT OF ZERO IS NOT SUCCESS. An UPDATE whose policy `using` clause
+  // matches nothing is a silent no-op in PostgREST — 204, no error — so a client
+  // who somehow reached this would be told their change saved. Measured as part
+  // of this migration's probe 8: a client UPDATE returns 0 rows, not 42501.
+  if (!data) return { ok: false, error: "No settings row was updated." };
+  return { ok: true, model: data.model, updatedAt: data.updated_at };
+}
+
 // ── Writes (clients have CRUD on their own entities/assets) ──────────────────
 export async function addEntity({ kind, name, typeLabel }) {
   const { data: { user } } = await supabase.auth.getUser();
