@@ -2731,25 +2731,93 @@ these are the parts that are not guessable:
   `function_edge_logs`, `postgres_logs`, `postgrest_logs`, `auth_logs`,
   `auth_audit_logs`, `pgbouncer_logs`, `storage_logs`, `realtime_logs`.
 
-⚠️ **WHAT IT CANNOT SEE, which is the half that matters for `help-ask`:** a
-function's own PostgREST calls do **not** appear. Measured — the browser's
-`GET`/`PATCH` on `help_settings` are both in `edge_logs` with status codes, and
-the same function's `admin.from("help_settings")` read in the same minute is in
-no source at all; `postgrest_logs` carries only Warp idle-timeout noise, not
-request lines. So **the logs cannot tell you whether a server-side read
-succeeded** — only whether the handler chose to log about it. Do not reason from
-their silence without a positive control that the channel carries app lines at
-all; every `function_logs` row in the 2026-10-14 window was a platform message,
-so that control did not exist.
+⚠️ **RETRACTED THE SAME DAY IT WAS WRITTEN — THE PREVIOUS VERSION OF THIS BLOCK
+WAS WRONG, AND IT WAS WRONG IN THE DIRECTION THAT SUPPRESSES A CHECK.** It said:
+*"a function's own PostgREST calls do **not** appear … so the logs cannot tell
+you whether a server-side read succeeded"*, and concluded that the tier proof
+could only ever rest on the fallback-chain argument. **They do appear.** Measured
+2026-10-14 at 15:41, hours after that paragraph merged:
 
-What it *is* good for, and did settle on sight: `edge_logs` gives every
-`/functions/v1/help-ask` request with method and status, which dated the
-deployment and the asks exactly — `OPTIONS | 404` through 2026-10-13 18:13 (not
-yet deployed), first `OPTIONS | 200` at 23:31:47, four `POST | 200` between
-00:03 and 00:58 (**that is `qa-live`'s S10 on its four viewport projects — the
-"4 paid calls per Pages deploy" record, now observed rather than counted from
-`--list`**), one `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe,
-behaving as designed), and the proving ask at 03:21:17.
+```
+GET | 200 | …/rest/v1/help_settings?select=model
+  | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.77.0; ref=bdsegmjcgfmgzuxwiplj)
+```
+
+That is `storedModel()`'s own `admin.from("help_settings").select("model")`, in
+`edge_logs`, with a status code. The function's `entities`, `assets`, `policies`
+and `help_queries` traffic is all there too, on the same user agent.
+
+**The discriminator nobody had looked for is the USER AGENT**, and it is what the
+original measurement missed:
+
+| caller | user agent in `edge_logs` |
+|---|---|
+| the browser | `Mozilla/5.0 (X11; CrOS …) Chrome/154…` |
+| the Edge Function | `Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.77.0; ref=<project>)` |
+
+⚠️ **AND THE SOURCE SPLIT IS NOT WHAT THIS SECTION SAID EITHER.** The paragraph
+below used to claim `edge_logs` carries the `/functions/v1/help-ask` requests. It
+does not — measured, a `source = 'edge_logs'` filter on that path returns **zero
+rows**. The split is:
+
+| source | what is in it |
+|---|---|
+| `function_edge_logs` | **inbound** invocations of the function (`POST\|200`, `OPTIONS\|200`, `POST\|401`) |
+| `edge_logs` | **PostgREST** traffic — the browser's and the function's alike, told apart by user agent |
+
+So a query filtered to one source and keyed on the path silently answers about
+half the system. Drop the `source` filter when you do not yet know which half you
+are in; `select source, …` and let the rows say.
+
+**What this unlocks, and it is the reason the retraction matters more than the
+two factual errors:** a server-side read's success is **directly observable**.
+The previous version told a reader to stop looking, on the strength of one
+negative result, and then correctly noted that reasoning from an absent log line
+needs a positive control it did not have — while the positive control was one
+unfiltered query away. *An absence measured through the wrong filter is not an
+absence.* Same family as this file's own "no webkit in the image" directory
+listing and the auth-gate window.
+
+**It closes the tier proof a second way, independently of the Sonnet argument.**
+The chain, read off `edge_logs` + `function_edge_logs` for 2026-10-14:
+
+| time | event | source |
+|---|---|---|
+| 14:22:58 | `PATCH\|200` on `help_settings` (Chrome UA) — the broker stores Sonnet | `edge_logs` |
+| 14:24:01 | **`GET\|200` on `help_settings?select=model` (Deno UA)** — the function reads the row | `edge_logs` |
+| 14:24:04 | `POST\|200` on `/functions/v1/help-ask` — the answer that read "Answered by Sonnet." | `function_edge_logs` |
+
+The Sonnet test proved the value could only have come from the row *by
+elimination*; this shows the read itself, 200, 63s after the write and 3s before
+the answer. Two independent closures of a claim this file had already had to
+narrow twice.
+
+⚠️ What is still NOT established is the `function_logs` half: every row there in
+the window is a platform `booted`/`shutdown` message, so nothing yet shows that
+channel carries a handler's own `console.error`. The `where` field this file
+tells readers to go and read remains unproven as *reachable* — which is a
+narrower and more honest version of what the retracted paragraph was groping at.
+
+What it *is* good for, and did settle on sight: the two sources together give
+every `help-ask` request with method and status, which dated the deployment and
+the asks exactly — `OPTIONS | 404` through 2026-10-13 18:13 (not yet deployed),
+first `OPTIONS | 200` at 23:31:47, four `POST | 200` between 00:03 and 00:58
+(**that is `qa-live`'s S10 on its four viewport projects — the "4 paid calls per
+Pages deploy" record, now observed rather than counted from `--list`**), one
+`POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe, behaving as
+designed), and the proving ask at 03:21:17.
+
+⚠️ **A KEPT RESERVATION IS A WEAK BILLING SIGNAL, NOT A STRONG ONE — do not read
+it as proof an answer was generated.** `releaseAnd` deletes the `help_queries`
+row when nothing was billed, so a `DELETE` is the signature of a release. The
+2026-10-14 window holds **`POST | 201` reservations and zero `DELETE`s**, which
+rules out a provider **HTTP error**; it does **not** rule out a timeout, because
+a timeout deliberately keeps the reservation ("billing unknown resolves as
+billed"). What separates those two is the latency: each response landed **6-7s**
+after its reservation, against a 60s provider ceiling. Reservation kept **and**
+fast is an answer. Reservation kept **and** ~60s is a billed timeout — the
+failure mode the `max_tokens: 8192` note predicts, and this is the query that
+would find it.
 
 ### ✅ DEPLOY PROVENANCE — CLOSED, AND THE DEPLOY PATH IS RESTORED (2026-10-14, both measured)
 
@@ -2771,6 +2839,18 @@ from a session afterwards rather than taken from the green tick:
 | `entrypoint_path` | `/home/runner/work/…` — the RUNNER'S checkout |
 | `index.ts` / `handler.ts` / `prompt.ts` | **all three byte-identical to the repo** (sha256) |
 | comment lines | **935** (79 + 587 + 269), intact |
+
+✅ **AND ON 2026-10-14 IT CARRIED A BEHAVIOUR CHANGE FOR THE FIRST TIME** — every
+prior green run deployed bytes that differed from production only in comments, so
+"the path works" had never been tested against a change that could break
+anything. `6b510a1` (the model-visibility change) merged, `Deploy Edge Functions`
+went green unattended, and the result was verified by hash rather than by the
+tick: **version 3 → 4**, ACTIVE, `verify_jwt: true`, `entrypoint_path` under
+`/home/runner/work/…`, and all three modules byte-identical to the repo
+(`index.ts` `ba21d49f53714a95`, `handler.ts` `913ad1226458dbd5`, `prompt.ts`
+`92f13c9868b5ada8`), 1,040 comment lines intact. `qa-live` then asked four real
+questions against it and all four answered `POST | 200`.
+
 
 ✅ **AND THIS IS THE CONTROLLED EXPERIMENT THE RED RUN WAS NOT.** The section
 below was careful to say the failure only *corroborated* the revoked-token
@@ -3272,6 +3352,18 @@ message, so **nothing establishes the channel works**. Absence of a log line is
 exactly the kind of evidence this repo has already been burned by (the auth-gate
 window, the "no webkit in the image" directory listing). It is recorded as
 suggestive and nothing more.
+
+⚠️ **AND THE SEARCH WAS CALLED OFF ONE QUERY TOO EARLY.** The paragraph above is
+sound about its own evidence and wrong about what evidence was available: the
+function's `help_settings` read **is** visible, in `edge_logs`, under the
+`Deno/… SupabaseEdgeRuntime` user agent — `GET | 200` at **14:24:01**, between
+the broker's `PATCH` at 14:22:58 and the answer at 14:24:04. See *HOW TO READ THE
+EDGE FUNCTION LOGS* above, which now carries the retraction and the user-agent
+discriminator. So the row-was-read claim has a **direct** measurement as well as
+the elimination argument below, and the thing that hid it was a `source` filter,
+not the platform. The `function_logs` limitation stated above is real and
+unchanged; it was simply never the only channel.
+
 
 ✅ **THE DECIDING TEST WAS RUN 2026-10-14, AND IT PASSED.** The stored tier was
 set to **Sonnet** — neither the default (`claude-opus-5-5`) nor the value already
