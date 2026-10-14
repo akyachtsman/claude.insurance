@@ -2799,9 +2799,50 @@ channel carries a handler's own `console.error`. The `where` field this file
 tells readers to go and read remains unproven as *reachable* — which is a
 narrower and more honest version of what the retracted paragraph was groping at.
 
-What it *is* good for, and did settle on sight: the two sources together give
-every `help-ask` request with method and status, which dated the deployment and
-the asks exactly — `OPTIONS | 404` through 2026-10-13 18:13 (not yet deployed),
+⚠️ **THESE LOGS DROP ROWS — MEASURED 2026-10-14 17:35, AND IT FALSIFIES THE
+SENTENCE BELOW.** That sentence said the two sources give **every** `help-ask`
+request with method and status. They do not, and this is the rare case where the
+absence can be *proved* rather than suspected, because there is a positive
+control:
+
+`functions-deploy.yml`'s smoke step exits 1 on any status other than 401
+(`case "$code" in 401) ;; *) exit 1`). On run `38607811541` it reported
+**success** at 17:35:13. So an unauthenticated POST was made and the gateway
+answered 401. **There is no row for it** — not in `function_edge_logs`, not in
+`edge_logs`, not in any source, across a two-minute window queried with no
+`source` filter and re-queried three minutes later (identical, so not ingestion
+lag). Its `OPTIONS` at 17:35:08 *is* there, and so is the worker's
+`booted (time: 65ms)` in `function_logs`.
+
+And the comparison is like-for-like: the other three deploys today
+(**15:37:18, 14:21:37, 01:57:02**) each have their smoke `POST | 401` present.
+Three of four. The same run's `qa-live` then shows **five `OPTIONS` and three
+`POST`s** where S10 asserts exactly one ask per project across four projects —
+consistent with the same loss rather than a missing ask.
+
+**Three consequences, and the second is the one that bites:**
+
+1. **A missing row is not a missing request.** Do not conclude from these logs
+   that something did not happen.
+2. ⚠️ **It weakens the `where: "answer"` positive control recorded below.** That
+   control says a billed non-answer with no matching `function_logs` line means
+   the channel is the defect. With row loss established, a missing line is
+   *also* consistent with the row being dropped — so the control can confirm the
+   channel works (a line appears) but can no longer condemn it (a line absent).
+   Stated here rather than left for a reader to discover, because this file has
+   already been burned twice today by reading an absence as a fact.
+3. **Do not count requests from these logs.** The "4 paid calls per Pages
+   deploy" figure stands on `npx playwright test --list | grep -c S10` returning
+   4, which is what originally established it; the log observation that was
+   added as corroboration is not a reliable instrument for a count.
+
+⚠️ This is the **fourth** correction to this section in one day, and the first
+three were all the same shape: a claim about what the logs show, stated more
+strongly than the measurement supported. The quantifier "every" was the defect
+both times it appeared.
+
+What it *is* good for, with that caveat: the two sources give `help-ask`
+requests with method and status, which dated the deployment and the asks — `OPTIONS | 404` through 2026-10-13 18:13 (not yet deployed),
 first `OPTIONS | 200` at 23:31:47, four `POST | 200` between 00:03 and 00:58
 (**that is `qa-live`'s S10 on its four viewport projects — the "4 paid calls per
 Pages deploy" record, now observed rather than counted from `--list`**), one
