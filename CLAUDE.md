@@ -96,9 +96,25 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
     with `x-deno-execution-id` set (so the flag does **not** block CORS), while a
     POST with no Authorization and a POST with a malformed bearer are both
     refused by the gateway with **no execution id** (so the function never runs).
-    The flag therefore costs nothing and stops junk traffic before it is a
-    billable invocation. `supabase/config.toml` carries no `[functions.help-ask]`
-    block, deliberately — and note that only the CLI reads that file at all; the
+    The flag therefore costs nothing and stops **keyless** junk traffic before it
+    is a billable invocation.
+    ⚠️ **"Junk traffic" MEANS KEYLESS, AND `verify_jwt` IS NOT USER
+    AUTHENTICATION** — raised by Codex on #271 and correct. The gateway checks
+    for a **valid project JWT**, and the publishable/anon key is one: it is
+    embedded in the browser bundle (`js/supabase.js`) and public by
+    construction. So anyone holding that key reaches the worker, and the
+    exposure this flag is credited with closing is *not* closed for them. What
+    it does stop is exactly the probe's own two cases — no `Authorization` at
+    all, and a malformed bearer. **The user gate is in the handler and always
+    was** (`if (!authz) 401`, then `getUser()` must return a user, then every
+    read runs as that user under RLS), so this changes no behaviour, only a
+    claim. ⚠️ **Not measured from here:** egress is blocked, so the
+    publishable-key path has never been exercised against the live gateway, and
+    the smoke probe sends no `apikey` — it tests the keyless path only.
+    ⚠️ **`supabase/config.toml` now PINS `verify_jwt = true`** for both
+    functions; it carried no `[functions.*]` block until 2026-10-14, when a
+    deploy measured that an absent block *preserves* the live value rather than
+    applying the default. Note that only the CLI reads that file at all; the
     Supabase MCP deploy tool takes `verify_jwt` explicitly and defaults to true.
     ✅ **MERGED AND DEPLOYED** — PR #254 merged 2026-10-11, deployed 2026-10-13, and
     redeployed from the runner's checkout 2026-10-14 (version 2, `verify_jwt: true`,
@@ -3389,6 +3405,40 @@ deploy` pushes every directory under `supabase/functions/`, so a new function
 would go live the moment it merged with no decision taken. It carried `help-ask`
 alone until 2026-10-14, while `notify-enhancement`'s claim table was unapplied;
 that condition is met and it is now a second row.
+
+### ⚠️ AN ABSENT `[functions.*]` BLOCK DOES NOT APPLY THE DEFAULT — IT PRESERVES WHAT IS LIVE (measured 2026-10-14)
+
+Both `config.toml` and `functions-deploy.yml` asserted, at length, that carrying
+**no** `[functions.<slug>]` block means *"the CLI applies the default
+(`verify_jwt = true`)"*. **It does not.** An absent block sends nothing, and the
+platform keeps whatever the function already had.
+
+Measured on the first run that deployed `notify-enhancement`: the deploy
+**succeeded** and uploaded the repo's source (version 3, `entrypoint_path` under
+`/home/runner/work/…`) — and the function stayed **`verify_jwt: false`**, which
+is what it had been since its old inline tool-call deploy. `function_edge_logs`
+shows `OPTIONS | 200` then `POST | 401`, and `list_edge_functions` still reported
+`false` afterwards.
+
+⚠️ **`help-ask` is why nobody noticed.** It was ALREADY `true`, so "preserve the
+existing value" and "apply the default" are observationally identical on it —
+the two readings only separate on a function whose flag is already `false`, and
+until that day there was none in the matrix. *A default you have never seen
+applied to a non-default value is an assumption, not a measurement.*
+
+✅ **The smoke step caught it, which is the whole reason it was redesigned.** An
+unauthenticated POST reached the **handler**, which answered its own
+`{"error":"unauthorized"}` — precisely what probe 2 exists to detect. The
+single-401 check it replaced in PR #258 would have gone **green** on a function
+accepting unauthenticated requests.
+
+**Fixed by pinning `verify_jwt = true` EXPLICITLY for both functions.** ⚠️ That
+is not a reversal of the long argument at the top of `config.toml`: that argument
+is against pinning `verify_jwt = **false**`, which was wrong on its merits and
+still is. Pinning **true** is its opposite — it states the intended end state
+instead of inheriting whatever is live, so a function that somehow acquires
+`false` is corrected by the next deploy rather than keeping it indefinitely.
+**An inherited default is not a decision.**
 
 ⚠️ **AND IT SHIPPED WITH THREE DEFECTS, ALL FOUND BY A REVIEW THAT LANDED AFTER
 THE MERGE** (Codex on #258, completed 00:03:24Z against a PR merged at
