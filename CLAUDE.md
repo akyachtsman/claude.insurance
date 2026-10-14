@@ -96,9 +96,25 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
     with `x-deno-execution-id` set (so the flag does **not** block CORS), while a
     POST with no Authorization and a POST with a malformed bearer are both
     refused by the gateway with **no execution id** (so the function never runs).
-    The flag therefore costs nothing and stops junk traffic before it is a
-    billable invocation. `supabase/config.toml` carries no `[functions.help-ask]`
-    block, deliberately — and note that only the CLI reads that file at all; the
+    The flag therefore costs nothing and stops **keyless** junk traffic before it
+    is a billable invocation.
+    ⚠️ **"Junk traffic" MEANS KEYLESS, AND `verify_jwt` IS NOT USER
+    AUTHENTICATION** — raised by Codex on #271 and correct. The gateway checks
+    for a **valid project JWT**, and the publishable/anon key is one: it is
+    embedded in the browser bundle (`js/supabase.js`) and public by
+    construction. So anyone holding that key reaches the worker, and the
+    exposure this flag is credited with closing is *not* closed for them. What
+    it does stop is exactly the probe's own two cases — no `Authorization` at
+    all, and a malformed bearer. **The user gate is in the handler and always
+    was** (`if (!authz) 401`, then `getUser()` must return a user, then every
+    read runs as that user under RLS), so this changes no behaviour, only a
+    claim. ⚠️ **Not measured from here:** egress is blocked, so the
+    publishable-key path has never been exercised against the live gateway, and
+    the smoke probe sends no `apikey` — it tests the keyless path only.
+    ⚠️ **`supabase/config.toml` now PINS `verify_jwt = true`** for both
+    functions; it carried no `[functions.*]` block until 2026-10-14, when a
+    deploy measured that an absent block *preserves* the live value rather than
+    applying the default. Note that only the CLI reads that file at all; the
     Supabase MCP deploy tool takes `verify_jwt` explicitly and defaults to true.
     ✅ **MERGED AND DEPLOYED** — PR #254 merged 2026-10-11, deployed 2026-10-13, and
     redeployed from the runner's checkout 2026-10-14 (version 2, `verify_jwt: true`,

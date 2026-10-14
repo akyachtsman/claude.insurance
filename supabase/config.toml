@@ -20,7 +20,32 @@
 # So the flag costs nothing and buys the thing this feature most needs: junk
 # traffic dies before it is a billable invocation, instead of being parsed by the
 # handler and (with any bearer present) causing an Auth round trip. help-ask
-# deploys with the DEFAULT, which is verify_jwt = true.
+# deploys with verify_jwt = true.
+#
+# ⚠️⚠️ AND "JUNK TRAFFIC" MEANS KEYLESS TRAFFIC — `verify_jwt` IS NOT USER
+# AUTHENTICATION, WHICH THE SENTENCE ABOVE READS AS CLAIMING. Raised by Codex on
+# #271, and it is right: the gateway checks for a VALID PROJECT JWT, and the
+# publishable/anon key is one — it is embedded in the browser bundle at
+# js/supabase.js and is public by construction. So anyone holding that key
+# reaches the worker, and the exposure this flag is credited with closing
+# (a billable invocation, an Auth round trip) is NOT closed for them.
+#
+# What the flag actually stops is the 2026-10-07 probe's own two cases: a POST
+# with NO Authorization, and one with a malformed bearer. Both died at the
+# gateway with no execution id. That is worth having and it is all it is.
+#
+# ⚠️ THE USER GATE IS IN THE HANDLER, AND ALWAYS WAS: `if (!authz) 401`, then
+# `getUser()` must return a user, then every table read runs as that user under
+# RLS. Nothing here depends on the gateway for identity, so this correction
+# changes no behaviour — only a claim. Do not "harden" by removing the flag
+# either: keyless junk dying early is still a real saving.
+#
+# ⚠️ NOT MEASURED FROM HERE, and stated rather than assumed: HTTPS egress to the
+# project is blocked from a session, so the publishable-key path has not been
+# exercised against the live gateway. The smoke probe in functions-deploy.yml
+# sends NO apikey, so it tests the keyless path only — it is not evidence either
+# way about the key-bearing one, and a probe asserting unmeasured gateway
+# behaviour would be a guess that can turn CI red.
 #
 # Two further corrections to what that block claimed: only the CLI reads this
 # file, and the Supabase MCP deploy tool this project uses takes `verify_jwt` as
@@ -39,8 +64,9 @@ project_id = "bdsegmjcgfmgzuxwiplj"
 # browser-side with the user's JWT), and it could never have worked anyway —
 # `service_role` holds no table privileges in this project, so a service-role
 # invocation failed on its first query like every other one. Every real caller is
-# a signed-in client, so the gateway flag now costs nothing and kills junk
-# traffic before it is a billable invocation.
+# a signed-in client, so the gateway flag now costs nothing and kills KEYLESS
+# junk traffic before it is a billable invocation — see the correction above:
+# `verify_jwt` is not user authentication, and the publishable key passes it.
 #
 # ✅ AND IT IS `true` ON THE LIVE DEPLOYMENT AS OF 2026-10-14, when
 # functions-deploy.yml gained notify-enhancement as a second matrix row and
