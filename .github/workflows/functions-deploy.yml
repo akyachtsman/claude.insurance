@@ -28,12 +28,25 @@
 #   SUPABASE_ACCESS_TOKEN — a Supabase personal access token.
 #     Supabase dashboard -> account menu -> Access Tokens -> Generate new token.
 #     Add it at Settings -> Secrets and variables -> Actions -> New repository secret.
-#   ⚠️ A Supabase PAT is ACCOUNT-WIDE, and this account also holds the `apfp`
-#   project — see CLAUDE.md's "Shared Supabase account" trade-off. The token this
-#   workflow holds can therefore reach both projects, which is the same exposure
-#   the MCP credential already has. Narrowing it is the per-project split that
-#   CLAUDE.md lists as a before-production task; it is not made worse here, and
-#   the `--project-ref` below pins what this workflow actually touches.
+#   ⚠️ SCOPE THE TOKEN. This said flatly that "a Supabase PAT is ACCOUNT-WIDE" and
+#   that narrowing it was a before-production task. No longer true: measured in the
+#   dashboard 2026-10-14, token creation offers Resource access (Project /
+#   Organization) and per-capability permissions. Create this one as:
+#       Expires in       Never
+#       Resource access  Project -> the `insurance` project ONLY
+#       Permissions      Application services -> Edge Functions -> Read-write
+#                        EVERYTHING ELSE None
+#   ⚠️ `Never` is deliberate, and the gate below is why it matters: it checks only
+#   that the secret is NON-EMPTY, so an expired or revoked token sails past it and
+#   dies later at the CLI with an auth error that reads like an outage. Present is
+#   not valid — the same lesson as `hasKeys` in CLAUDE.md.
+#   ⚠️ Leave `Edge Function Secrets` (HIGH RISK) at None, so this token cannot READ
+#   ANTHROPIC_API_KEY. That bounds the blast radius without closing it: code this
+#   token deploys still runs with access to that secret at runtime.
+#   ⚠️ Access CANNOT be changed after creation; widening means a new token.
+#   The account also holds the `apfp` project (CLAUDE.md, "Shared Supabase
+#   account"), which is what the project scoping protects. `--project-ref` below
+#   pins what this workflow touches; the token scoping pins what it COULD touch.
 
 name: Deploy Edge Functions
 

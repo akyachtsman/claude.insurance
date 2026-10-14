@@ -741,7 +741,11 @@ profile**, never by listing a directory.
   re-measuring `GET /auth/v1/settings` is the way to confirm it when it is.
   Deliberately NOT reworded to match the current setting — the wording describes
   the intended state, and the config is what is wrong.
-- **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
+- **⚠️ Shared Supabase account — FOUR projects, not two, and the session credential is `postgres` with BYPASSRLS on all of them (MEASURED 2026-10-14).** This entry said "`insurance` and `apfp` share one account … so the MCP credential can reach both", which understated it on both counts.
+  **What a session's Supabase connection actually is:** NOT a personal access token — the Access Tokens page was EMPTY while all of this session's migrations and probes ran. It is the **Management API** (`application_name = 'mgmt-api'`), authorized by the account's OAuth grant to Claude, and it lands as `current_user = session_user = postgres`, `rolbypassrls = true`, `rolsuper = false`. That is why a session can apply migrations, read `auth.users`, and `set local role` to probe as any persona. Revoking it is done where it was granted (the Supabase ↔ Claude integration), not on the Access Tokens page.
+  **What it reaches** (`list_projects`, one org `akyachtsman`): `trading dashboard` (`kwugzhyfjevzwgplhtsd`), **`insurance`** (`bdsegmjcgfmgzuxwiplj`), `property dashboard` (`yucnxlimmrgzbqtdizle`), `apfp` (`qnjrwbgxywkdfbfuzwas`). Accepted for now (same owner), but the blast radius is **four** projects as `postgres`, not two.
+  ⚠️ The *Operating rule* below still binds: list-level visibility is not permission to read. No byte was read from the other three.
+  **Before production: split into per-project Supabase accounts/orgs.** Note the deploy token created 2026-10-14 is the counter-example worth copying — scoped to one project and one capability (see *DEPLOY PROVENANCE*).
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
 ### Auth-gate readiness: proven, not windowed (wired 2026-10-06)
@@ -2671,10 +2675,55 @@ than insert-then-delete — which is what should have been done the first time.
 one throwaway probe row is outstanding and needs one line from the owner (see
 `migrations/20261013014854_enhancement_requests_insert_column_scope.sql`).
 
-### ⚠️ DEPLOY PROVENANCE — the live `help-ask` is NOT byte-equal to this repo (2026-10-13)
+### ✅ DEPLOY PROVENANCE — CLOSED 2026-10-14, MEASURED (was: the live `help-ask` is NOT byte-equal to this repo)
 
-`help-ask` is deployed and working. **The deployed source is the repo's code with
-every comment block removed**, and that is a defect to close, not a style choice.
+⚠️ **This heading said "is NOT byte-equal" and that is no longer true.** Kept,
+heading and all, because the defect and the way it was closed are both worth
+reading — but a reader must not take the sections below as current.
+
+**Measured 2026-10-14 after the first run of `functions-deploy.yml`** (run
+`38498409976`, `workflow_dispatch`, all seven steps green), by fetching the
+deployed source and hashing it against the working tree at `86aae05`:
+
+| file | deployed sha256 | repo sha256 | match |
+|---|---|---|---|
+| `index.ts` | `091c9f3685791bc9…` | `091c9f3685791bc9…` | ✅ |
+| `handler.ts` | `171fed205113eb71…` | `171fed205113eb71…` | ✅ |
+| `prompt.ts` | `92f13c9868b5ada8…` | `92f13c9868b5ada8…` | ✅ |
+
+Function **version 2**, `verify_jwt: true`, and `entrypoint_path` reads
+`/home/runner/work/claude.insurance/…` — i.e. deployed from the RUNNER'S
+CHECKOUT, not retyped into a tool call. The comments are back: **1,027 comment
+lines** across the three modules (78 + 632 + 317) where the stripped copy had
+none. "Deployed == repo" now holds by construction rather than by anyone's care,
+which was the whole point.
+
+⚠️ **AND THE TOKEN THAT DID IT NO LONGER EXISTS.** The owner rotated and then
+deleted both access tokens, so `SUPABASE_ACCESS_TOKEN` in GitHub holds a
+**revoked** value. Nothing is broken — the deploy already ran and the function is
+live — but the NEXT deploy fails at the CLI with an auth error. ⚠️ It will NOT
+fail at the `Require SUPABASE_ACCESS_TOKEN` gate, which only checks the secret is
+non-empty: a revoked token is non-empty. That is the `hasKeys` lesson on a third
+surface — **present is not valid**. To restore: a new Supabase token (Never,
+project `insurance`, Edge Functions read-write) pasted over that secret.
+
+⚠️ **A SUPABASE PAT IS NO LONGER NECESSARILY ACCOUNT-WIDE**, and this file and
+`functions-deploy.yml` both said it was. Measured in the dashboard 2026-10-14:
+token creation now offers **Resource access** (Project / Organization) and
+per-capability permissions. The token used here was scoped to the `insurance`
+project with **Edge Functions: read-write** and nothing else — notably NOT
+`Edge Function Secrets` (HIGH RISK), so a CI token cannot read
+`ANTHROPIC_API_KEY`, though code it deploys still runs with access to it. That
+weakens, but does not remove, the "split into per-project accounts" item under
+*Shared Supabase account*: the MCP credential is a separate path and is not a
+PAT (the token list was EMPTY before this one was created).
+⚠️ **Access cannot be changed after creation** — widening means a new token.
+
+---
+
+**What the defect was, and why it is kept below.** `help-ask` was deployed and
+working. **The deployed source was the repo's code with every comment block
+removed**, and that was a defect to close, not a style choice.
 
 **How it happened.** `mcp__Supabase__deploy_edge_function` takes file CONTENT
 inline — there is no path parameter — so deploying from a session means
@@ -2697,15 +2746,15 @@ reviewable, and nobody can diff live against `main`.
 | the function is ACTIVE, `verify_jwt: true` | **verified** (`get_edge_function`) |
 | stripping comments does not change behaviour | **verified** — 96 behavioural tests (`handler.test.mjs`, `prompt.node.test.mjs`) pass against a mechanically comment-stripped copy |
 | one real client ask returns a correct grounded answer | **verified** — owner-gate step 8 |
-| deployed bytes == repo bytes | **FALSE, and known to be false** |
+| deployed bytes == repo bytes | **was FALSE and known to be false; now TRUE, measured — see the top of this section** |
 | hand-stripped == mechanically-stripped, byte for byte | **not checked** |
 
 **The fix is `.github/workflows/functions-deploy.yml`**, added in the same change:
 it runs `supabase functions deploy help-ask` from the checkout, so the uploaded
 files are the repo's files and "deployed == repo" holds by construction instead
 of by anyone's care. It needs one repository secret, `SUPABASE_ACCESS_TOKEN`.
-Until that secret exists and one push to `main` has run it, the live function is
-still the stripped copy.
+✅ That secret was added and the workflow ran on 2026-10-14; the live function is
+no longer the stripped copy.
 ⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
 push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
 
@@ -2900,9 +2949,28 @@ an answer shown to a **broker** carries `.k-help__tier`, "Answered by Haiku."
 That field is gated server-side on the caller's own `profiles.role`, so it never
 reaches a client's payload; the view renders on PRESENCE, because a second role
 check there would read as though the field were client-safe and merely hidden.
-⚠️ **As of this writing the live function is still the pre-change deploy**, so
-the switch stores a tier nothing reads yet. It needs `SUPABASE_ACCESS_TOKEN` and
-one run of `functions-deploy.yml` — see *DEPLOY PROVENANCE* above.
+✅ **PROVEN END TO END ON THE LIVE SITE, 2026-10-14.** This read "the live
+function is still the pre-change deploy, so the switch stores a tier nothing
+reads yet" — true when written, false within the hour, which is exactly the
+staleness this file keeps paying for. What was actually done, in order, by the
+owner against production:
+
+1. Signed in as `broker@example.com` → the `.k-tier` card RENDERED (a client
+   never sees it), and its status read **"Opus is the stored tier."** — the value
+   READ BACK from `help_settings`, not a default, so `hs_broker_select` admitted
+   a real broker session.
+2. Clicked **Haiku** → **"Haiku is now the stored tier."** — so
+   `hs_broker_update` admitted the write, the `(model)` column grant allowed it,
+   and the CHECK accepted the value.
+3. Asked a question on `#/keep/help` → the answer ended **"Answered by Haiku."**
+
+Step 3 is the one that matters: that line is appended by the FUNCTION, gated on
+the caller's own `profiles.role`, so it proves the deployed function read the row
+on that ask. ⚠️ **Asking the model "which model are you using" does NOT prove
+it** — it was tried first, and the model correctly answered that the help guide
+does not say, because the corpus and the client's records are all it sees. A
+model cannot verify its own tier, and the readout is deliberately not something
+it can say.
 
 **An unrecognised stored value falls back to the default and logs
 `where: "model", source: "settings"`.** The CHECK constraint makes that
