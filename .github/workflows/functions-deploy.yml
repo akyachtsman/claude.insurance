@@ -250,7 +250,9 @@ jobs:
 
           # PROBE 1 — OPTIONS must REACH the function. verify_jwt lets a preflight
           # through (measured on this project 2026-10-07 against desk-ask, which
-          # carries the same flag), and handler.ts answers it with the literal
+          # carried the same flag; that stub was deleted 2026-10-14, so the
+          # measurement stands but has no live control), and handler.ts answers
+          # it with the literal
           # body `ok`. So that body is proof the deployed worker booted, resolved
           # all three modules, and is running THIS repo's code. It depends on no
           # response header, deliberately: an assertion on x-deno-execution-id

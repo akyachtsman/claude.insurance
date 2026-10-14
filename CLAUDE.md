@@ -89,8 +89,9 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   - **`help-ask`** (feature 003, `supabase/functions/help-ask/`) — the Help desk
     endpoint. **Deploy with the DEFAULT — `verify_jwt` ON.**
     ⚠️ This line said `--no-verify-jwt` for five commits, on two claims that were
-    both false and both testable here all along. `desk-ask` is deployed with
-    `verify_jwt: true`, which makes it a live control; probed 2026-10-07:
+    both false and both testable here all along. `desk-ask` WAS deployed with
+    `verify_jwt: true`, which made it a live control (it was deleted 2026-10-14 —
+    see below; the probe below stands, the control no longer exists); probed 2026-10-07:
     an OPTIONS preflight with no Authorization returns **the stub's own body**
     with `x-deno-execution-id` set (so the flag does **not** block CORS), while a
     POST with no Authorization and a POST with a malformed bearer are both
@@ -99,25 +100,44 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
     billable invocation. `supabase/config.toml` carries no `[functions.help-ask]`
     block, deliberately — and note that only the CLI reads that file at all; the
     Supabase MCP deploy tool takes `verify_jwt` explicitly and defaults to true.
-    Written, **not merged and not deployed** — ⚠️ this said "Written and merged"
-    while PR #254 was still open, which is the kind of claim that makes a reader
-    stop looking for the branch. See the owner gate below for the full order. Until then `#/keep/help` renders and every ask shows the plain
-    "not available" notice — FR-17's single failure
-    path, which is why the page is shippable ahead of the deploy.
-  - ⚠️ **`desk-ask` is a retired stub, not part of this system — and NOT an
-    older name for `help-ask` above.** The two are easy to confuse because 003
-    was first planned to deploy straight over this stub (`specs/003-help-desk/plan.md`,
-    Key decision 1, revised); that was rejected precisely so this record could
-    stay unambiguous. `desk-ask` is still
-    deployed here and reads ACTIVE, which an earlier version of this line listed
-    alongside `notify-enhancement` as though both were working features. Its
-    source (fetched 2026-10-05) is a 410 responder whose own comment says it
-    "was deployed by mistake into the wrong project and has been neutralized: it
-    reads nothing, calls nothing, and stores nothing. Safe to delete entirely."
-    Nothing in `js/` references it. It is deliberately **not** vendored into
-    `supabase/functions/` — the fix is to delete the function (Dashboard → Edge
-    Functions → desk-ask → Delete), which needs owner approval as a production
-    change. Until then it is a live JWT-verified endpoint that does nothing.
+    ✅ **MERGED AND DEPLOYED** — PR #254 merged 2026-10-11, deployed 2026-10-13, and
+    redeployed from the runner's checkout 2026-10-14 (version 2, `verify_jwt: true`,
+    id `89dca147`). ⚠️ This line read "Written, **not merged and not deployed**"
+    long after both had happened — and before that it read "Written and merged"
+    while PR #254 was still open. It has now been wrong in BOTH directions, which
+    is why the owner gate below is the authoritative order and this bullet defers
+    to it. ⚠️ Deployed is not the same as *deployable*: the deploy PATH is blocked
+    on a revoked `SUPABASE_ACCESS_TOKEN` — see *DEPLOY PROVENANCE*.
+    When the function is unreachable for any reason, `#/keep/help` renders and
+    every ask shows the plain "not available" notice — FR-17's single failure
+    path, which is why the page was shippable ahead of the deploy.
+  - ✅ **`desk-ask` IS DELETED (owner, Dashboard, 2026-10-14) — verified from a
+    session: `list_edge_functions` returns exactly `help-ask` and
+    `notify-enhancement`, and the id `57d80051-5070-4f0d-b5a2-d80368dbf293` is
+    gone.** It was a retired stub, never part of this system, and **NOT** an older
+    name for `help-ask` above — the two were easy to confuse because 003 was first
+    planned to deploy straight over it (`specs/003-help-desk/plan.md`, Key
+    decision 1, revised); that was rejected precisely so this record could stay
+    unambiguous.
+    Kept as an entry rather than deleted, for two reasons. **First, so the name
+    still resolves:** six files across this repo cite `desk-ask` in comments, and
+    a reader meeting one needs to find out what it was without concluding there is
+    an undocumented endpoint. **Second, because it is the source of a live
+    decision** — it was deployed with `verify_jwt: true`, which made it the only
+    control available for the 2026-10-07 preflight probe that reversed this repo's
+    `--no-verify-jwt` advice. That measurement stands (it was taken against a
+    then-live function and its observed bodies are recorded above); what no longer
+    exists is the ability to re-run it. ⚠️ So a future session cannot re-probe
+    gateway behaviour against a local control, and should not write as though it
+    could.
+    What it was: a 410 responder whose own comment read *"was deployed by mistake
+    into the wrong project and has been neutralized: it reads nothing, calls
+    nothing, and stores nothing. Safe to delete entirely."* Nothing in `js/` ever
+    called it, and it was deliberately never vendored into `supabase/functions/`.
+    ⚠️ **A session cannot do this**, which is why it waited for the owner: the
+    Supabase MCP has `deploy_edge_function`, `get_edge_function` and
+    `list_edge_functions` but **no delete**, the Management API needs a PAT no
+    session holds, and HTTPS egress to the project is blocked from here.
 - `supabase/proposed/` — migrations **written but not applied**, awaiting owner
   approval. `supabase/migrations/` means "live and matching `list_migrations`";
   this directory exists so that stays true. See its README.

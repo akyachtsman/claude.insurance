@@ -4,8 +4,9 @@
 // was first drafted over. Deploying on top of that stub would have shipped 003
 // and removed the dead endpoint in one owner action, which is tempting — but it
 // also silently changes what a deployed name means, and this repo has been bitten
-// repeatedly by a record that still reads as current. `desk-ask` stays
-// unambiguously retired and its deletion stays a separate, closable item;
+// repeatedly by a record that still reads as current. `desk-ask` stayed
+// unambiguously retired and its deletion stayed a separate, closable item —
+// ✅ CLOSED: the owner deleted `desk-ask` on 2026-10-14, verified from a session.
 // "help-ask" also matches what the feature is now called everywhere else.
 //
 // Deploy with the default, verify_jwt ON — see handler.ts's header for the

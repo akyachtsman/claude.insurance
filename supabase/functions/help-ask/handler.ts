@@ -81,13 +81,17 @@ export interface Deps {
 // was first drafted over. Deploying on top of that stub would have shipped 003
 // and removed the dead endpoint in one owner action, which is tempting — but it
 // also silently changes what a deployed name means, and this repo has been bitten
-// repeatedly by a record that still reads as current. `desk-ask` stays
-// unambiguously retired and its deletion stays a separate, closable item;
+// repeatedly by a record that still reads as current. `desk-ask` stayed
+// unambiguously retired and its deletion stayed a separate, closable item —
+// ✅ CLOSED: the owner deleted `desk-ask` on 2026-10-14, verified from a session.
 // "help-ask" also matches what the feature is now called everywhere else.
 // DEPLOY WITH THE DEFAULT — `verify_jwt` ON. An earlier version of this header
 // argued at length for `--no-verify-jwt`, on two claims that were both false and
-// both testable from here the whole time. The retired `desk-ask` stub is deployed
-// with verify_jwt = true, which makes it a live control. Probed 2026-10-07:
+// both testable from here the whole time. The retired `desk-ask` stub WAS
+// deployed with verify_jwt = true, which made it a live control. ⚠️ It was
+// DELETED 2026-10-14, so this measurement stands but cannot be re-run against
+// it — do not write as though a local control is still available.
+// Probed 2026-10-07:
 //
 //   OPTIONS with browser preflight headers and no Authorization returns the
 //   STUB'S OWN body, with x-deno-execution-id set — the preflight REACHES the
