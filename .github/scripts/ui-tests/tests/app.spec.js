@@ -4429,6 +4429,27 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));
 
+  // ── THE SCENARIO'S OWN PRECONDITION, asserted rather than assumed.
+  //
+  // The whole point is a cancelled policy WHOSE RENEWAL DATE HAS NOT PASSED:
+  // with a past one the date logic alone renders "Expired", the landing
+  // `lapsed` counter reaches 1 by the old date-only route, and every assertion
+  // below still passes against the unfixed code. `dayOffset` keeps that true
+  // forever, but an edit back to a literal would quietly DISARM the scenario
+  // rather than break it — so this says so by name.
+  //
+  // ⚠️ Checked on the FIXTURE's own date rather than on the adapted
+  // `renewalInDays`, deliberately: it fails before any browser work, with a
+  // message naming the cause, and `daysFromToday` is a pure function of exactly
+  // this value. The reviewer asked for the adapted field; this is the same
+  // claim, taken one step earlier and more cheaply.
+  const future = (d) => new Date(`${d}T00:00:00Z`).getTime() > Date.now();
+  for (const id of ['p-cx', 'p-ok']) {
+    const row = S28_POLICIES.find((x) => x.id === id);
+    expect(future(row.renewal_date),
+      `S28 is disarmed: ${id}'s renewal_date ${row.renewal_date} is in the past, so the date logic alone decides the badge and this scenario no longer tests the status rule`).toBe(true);
+  }
+
   await seedKeepSession(page, 'a', { policies: S28_POLICIES });
   await page.goto('./#/keep/insurance');
   await expect(page.locator('.k-h1')).toHaveText(/policies/i, { timeout: 15_000 });
