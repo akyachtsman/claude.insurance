@@ -46,7 +46,7 @@ export const SAMPLE = {
             {
               id: "ho3-marina", line: "Homeowners (HO-3)", form: "HO-3 (special)", cic: "home", icon: "home",
               carrier: "Gulfstream P&C", naic: "12345", number: "HO-4471892",
-              effectiveInDays: -102, renewalInDays: 263, autoRenew: true,
+              status: "active", effectiveInDays: -102, renewalInDays: 263, autoRenew: true,
               namedInsured: "Jordan & Alex Mercer", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Dwelling type", "Single-family"], ["Year built", "1998"], ["Construction", "Masonry"], ["Roof", "Replaced 2021"], ["Protection class", "3 · FEMA zone AE"]],
               coverages: [
@@ -68,7 +68,7 @@ export const SAMPLE = {
             {
               id: "flood-marina", line: "Flood (NFIP)", form: "Dwelling form", cic: "boat", icon: "flood",
               carrier: "FloodPro / NFIP", naic: "—", number: "FLD-22119",
-              effectiveInDays: -353, renewalInDays: 12, autoRenew: false,
+              status: "active", effectiveInDays: -353, renewalInDays: 12, autoRenew: false,
               namedInsured: "Jordan & Alex Mercer", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Flood zone", "AE"], ["Elevation cert.", "On file"]],
               coverages: [
@@ -84,7 +84,7 @@ export const SAMPLE = {
             {
               id: "wind-marina", line: "Windstorm", form: "Wind-only", cic: "home", icon: "umbrella",
               carrier: "Coastal Wind Pool", naic: "67890", number: "WS-7781",
-              effectiveInDays: -388, renewalInDays: -23, autoRenew: false,
+              status: "active", effectiveInDays: -388, renewalInDays: -23, autoRenew: false,
               namedInsured: "Jordan & Alex Mercer", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Construction", "Masonry"], ["Roof", "Replaced 2021"]],
               coverages: [{ tag: "—", label: "Wind / hail", limit: "$920,000" }],
@@ -108,7 +108,7 @@ export const SAMPLE = {
             {
               id: "auto-tesla", line: "Personal auto", form: "PAP", cic: "auto", icon: "auto",
               carrier: "Anchor Mutual", naic: "24680", number: "AU-90233",
-              effectiveInDays: -220, renewalInDays: 140, autoRenew: true,
+              status: "active", effectiveInDays: -220, renewalInDays: 140, autoRenew: true,
               namedInsured: "Jordan Mercer", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Vehicle", "2023 Tesla Model Y"], ["VIN", "••••4471"], ["Driver", "Jordan Mercer"]],
               coverages: [
@@ -152,7 +152,7 @@ export const SAMPLE = {
             {
               id: "floater-valuables", line: "Scheduled personal property", form: "Floater", cic: "gem", icon: "gem",
               carrier: "Gulfstream P&C", naic: "12345", number: "SPP-3321",
-              effectiveInDays: -160, renewalInDays: 205, autoRenew: true,
+              status: "active", effectiveInDays: -160, renewalInDays: 205, autoRenew: true,
               namedInsured: "Jordan Mercer", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Items", "3 scheduled"], ["Appraisals", "On file"]],
               coverages: [
@@ -191,7 +191,7 @@ export const SAMPLE = {
             {
               id: "bop-harbor", line: "Business owner's policy (BOP)", form: "BOP", cic: "cp", icon: "general-liability",
               carrier: "Harbor Commercial", naic: "13579", number: "BOP-55120",
-              effectiveInDays: -270, renewalInDays: 88, autoRenew: true,
+              status: "active", effectiveInDays: -270, renewalInDays: 88, autoRenew: true,
               namedInsured: "Coastal Cafe LLC", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Location", "312 Harbor Dr"], ["Sq ft", "1,800"], ["Class", "Restaurant"]],
               coverages: [
@@ -220,7 +220,7 @@ export const SAMPLE = {
             {
               id: "cauto-van", line: "Commercial auto", form: "BAP", cic: "auto", icon: "commercial-auto",
               carrier: "Harbor Commercial", naic: "13579", number: "CA-77410",
-              effectiveInDays: -240, renewalInDays: 120, autoRenew: true,
+              status: "active", effectiveInDays: -240, renewalInDays: 120, autoRenew: true,
               namedInsured: "Coastal Cafe LLC", agent: "Rosa Alvarez", agentContact: "(239) 555-0142",
               details: [["Vehicle", "2021 Ford Transit"], ["VIN", "••••2210"], ["Use", "Delivery"]],
               coverages: [

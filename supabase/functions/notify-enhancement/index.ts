@@ -101,11 +101,21 @@
 //   2. run the Supabase MCP `list_migrations` and confirm, for each of them,
 //      every migration that CREATES it or REVOKES on it is present. These are
 //      the boundary, not housekeeping:
-//        <the claim migration> — creates enhancement_notifications, grants
+//        20261014195128 — creates enhancement_notifications, grants
 //          service_role select+insert on it, and defines claim_notification with
 //          EXECUTE to service_role only. Skipped: every claim returns 42501 or
 //          "function does not exist", the handler answers `claim_failed`, nothing
 //          is sent. FAIL-CLOSED — a dead endpoint, not a wrong email.
+//          ✅ APPLIED 2026-10-14, with the catalog read back and every probe run.
+//          ⚠️ IT WAS NOT ON THE MACHINE-CHECKED LINE BELOW UNTIL THAT DAY, AND
+//          NOT BECAUSE ANYONE FORGOT. The derivation in `privilege.test.mjs`
+//          took the tables this file names in `.from(...)`; this handler reaches
+//          the claim table only through `.rpc("claim_notification")`, and the
+//          helper it used ALSO filtered the claim table out by name. So the one
+//          migration that creates the table and the RPC was structurally
+//          invisible to the check — and the suite stayed green at 23/23 through
+//          the apply and the move, which is how that was finally measured. The
+//          derivation now takes `.from(...)` tables PLUS the claim table.
 //        20261013013743 — revoke update on enhancement_requests. Skipped: staff
 //          can rewrite a client's request text and lifecycle columns.
 //        20261013014854 — revoke insert on enhancement_requests. Skipped: the
@@ -129,7 +139,7 @@
 //   version ANYWHERE in the header, and a mutation deleting 20261013014854 from
 //   the checklist PASSED because the prose above still mentioned it. An
 //   assertion over a wider text than the property belongs to cannot fail.
-//   CONFIRM APPLIED: 20261005120100 20261013013743 20261013014854
+//   CONFIRM APPLIED: 20261005120100 20261013013743 20261013014854 20261014195128
 //
 // ⚠️⚠️ 3. AND MEASURE THE EFFECTIVE STATE, NOT ONLY THAT THE FILES ARE APPLIED.
 // Six consecutive Codex rounds (17, 19, 20, 21, 22, 23) found a construct the
@@ -287,11 +297,13 @@
 // The honest summary: these queries make the escalation surface SMALL AND
 // LISTED, not empty and proven. That is a better position than the source
 // scanner was in, and it is not a proof.
-//   PLUS the claim table's own migration, which is NOT on that line because it
-//   is not applied yet — it is supabase/proposed/20261013_enhancement_notifications.sql
-//   and proposed/README.md names it as blocking this deploy. When it is applied
+//   ⚠️ The claim table's own migration IS on that line now, as 20261014195128
+//   (applied 2026-10-14, moved from supabase/proposed/). This text used to say it
+//   was "NOT on that line because it is not applied yet ... when it is applied
 //   and moves to migrations/, its version joins the line above and the test
-//   requires it there.
+//   requires it there" — the apply happened and the test did NOT require it, for
+//   the reason recorded above. Both halves are fixed: the version is listed, and
+//   the derivation can now see it.
 //   ⚠️ 20261013005250 came OFF this line when the claim moved: it defines
 //   stamp_requested_notified, which nothing calls any more.
 //
