@@ -249,18 +249,30 @@ jobs:
       # handler.ts and prompt.ts, so a partial upload fails at bundle time. The
       # CLI sends the whole directory, which is the entire point of this workflow.
       #
-      # verify_jwt is NOT passed: supabase/config.toml deliberately carries no
-      # [functions.*] block for either function, so the CLI applies the default
-      # (true). That default is the safe one and the config file says at length
-      # why — for BOTH, since notify-enhancement's block was removed 2026-10-13
-      # once its service-role caller path was dropped.
+      # verify_jwt is not passed on the command line: supabase/config.toml pins
+      # `verify_jwt = true` for BOTH functions, and the CLI reads it from there.
       #
-      # ⚠️ FOR notify-enhancement THIS DEPLOY ALSO FLIPS verify_jwt false -> true.
-      # Measured before this change: it was live at version 2 with verify_jwt
-      # FALSE and an entrypoint under /tmp/user_fn_… — i.e. an old inline tool-call
-      # deploy of the PRE-REWRITE source, which answered 404 to every caller
-      # because service_role holds no table privileges here. Removing the config
-      # block changed nothing on its own; only the CLI reads that file.
+      # ⚠️ THAT PIN EXISTS BECAUSE THIS COMMENT WAS WRONG, AND THE SMOKE STEP
+      # BELOW IS WHAT PROVED IT. It used to read: "config.toml deliberately
+      # carries no [functions.*] block, so the CLI applies the default (true)".
+      # Measured 2026-10-14 on the first run that deployed notify-enhancement:
+      # the deploy SUCCEEDED and uploaded the repo's source (version 3,
+      # entrypoint under /home/runner/work/…) — and the function stayed
+      # `verify_jwt: false`, because it already was. An absent block does not
+      # ASSERT the default; it sends nothing, and the platform keeps the existing
+      # value. help-ask looked like evidence for the old reading only because it
+      # was already true, so "preserve" and "apply the default" could not be told
+      # apart until a function with a false flag went through.
+      #
+      # The probe then caught it exactly as designed: an unauthenticated POST
+      # reached the HANDLER, which answered its own {"error":"unauthorized"}.
+      # The single-401 check this step replaced would have gone green.
+      #
+      # ⚠️ So notify-enhancement's flag is corrected by the PIN, not by the
+      # deploy's defaulting. Before any of this it was live at version 2 with
+      # verify_jwt FALSE and an entrypoint under /tmp/user_fn_… — an old inline
+      # tool-call deploy of the PRE-REWRITE source, which answered 404 to every
+      # caller because service_role holds no table privileges here.
       - name: Deploy ${{ matrix.fn }}
         if: steps.fresh.outputs.current == 'true'
         env:

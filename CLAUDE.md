@@ -3390,6 +3390,40 @@ would go live the moment it merged with no decision taken. It carried `help-ask`
 alone until 2026-10-14, while `notify-enhancement`'s claim table was unapplied;
 that condition is met and it is now a second row.
 
+### ⚠️ AN ABSENT `[functions.*]` BLOCK DOES NOT APPLY THE DEFAULT — IT PRESERVES WHAT IS LIVE (measured 2026-10-14)
+
+Both `config.toml` and `functions-deploy.yml` asserted, at length, that carrying
+**no** `[functions.<slug>]` block means *"the CLI applies the default
+(`verify_jwt = true`)"*. **It does not.** An absent block sends nothing, and the
+platform keeps whatever the function already had.
+
+Measured on the first run that deployed `notify-enhancement`: the deploy
+**succeeded** and uploaded the repo's source (version 3, `entrypoint_path` under
+`/home/runner/work/…`) — and the function stayed **`verify_jwt: false`**, which
+is what it had been since its old inline tool-call deploy. `function_edge_logs`
+shows `OPTIONS | 200` then `POST | 401`, and `list_edge_functions` still reported
+`false` afterwards.
+
+⚠️ **`help-ask` is why nobody noticed.** It was ALREADY `true`, so "preserve the
+existing value" and "apply the default" are observationally identical on it —
+the two readings only separate on a function whose flag is already `false`, and
+until that day there was none in the matrix. *A default you have never seen
+applied to a non-default value is an assumption, not a measurement.*
+
+✅ **The smoke step caught it, which is the whole reason it was redesigned.** An
+unauthenticated POST reached the **handler**, which answered its own
+`{"error":"unauthorized"}` — precisely what probe 2 exists to detect. The
+single-401 check it replaced in PR #258 would have gone **green** on a function
+accepting unauthenticated requests.
+
+**Fixed by pinning `verify_jwt = true` EXPLICITLY for both functions.** ⚠️ That
+is not a reversal of the long argument at the top of `config.toml`: that argument
+is against pinning `verify_jwt = **false**`, which was wrong on its merits and
+still is. Pinning **true** is its opposite — it states the intended end state
+instead of inheriting whatever is live, so a function that somehow acquires
+`false` is corrected by the next deploy rather than keeping it indefinitely.
+**An inherited default is not a decision.**
+
 ⚠️ **AND IT SHIPPED WITH THREE DEFECTS, ALL FOUND BY A REVIEW THAT LANDED AFTER
 THE MERGE** (Codex on #258, completed 00:03:24Z against a PR merged at
 00:00:33Z — a 3-minute window that no merge gate covers). All three were real

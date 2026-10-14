@@ -55,3 +55,34 @@ project_id = "bdsegmjcgfmgzuxwiplj"
 # effect on the next deploy THROUGH THE CLI. (The Supabase MCP's deploy tool,
 # which is how that version 2 got there, takes verify_jwt as an explicit
 # parameter and ignores this file entirely.)
+
+# ⚠️⚠️ BOTH FUNCTIONS NOW PIN `verify_jwt = true` EXPLICITLY, AND THE REASONING
+# ABOVE — THAT AN ABSENT BLOCK MEANS "THE CLI APPLIES THE DEFAULT (true)" — IS
+# FALSE FOR A FUNCTION THAT ALREADY EXISTS. Measured 2026-10-14, and the smoke
+# probe is what caught it:
+#
+#   `supabase functions deploy notify-enhancement` with NO block here succeeded,
+#   uploaded the repo's source (version 3, entrypoint under /home/runner/work/…)
+#   — and the function stayed `verify_jwt: false`. An unauthenticated POST then
+#   reached the HANDLER, which answered its own {"error":"unauthorized"}, which
+#   is exactly what probe 2 exists to detect. Confirmed in function_edge_logs:
+#   `OPTIONS | 200` then `POST | 401`, and `list_edge_functions` still reporting
+#   false afterwards.
+#
+# So an absent block does not ASSERT the default — it sends nothing, and the
+# platform keeps whatever the function already had. help-ask only ever looked
+# like evidence for the old reading because it was ALREADY true, so "preserve"
+# and "apply the default" were indistinguishable on the one function being
+# deployed. One function with a false flag separated them.
+#
+# ⚠️ This does NOT reinstate the thing the long comment at the top is against.
+# That argument is about pinning `verify_jwt = FALSE`, which was wrong on its
+# merits and is still wrong. Pinning TRUE is its opposite: it states the intended
+# end state instead of inheriting whatever is live, so a function that somehow
+# acquires `false` is corrected by the next deploy rather than keeping it
+# forever. An inherited default is not a decision; this is.
+[functions.help-ask]
+verify_jwt = true
+
+[functions.notify-enhancement]
+verify_jwt = true
