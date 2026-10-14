@@ -3,6 +3,32 @@
 Spec: `specs/003-help-desk/spec.md`. Stack unchanged — vanilla ES modules, no
 build, Supabase + RLS, one Edge Function.
 
+> ## ⚠️ STATUS NOTE — read before the decisions below (added 2026-10-14)
+>
+> This file is a **frozen** point-in-time record, like everything under `specs/`
+> (see `specs/README.md`). It is **not** updated as the app evolves, and it must
+> not be "fixed" to match the code. One thing has changed that this file states
+> in the PRESENT TENSE often enough to mislead a reader who arrives here from
+> CLAUDE.md's `desk-ask` entry, so it is flagged once, here, rather than edited
+> away below:
+>
+> **`desk-ask` NO LONGER EXISTS.** It was deleted by the owner in the Supabase
+> dashboard on 2026-10-14 and verified from a session — `list_edge_functions`
+> returns exactly `help-ask` and `notify-enhancement`. So, below:
+>
+> - Key decision 1 describes it as *"deployed, ACTIVE, JWT-verified"* and its
+>   deletion as *"a pending owner decision"* / *"a separate, closable owner
+>   item"* — **that item is now CLOSED.** The decision itself stands: `help-ask`
+>   is a new slug precisely so this record could stay unambiguous, and it did.
+> - The JWT paragraph says *"`desk-ask` is deployed with `verify_jwt: true`"* and
+>   treats it as a live probe target. The **2026-10-07 measurement stands** — it
+>   was taken against a then-live function and its observed bodies are recorded
+>   in CLAUDE.md — but the control is **gone**, so that probe cannot be re-run.
+>   Do not plan a verification around it.
+>
+> Current state for all of this: CLAUDE.md → the `desk-ask` entry under
+> *Application Architecture*.
+
 ## Key decision 1 — a NEW `help-ask` function, not the retired `desk-ask` stub
 
 **Revised 2026-10-06.** This decision originally read *"`desk-ask` becomes this

@@ -1,10 +1,19 @@
 # specs/ — point-in-time SDD record, NOT current architecture
 
-These files are the **frozen** spec-driven-development artifacts for feature
-001, in phase order: `research.md` → `spec.md` → `plan.md` → `tasks.md`. They
-record what was decided and planned *then*. They are deliberately not updated as
-the app evolves, so **do not read them as a description of the code today** and
-do not "fix" them to match it.
+These files are the **frozen** spec-driven-development artifacts, in phase
+order: `research.md` → `spec.md` → `plan.md` → `tasks.md`. They record what was
+decided and planned *then*. They are deliberately not updated as the app
+evolves, so **do not read them as a description of the code today** and do not
+"fix" them to match it.
+
+⚠️ **THIS COVERS EVERY FEATURE DIRECTORY HERE, NOT JUST 001** — today that is
+feature 001 (the files beside this README) and `003-help-desk/`. This line said
+"for feature 001" while `003-help-desk/` sat in the same tree, which reads as
+though the frozen rule, and the divergence list below, apply to one feature and
+not the other. They apply to all of them. A feature's own current-state
+divergences belong in **that feature's** file, as a dated status note at the top
+(see `003-help-desk/plan.md`), so a reader arriving from a CLAUDE.md pointer
+meets it before the stale prose. The list below is feature 001's.
 
 A newcomer previously found a confident file-by-file layout map in `plan.md` with
 nothing marking it historical, and CLAUDE.md never mentioned this directory at

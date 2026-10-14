@@ -5,8 +5,9 @@
 # An earlier version of this file pinned `verify_jwt = false` for help-ask and
 # argued that the gateway flag "adds no protection" and "can reject the CORS
 # preflight". BOTH HALVES WERE WRONG, and both were testable from here all along
-# — the retired `desk-ask` stub is deployed with verify_jwt = true, so it is a
-# live control. Probed 2026-10-07:
+# — the retired `desk-ask` stub WAS deployed with verify_jwt = true, which made
+# it a live control. ⚠️ That stub was DELETED by the owner on 2026-10-14, so the
+# measurement below stands but cannot be re-run against it. Probed 2026-10-07:
 #
 #   OPTIONS, browser preflight headers, no Authorization
 #     -> the STUB'S OWN body {"ok":false,"error":"gone"}, with
