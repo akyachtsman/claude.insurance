@@ -2746,13 +2746,59 @@ yet deployed), first `OPTIONS | 200` at 23:31:47, four `POST | 200` between
 `--list`**), one `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe,
 behaving as designed), and the proving ask at 03:21:17.
 
-### ✅ DEPLOY PROVENANCE — CLOSED 2026-10-14, MEASURED · ⛔ BUT THE DEPLOY PATH IS BLOCKED (revoked token)
+### ✅ DEPLOY PROVENANCE — CLOSED, AND THE DEPLOY PATH IS RESTORED (2026-10-14, both measured)
 
-**Read the two halves separately — they are not the same claim.** What is CLOSED
-is the *provenance* defect: the bytes now live match the repo, measured. What is
-**BLOCKED** is the *path*: `SUPABASE_ACCESS_TOKEN` holds a revoked value, so the
-next deploy fails. An earlier version of this heading said only "CLOSED", and a
-reader scanning headings would have taken the deployment path for healthy.
+**Read the two halves separately — they are not the same claim.** The
+*provenance* defect is closed (the bytes live match the repo) and the *path* is
+working (a deploy can reach production). Both measured. The heading has now been
+wrong in both directions — it said only "CLOSED" while the path was down, and
+then said BLOCKED after it was restored — so it states both halves explicitly.
+
+✅ **THE TOKEN WAS RESTORED 2026-10-14 AND THE PATH IS PROVEN GREEN.** Run
+`38579744467`, `workflow_dispatch` on `baad788`, **all seven steps success** —
+including step 7, the smoke probe, which is skipped on a failed deploy and so is
+the step that proves the worker booted and resolved all three modules. Verified
+from a session afterwards rather than taken from the green tick:
+
+| check | result |
+|---|---|
+| function version | **2 → 3**, `verify_jwt: true`, ACTIVE |
+| `entrypoint_path` | `/home/runner/work/…` — the RUNNER'S checkout |
+| `index.ts` / `handler.ts` / `prompt.ts` | **all three byte-identical to the repo** (sha256) |
+| comment lines | **935** (79 + 587 + 269), intact |
+
+✅ **AND THIS IS THE CONTROLLED EXPERIMENT THE RED RUN WAS NOT.** The section
+below was careful to say the failure only *corroborated* the revoked-token
+hypothesis, because the comment-only diff ruled out a workflow-logic change and
+nothing else — not the runner image, not network egress, not Supabase's service
+state. This run settles it: **same commit** (`baad788`), same workflow, same
+runner image, **one variable changed** (the secret), red → green. That is a
+stronger proof than the CLI error text would have been, because it tests the
+hypothesis instead of reading an error message's own account of itself — which
+is exactly what the paragraph below predicted when it named the restore as the
+better evidence.
+
+⚠️ **The token is scoped, and the review screen stated the scope better than
+this file could promise.** Expiry Never, Resource access Project → `insurance`,
+one capability: **Edge Functions read-write**. Supabase's own review step
+enumerated what that grants — `deploy_edge_function`, `get_edge_function`,
+`list_edge_functions`, `confirm_cost`, `search_docs` — i.e. **no database
+access and no secrets access**. `Edge Function Secrets` (HIGH RISK) is None, so
+a CI token cannot read `ANTHROPIC_API_KEY`; code it deploys still runs with
+access to that key at runtime, which is a different thing and is not closed by
+scoping the token.
+
+⚠️ **AND THE URGENCY IN THE SECTION BELOW WAS OVERSTATED, which is worth more
+than the fix.** It said production "cannot receive a fix" — true of the PATH and
+misleading about the STATE. Measured when the owner questioned it: every
+undeployed line in `help-ask/` and `config.toml` was **a comment or blank**, zero
+behavioural change, so production's behaviour was identical to `main` the whole
+time. What was actually waiting was stale comments. The owner also correctly
+pointed out that the token was never required to DEPLOY at all —
+`mcp__Supabase__deploy_edge_function` works from a session and is how `help-ask`
+first shipped; the token buys "deployed == repo **by construction**", not the
+ability to deploy. Overstating urgency is the same defect class as understating
+it, and this file does both.
 
 ⚠️ **This heading said "is NOT byte-equal" and that is no longer true.** Kept,
 heading and all, because the defect and the way it was closed are both worth
@@ -3169,7 +3215,7 @@ it. What step 3 does establish, exactly:
 | the deployed function is the post-change build (it reads a tier at all and gates the field on role) | **proven** — the pre-change deploy had no `model` field to send |
 | the resolved tier was `claude-haiku-5-5` | **proven** |
 | a broker sees the readout and a client does not | **proven** |
-| the resolved tier came from `help_settings` rather than from `HELP_MODEL` | **NOT proven** |
+| the resolved tier came from `help_settings` rather than from `HELP_MODEL` | ✅ **PROVEN 2026-10-14 — see the Sonnet test below** |
 
 Steps 1 and 2 cannot close the last row either: they are the **browser's** reads
 and writes (anon key + the broker's JWT, under `hs_broker_select` /
@@ -3196,14 +3242,35 @@ exactly the kind of evidence this repo has already been burned by (the auth-gate
 window, the "no webkit in the image" directory listing). It is recorded as
 suggestive and nothing more.
 
-✅ **THE TEST THAT WOULD DECIDE IT, and it is cheap:** set the stored tier to
-**Sonnet** — a value that is neither the default (`claude-opus-5-5`) nor the one
-already observed (`claude-haiku-5-5`) — and ask once as a broker. "Answered by
-Sonnet." cannot come from the fallback chain unless `HELP_MODEL` is *also*
-sonnet, and the fallback cannot produce a value nobody configured. It costs one
-paid ask and two clicks. Until it is run, the last row above stays open; what is
-NOT in doubt is that the switch is reaching a post-change deploy, so nothing here
-blocks the feature.
+✅ **THE DECIDING TEST WAS RUN 2026-10-14, AND IT PASSED.** The stored tier was
+set to **Sonnet** — neither the default (`claude-opus-5-5`) nor the value already
+observed (`claude-haiku-5-5`) — and one question was asked as a broker. The row
+was confirmed from a session first (`claude-sonnet-5-5`, `updated_at`
+14:22:58Z), and the answer ended **"Answered by Sonnet."**
+
+**Why that is proof rather than more corroboration:** the fallback chain is
+stored row → `HELP_MODEL` → default, and **it cannot produce a value nobody
+configured**. Haiku could not distinguish the branches because a secret set to
+haiku yields a byte-identical payload; Sonnet can, because reaching it requires
+the row to have been read. The test was designed to be informative in all three
+directions, which is what makes it a test and not a confirmation: Opus would have
+meant the settings read failed to the default, and Haiku would have meant
+`HELP_MODEL` is overriding and the precedence is backwards.
+
+⚠️ **THE ANSWER ALSO SAID "nothing on file for you yet", AND THAT IS CORRECT —
+do not read it as a records-digest failure.** The caller was the **broker**, and
+the digest is owner-scoped from the JWT under RLS, so it reported the BROKER's
+records; the seeded entities, assets and policies belong to `user@example.com`.
+Two independently-wired things are visible in that one answer, and it is worth
+noting they stayed independent: `.k-help__tier` rendered (gated on
+`profiles.role`) while the digest stayed empty (gated on `owner = auth.uid()`).
+Had those been wired to the same check, one of them would have been wrong. The
+staff read path (`er_broker_select`) covers enhancement requests only — it does
+not widen the digest, and this answer is the practical demonstration.
+⚠️ A consequence worth stating for the next operator: **a broker is the wrong
+account for testing the RECORDS half of the desk.** Use the client for that; use
+the broker only for the tier readout, which is the one thing a client cannot
+see.
 
 **An unrecognised stored value falls back to the default and logs
 `where: "model", source: "settings"`.** The CHECK constraint makes that
