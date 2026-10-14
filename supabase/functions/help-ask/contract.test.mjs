@@ -46,10 +46,45 @@ const emitted = [...fnSrc.matchAll(/\bunavailable\(\s*"([a-z_]+)"/g)].map((m) =>
 // was added to it — so the only thing that noticed was the "did the parse break?"
 // assertion below, which is the only reason this is not now a hole. A scraper
 // that quietly finds nothing is worse than no scraper, because it reads green.
+//
+// ⚠️ AND IT IS NOW SCOPED TO THE `reason` PROPERTY, NOT TO THE OBJECT'S TAIL.
+// The previous version sliced from `reason:` all the way to the closing `});`,
+// so EVERY lowercase string literal in every property after it was collected as
+// a success reason. It failed the moment a `model:` property was added below —
+// correctly reporting `["broker"]` as an unrecognised reason, which is a string
+// in a different property's ternary. That is the scoping defect CLAUDE.md
+// records five times over: the region was the whole object when the property it
+// owns is one key. The property's own value ends at the first comma at depth 0,
+// because a value containing a top-level comma is not expressible in an object
+// literal; `propertyValue` tracks nesting and quotes so a comma inside a call,
+// an array or a string cannot end it early.
 const payload = fnSrc.slice(fnSrc.lastIndexOf("return json({"));
+
+/** The source text of one property's VALUE in an object literal, from `key:` to
+ *  the comma that ends it. "" when the key is absent. */
+function propertyValue(objSrc, key) {
+  const at = objSrc.indexOf(`${key}:`);
+  if (at < 0) return "";
+  let i = at + key.length + 1;
+  let depth = 0;
+  let quote = "";
+  for (; i < objSrc.length; i++) {
+    const c = objSrc[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) { if (depth === 0) break; depth--; }
+    else if (c === "," && depth === 0) break;
+  }
+  return objSrc.slice(at, i);
+}
+
 const reasonAt = payload.indexOf("reason:");
-const closeAt = payload.indexOf("\n  });", reasonAt);
-const reasonExpr = reasonAt < 0 ? "" : payload.slice(reasonAt, closeAt < 0 ? undefined : closeAt);
+const reasonExpr = propertyValue(payload, "reason");
 const successReasons = [...reasonExpr.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
 
 test("the function emits at least one failure reason and one success reason", () => {

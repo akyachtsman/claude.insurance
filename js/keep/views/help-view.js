@@ -15,6 +15,7 @@ import {
   cleanQuestion, validateQuestion, suggestionChips, answerShape, creditedTopics,
 } from "../logic/help.js";
 import { page, originBackRow } from "./shell.js";
+import { helpModelLabel } from "../logic/help-model.js";
 
 // FR-10's sentence, in ONE place. It is shown up front (before any question, so
 // the client knows what they are reading before they type) and again on every
@@ -255,6 +256,19 @@ export async function renderKeepHelp() {
       el("p", { text: "Coverage questions — whether something is covered, or whether a limit is enough — are your broker's to answer in writing." }),
       el("a", { class: "k-ilink", attrs: { href: "#/keep/insurance" }, text: "Open a policy to send a request" }),
     ]));
+
+    // ADMIN READOUT — present only when the function sent it, which it does only
+    // for a broker (gated on the caller's own `profiles.role`). This is the only
+    // end-to-end proof the Security page's tier switch is in use: FR-17 renders
+    // every failure as one quiet notice, so without it a stored tier the
+    // deployed function never reads looks exactly like one it honours.
+    // ⚠️ `helpModelLabel` returns "" for an id this build does not know, and the
+    // raw id is then shown instead — a tier nobody recognises is precisely what
+    // an admin needs to see, not something to round to a familiar name.
+    if (shaped.model) {
+      const label = helpModelLabel(shaped.model);
+      blocks.push(el("p", { class: "k-help__tier", text: `Answered by ${label || shaped.model}.` }));
+    }
 
     // FR-10, rendered on EVERY answer regardless of what came back. A model that
     // ignored its instructions cannot remove this line, which is the point.

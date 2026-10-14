@@ -28,7 +28,14 @@ import { buildPrompt, splitTrailer, recordIndex, clipField, type HelpTopic, type
 export type Db = any;
 
 export interface Deps {
-  /** Service-role client. ⚠️ USE IT FOR `help_queries` AND NOTHING ELSE.
+  /** Service-role client. ⚠️ USE IT FOR `help_queries` AND `help_settings` ONLY.
+   *
+   *  BOTH are reachable for the same reason and no other: their own migrations
+   *  grant `service_role` explicitly. That grant is load-bearing, not tidiness.
+   *  ⚠️ This doc said "AND NOTHING ELSE" while naming one table, and the second
+   *  arrived in the change that made this sentence false — which is the
+   *  comment-overclaims-code defect CLAUDE.md records half a dozen times. Any
+   *  third table needs a grant of its own AND a line here.
    *
    *  Measured on this project 2026-10-06:
    *    has_table_privilege('service_role','public.profiles','SELECT') -> FALSE
@@ -158,6 +165,45 @@ export function resolveModel(raw: string | null | undefined): { model: string; r
   return (HELP_MODELS as readonly string[]).includes(norm)
     ? { model: norm, rejected: null }
     : { model: DEFAULT_HELP_MODEL, rejected: want };
+}
+
+// ── THE STORED TIER, AND WHY IT IS READ ON EVERY ASK ─────────────────────────
+//
+// `help_settings` is the broker-facing half of the allow-list above: one row,
+// `model` constrained by a CHECK to the same three ids, broker-writable from the
+// Security page. Read through `admin` because the policies on it are broker-only
+// — a client's own session can see nothing there, and a client must still get an
+// answer.
+//
+// ⚠️ NOT CACHED IN THE ISOLATE, deliberately, and this is the one place the
+// corpus's `guideCache` is the wrong model to copy. A cached tier would take
+// effect whenever the isolate happened to recycle, so a broker who moved the
+// switch and then asked a question would get the old tier with nothing saying
+// so — a control that appears to work and does not, which is precisely what this
+// feature is littered with. One indexed single-row select per ask is the price
+// of the switch being honest.
+//
+// ⚠️ A FAILED READ IS NOT FATAL. It returns `failed` and the caller falls back
+// to the `HELP_MODEL` secret and then to the default, because a missing tier has
+// a correct answer without it — the same reasoning that keeps `HELP_MODEL` out
+// of `HAS_KEYS`. It IS logged, because a silently-not-applied setting is the
+// thing a log line should be shouting about.
+export async function storedModel(admin: Db): Promise<{ raw: string | null; failed: boolean }> {
+  try {
+    const { data, error } = await admin.from("help_settings").select("model").maybeSingle();
+    if (error) {
+      // 42501 here means the explicit grant in the migration was lost or never
+      // applied; anything else is a transient. Both are config, not spend.
+      console.error(JSON.stringify({ where: "settings", code: error.code ?? null, message: error.message ?? "unknown" }));
+      return { raw: null, failed: true };
+    }
+    // No row is not a failure: the table can legitimately be empty before the
+    // migration's seed, and the fallback chain covers it.
+    return { raw: typeof data?.model === "string" ? data.model : null, failed: false };
+  } catch (e) {
+    console.error(JSON.stringify({ where: "settings", message: (e as Error)?.message ?? "unknown" }));
+    return { raw: null, failed: true };
+  }
 }
 
 const CORS = {
@@ -458,8 +504,13 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // in this project (measured — see Deps.admin), so doing this with `admin`
   // returned 42501 for every caller and refused the whole feature permanently.
   const caller = userDb(authz);
+  // `role` rides along on a read that already happens, so it costs nothing. It
+  // is the CALLER'S OWN row — RLS on `profiles` is `id = auth.uid()` — so a
+  // caller can only ever assert their own role, which is the same property that
+  // made `notify-enhancement`'s rework safe. Used for one thing: whether the
+  // response names the model that answered (see the payload at the end).
   const { data: invited, error: inviteErr } = await caller
-    .from("profiles").select("id").eq("id", owner).maybeSingle();
+    .from("profiles").select("id, role").eq("id", owner).maybeSingle();
   if (inviteErr || !invited) {
     console.error(JSON.stringify({ where: "invite", code: inviteErr?.code ?? null, message: inviteErr?.message ?? "no profile row" }));
     return unavailable("unavailable");
@@ -761,9 +812,26 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // rejected value is logged on every ask that uses the fallback, deliberately:
   // it is bounded by the caps, and a secret that is silently not taking effect is
   // precisely the thing one line in the logs should be shouting about.
-  const { model, rejected } = resolveModel(deps.helpModel);
+  //
+  // PRECEDENCE: the stored row, then the `HELP_MODEL` secret, then the default.
+  // ⚠️ THE ROW WINS ON PURPOSE, and the other order was the tempting one. If the
+  // secret overrode the row, a broker moving the switch would see it save, read
+  // back, and change nothing about the answers — the exact "appears to work"
+  // failure the whole three-layer allow-list exists to avoid. The secret keeps
+  // its job as the owner's break-glass for when the row is unreadable, and when
+  // both are set and disagree the ignored one is NAMED in the log rather than
+  // silently dropped.
+  const stored = await storedModel(deps.admin);
+  const source = stored.raw ? "settings" : (stored.failed ? "secret_after_settings_error" : "secret_or_default");
+  const { model, rejected } = resolveModel(stored.raw ?? deps.helpModel);
   if (rejected !== null) {
-    console.error(JSON.stringify({ where: "model", rejected, using: model, allowed: HELP_MODELS }));
+    console.error(JSON.stringify({ where: "model", source, rejected, using: model, allowed: HELP_MODELS }));
+  }
+  // Both set and disagreeing: one of them is not taking effect, and which one is
+  // not obvious from either place it was configured.
+  const secret = resolveModel(deps.helpModel).model;
+  if (stored.raw && deps.helpModel && secret !== model) {
+    console.error(JSON.stringify({ where: "model", source, using: model, ignoredSecret: deps.helpModel }));
   }
 
   // ─── THE BILLING LINE. Past here the reservation STAYS, whatever comes back,
@@ -869,5 +937,14 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // `refused` drives FR-8's hand-off, so it wins over the records distinction:
     // a declined coverage question is a refusal whether or not records were read.
     reason: split.refused ? "refused" : facts.length ? "answered" : "no_records",
+    // ⚠️ BROKERS ONLY, and the gate is the caller's OWN `profiles.role`. This
+    // field exists so the Security page's tier switch can be proved to have
+    // taken effect: FR-17 renders every failure as one quiet notice, so without
+    // it "I moved the switch and asked a question" cannot distinguish a working
+    // change from a change the function never read. It is withheld from clients
+    // because which tier they are getting is a spend decision of the broker's,
+    // not a fact about their cover — and a payload field reaches devtools, so
+    // "the view only renders it for staff" would not have been the same claim.
+    model: invited.role === "broker" ? model : undefined,
   });
 }

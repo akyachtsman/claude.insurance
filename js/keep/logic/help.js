@@ -344,6 +344,14 @@ export function answerShape(payload) {
     reason: kind,
     notice: "",
     retryAfter: null,
+    // Which model produced the answer, and "" for everyone it was not sent to.
+    // ⚠️ THE GATE IS SERVER-SIDE: `help-ask` includes this field only when the
+    // caller's own `profiles.role` is `broker`, so its mere PRESENCE is the
+    // authorisation. A second role check in the view would read as though the
+    // field were client-safe and merely hidden, which is the opposite of the
+    // claim — the point is that a client's payload never carries it, because a
+    // payload field reaches devtools.
+    model: str(p.model),
   };
 }
 

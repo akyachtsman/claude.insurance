@@ -45,6 +45,17 @@ on:
     paths:
       - "supabase/functions/help-ask/**"
       - ".github/workflows/functions-deploy.yml"
+      # ⚠️ config.toml IS A DEPLOY INPUT, not documentation. The CLI reads it for
+      # per-function settings (verify_jwt, import maps, entrypoints), so a
+      # config-only change would otherwise merge and leave production on the old
+      # configuration until some unrelated source edit happened along. Today this
+      # repo deliberately carries NO [functions.help-ask] block — which is
+      # exactly why the gap was invisible: there is nothing there to change yet.
+      # Found by an automated review of the merged PR that added this file.
+      # It does mean a config change for ANOTHER function redeploys help-ask.
+      # That is an idempotent re-upload of identical source, and the alternative
+      # is a path filter that has to be kept in step with a file's internals.
+      - "supabase/config.toml"
   # Manual escape hatch: lets a deploy be re-run without an empty commit, which
   # the drive-to-green rules forbid for CI and which is no better here.
   workflow_dispatch:
@@ -53,12 +64,24 @@ on:
 # which finished last. cancel-in-progress is FALSE on purpose: a deploy that has
 # started should finish, because a cancelled one leaves the previous version live
 # with nothing saying so.
+#
+# ⚠️ AND THE GROUP ALONE DOES NOT CLOSE THE RACE — it serializes, it does not
+# ORDER. GitHub gives no FIFO guarantee for queued runs, so with two pushes close
+# together an OLDER run can execute second and upload OLDER code over newer. This
+# repo already records that exact lesson for pages-retry.yml ("a concurrency
+# group is mutual exclusion, not FIFO"), and this file shipped without carrying
+# it over; found by an automated review of the merged PR that added it. The
+# freshness check in the job below is what actually closes it.
 concurrency:
   group: functions-deploy-help-ask
   cancel-in-progress: false
 
+# `actions: read` is for the successor check below — listing this workflow's own
+# runs. `contents: read` alone cannot, and the check failing open would leave the
+# stale-overwrite hole it exists to close. Nothing here writes anything on GitHub.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
@@ -68,10 +91,73 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ⚠️ IS A NEWER DEPLOY RUN ALREADY QUEUED? See the concurrency note above:
+      # the group serializes but does not order, so a superseded run reaching
+      # this point would publish stale code with nothing saying so — and FR-17
+      # means nobody could tell from the product.
+      #
+      # ⚠️ THE FIRST VERSION OF THIS COMPARED SHAs AGAINST main's ABSOLUTE HEAD,
+      # AND THAT WAS WRONG — a P1 in the review of the PR that added it, and the
+      # error was in my reasoning rather than the code. The comment claimed "this
+      # workflow fires on every qualifying push, so a superseded run always has a
+      # newer run behind it". True only of commits that touch the watched PATHS,
+      # and main's head need not be one: push a function change, then push a
+      # CLAUDE.md edit, and the second fires nothing while making the first look
+      # stale. The function change would then sit undeployed until a manual
+      # dispatch. Two of my own changes in one commit — tightening the path
+      # filter and adding this check — interacting to produce a hole neither had
+      # alone.
+      #
+      # So it now asks the question Codex's finding named: does a SUCCESSOR
+      # DEPLOY exist? The runs API lists runs of THIS workflow only, and such a
+      # run exists exactly when a qualifying push (or a dispatch) happened — so
+      # the path filter is consulted by construction and there is no second copy
+      # of the path list to drift. A higher run id means a newer run of this
+      # workflow is queued or running, and it will deploy.
+      #
+      # ⚠️ KEYED ON THE WORKFLOW'S FILE NAME, which is NOT the trap recorded for
+      # pages-retry.yml. That one is about a workflow's two DISPLAY names
+      # (`pages-build-deployment` in the workflows API, `pages build and
+      # deployment` in the runs API), where filtering by the wrong one silently
+      # matches nothing. The file name is a documented, exact identifier for the
+      # workflow endpoint, and it is this file — so it cannot name the wrong one.
+      #
+      # If the check itself cannot run, PROCEED: an unverifiable check is not
+      # evidence of obsolescence, and the stale overwrite then needs a double
+      # failure (an inverted order AND a failed API call) whose recovery is one
+      # workflow_dispatch. Same direction as pages-retry.yml, for the same
+      # reason.
+      #
+      # workflow_dispatch is exempt. It is the manual escape hatch, and someone
+      # dispatching deliberately is asking for what they dispatched.
+      - name: Is a newer deploy run already queued?
+        id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "manual dispatch — successor check skipped by design"
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if newest=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/functions-deploy.yml/runs?per_page=1" \
+                        --jq '.workflow_runs[0].id // 0'); then
+            if [ "${newest:-0}" -gt "${GITHUB_RUN_ID}" ]; then
+              echo "::notice::Run ${GITHUB_RUN_ID} (commit ${GITHUB_SHA:0:7}) is superseded by newer deploy run ${newest} — skipping, so an older commit is not deployed over a newer one. That run deploys the newer code."
+              echo "current=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Run ${GITHUB_RUN_ID} is the newest deploy run (${newest}) — proceeding."
+          else
+            echo "::warning::Could not list this workflow's runs to check for a successor; proceeding. If this deploy lands out of order, re-run the workflow manually."
+          fi
+          echo "current=true" >> "$GITHUB_OUTPUT"
+
       # Fail LOUDLY and early on a missing token. Without this the CLI's own
       # error is an auth failure several steps later, which reads like an outage
       # rather than like "the one setup step was never done".
       - name: Require SUPABASE_ACCESS_TOKEN
+        if: steps.fresh.outputs.current == 'true'
         env:
           TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
@@ -100,6 +186,7 @@ jobs:
       # To update: re-run the ls-remote, bump both the SHA and the trailing
       # comment together, and say in the commit why the bump was needed.
       - uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        if: steps.fresh.outputs.current == 'true'
         with:
           # A fixed CLI version, published to npm. `latest` would mean a deploy
           # path that changes under us between two identical pushes.
@@ -113,31 +200,84 @@ jobs:
       # [functions.help-ask] block, so the CLI applies the default (true). That
       # default is the safe one and the config file says at length why.
       - name: Deploy help-ask
+        if: steps.fresh.outputs.current == 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           supabase functions deploy help-ask \
             --project-ref bdsegmjcgfmgzuxwiplj
 
-      # A deploy that reports success still says nothing about whether the
-      # function BOOTS — a bad import surfaces on the first request, which FR-17
-      # then renders as the same quiet notice as everything else. This asks the
-      # gateway for an unauthenticated POST, which verify_jwt refuses BEFORE the
-      # function runs: a 401 proves the route exists and is JWT-gated. A 404
-      # means the deploy did not take.
+      # ── SMOKE: TWO PROBES, BECAUSE ONE 401 PROVED NEITHER THING ─────────────
       #
-      # It deliberately does NOT send a real question: that would be a billable
-      # provider call on every push to main, and CLAUDE.md already records
-      # qa-live's four-asks-per-deploy as a cost worth watching.
-      - name: Smoke — the route exists and is JWT-gated
+      # ⚠️ THE FIRST VERSION OF THIS STEP ASSERTED A SINGLE UNAUTHENTICATED 401
+      # AND CLAIMED IT PROVED "the route exists and is JWT-gated". It proved
+      # neither, and an automated review of the merged PR that added it said so
+      # in two parts, both correct:
+      #
+      #   · With verify_jwt ON the gateway answers 401 BEFORE the function runs,
+      #     so a worker that fails to import — a bad specifier in prompt.ts, say,
+      #     the module that defines what client data crosses the Anthropic
+      #     boundary — still produced a green deploy. That is precisely the
+      #     failure this whole workflow exists to make impossible, and FR-17
+      #     renders it as the same quiet notice as everything else.
+      #   · If verify_jwt were accidentally OFF, handler.ts itself answers 401 to
+      #     a missing Authorization header. The same status, from a completely
+      #     different place, so the check could not tell them apart.
+      #
+      # So: one probe that MUST reach the function, and one that MUST NOT.
+      #
+      # Neither sends a question, so neither is a billable provider call — the
+      # cost note on qa-live's four-asks-per-deploy applies here too.
+      - name: Smoke — the worker boots, and the gateway gates it
+        if: steps.fresh.outputs.current == 'true'
+        env:
+          FN: https://bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+          set -u
+
+          # PROBE 1 — OPTIONS must REACH the function. verify_jwt lets a preflight
+          # through (measured on this project 2026-10-07 against desk-ask, which
+          # carries the same flag), and handler.ts answers it with the literal
+          # body `ok`. So that body is proof the deployed worker booted, resolved
+          # all three modules, and is running THIS repo's code. It depends on no
+          # response header, deliberately: an assertion on x-deno-execution-id
+          # would be guessing at a name nobody here can verify from a session.
+          pre=$(curl -s -o /tmp/pre.body -w '%{http_code}' -X OPTIONS "$FN")
+          echo "OPTIONS -> HTTP $pre, body: $(cat /tmp/pre.body)"
+          if [ "$pre" = "404" ]; then
+            echo "::error::404 on a preflight — the function is not deployed at that slug."
+            exit 1
+          fi
+          if [ "$pre" -lt 200 ] || [ "$pre" -ge 300 ] || [ "$(cat /tmp/pre.body)" != "ok" ]; then
+            echo "::error::The deployed worker did not answer a preflight with 'ok'."
+            echo "::error::Either it failed to boot (check the function logs for an"
+            echo "::error::import error — index.ts needs handler.ts AND prompt.ts), or the"
+            echo "::error::gateway stopped forwarding OPTIONS. The status and body above"
+            echo "::error::say which: a 401 means the gateway refused the preflight;"
+            echo "::error::a 5xx or an empty body means the worker itself."
+            exit 1
+          fi
+
+          # PROBE 2 — an unauthenticated POST must NOT reach the function. The
+          # status alone cannot say that (see the header), so the BODY decides:
+          # handler.ts answers `{"error":"unauthorized"}` and the gateway answers
+          # its own shape. Finding that body here means verify_jwt is off and
+          # every unauthenticated request is reaching the worker.
+          code=$(curl -s -o /tmp/post.body -w '%{http_code}' -X POST \
             -H 'Content-Type: application/json' \
-            -d '{"question":"ping"}' \
-            https://bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask)
-          echo "unauthenticated POST -> HTTP $code"
+            -d '{"question":"ping"}' "$FN")
+          body=$(cat /tmp/post.body)
+          echo "unauthenticated POST -> HTTP $code, body: $body"
           case "$code" in
-            401) echo "OK: gateway refused an unauthenticated call, so the route is live and gated." ;;
+            401) ;;
             404) echo "::error::404 — the function is not deployed at that slug."; exit 1 ;;
             *)   echo "::error::Unexpected $code. Expected 401 from the verify_jwt gateway."; exit 1 ;;
           esac
+          if printf '%s' "$body" | grep -q '"error"[[:space:]]*:[[:space:]]*"unauthorized"'; then
+            echo "::error::That 401 came from handler.ts, not from the gateway — so"
+            echo "::error::verify_jwt is OFF and unauthenticated requests are reaching the"
+            echo "::error::worker. Redeploy with the default (config.toml must carry no"
+            echo "::error::[functions.help-ask] verify_jwt = false)."
+            exit 1
+          fi
+          echo "OK: the worker boots (OPTIONS reached it) and the gateway refuses an unauthenticated POST before it runs."

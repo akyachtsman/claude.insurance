@@ -616,3 +616,40 @@ test("a junk window is ignored rather than rendered", () => {
       `window ${JSON.stringify(junk)} leaked into the notice: ${s.notice}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// answerShape — the admin tier readout
+//
+// ⚠️ ITS ABSENCE IS THE COMMON CASE, so the tests lead with that. The function
+// sends `model` only to a broker, so for every client this field is "" and the
+// view renders nothing — which must not be a crash and must not be a stray
+// "Answered by ." line.
+// ---------------------------------------------------------------------------
+
+test("answerShape: a model sent by the function is carried through verbatim", () => {
+  assert.equal(answerShape(ok({ model: "claude-haiku-5-5" })).model, "claude-haiku-5-5");
+});
+
+test("answerShape: no model (the client case) is an empty string, never undefined", () => {
+  // The view's guard is `if (shaped.model)`, so "" and undefined behave the
+  // same there — but an absent KEY would make `"model" in shaped` false, and
+  // the next reader of this shape should not have to know which.
+  const s = answerShape(ok());
+  assert.ok("model" in s, "the key is absent, so the shape is not uniform across callers");
+  assert.equal(s.model, "");
+});
+
+test("answerShape: a junk model is flattened, not passed to the view as an object", () => {
+  for (const bad of [null, 7, {}, [], true, "   "]) {
+    assert.equal(answerShape(ok({ model: bad })).model, "", `leaked ${JSON.stringify(bad)}`);
+  }
+});
+
+test("answerShape: a failure carries no model, whatever the payload says", () => {
+  // A payload with no answer is a failure, and a failure has no model to name.
+  // Pinned because the failure branch returns a DIFFERENT object literal, so a
+  // field added to one is silently missing from the other.
+  const s = answerShape({ answer: "", reason: "unavailable", model: "claude-opus-5-5" });
+  assert.equal(s.ok, false);
+  assert.ok(!s.model, "a failed ask named a model");
+});

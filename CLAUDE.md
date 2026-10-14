@@ -28,7 +28,7 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 - `js/views/` — public marketing views: `landing.js`, `section.js`, `coverage.js`, `qualify.js`, `summary.js`.
 - `js/keep/` — the Keep feature, split by layer:
   - `js/keep/views/` (rendering) — `keep.js` (entry: login, landing/home with renewals report + at-a-glance boxes, documents, account, security, add-entity), `entities.js` (My Entities list/cards/map + entity detail + card drag-reorder), `assets.js` (assets table + asset detail + add-asset), `policies-view.js` (policy detail + request form + My requests), `shell.js` (shared chrome: app frame, header menus, search, back-nav, doc download, formatters), `relmap-view.js` (Relationships-map SVG engine), `help-view.js` (the Help desk page).
-  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `help` (Help-desk question validation, suggestion chips, answer shaping), `asset-meta` (`ASSET_META` — the
+  - `js/keep/logic/` (pure, unit-tested, no DOM) — `analysis`, `depreciation`, `ownership`, `policies` (presentation facts), `requests` (lifecycle), `entity-display`, `entity-types`, `relmap` (layout math), `search`, `docfile`, `help` (Help-desk question validation, suggestion chips, answer shaping), `help-model` (the Help desk's model tiers and prices for the broker control — one of THREE copies of that allow-list, gated against the other two by `help-model.test.mjs`), `asset-meta` (`ASSET_META` — the
     only one of these on the render path). The offline fixture is **not** here:
     it lives in `js/keep/fixtures/sample.mjs`, deliberately outside `logic/`.
 - **The Keep (v2, live):** invite-only client portal — entities (`Me` default + businesses/trusts) → assets → policies → coverage analysis. Reads/writes live Supabase under RLS via `js/supabase.js`; real Supabase Auth login gate. `js/keep/logic/asset-meta.js` holds `ASSET_META` (asset-type icon/colour/label — on the render path);
@@ -76,7 +76,12 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   `pages-retry.yml`. `.github/actions/` holds the shared composite actions
   (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
   `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
-- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013005250_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
+- `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). ⚠️ A fifth migration landed 2026-10-14: `20261014001500_help_settings` — a
+  **singleton** row holding the Help desk's model tier, broker-readable and
+  broker-writable (`authenticated` holds `SELECT` + `UPDATE (model)` only;
+  `service_role` holds `SELECT` by explicit grant; `anon` holds nothing;
+  **nobody** holds INSERT or DELETE). See *The Help desk model tier* below.
+  Demo data seeded live; `supabase/seed/` documents the seed in run order (`base_demo.sql` → `entity_relationships_demo.sql` → `assets_held_demo.sql`). ⚠️ A fourth migration landed 2026-10-13: `20261013005250_stamp_requested_notified` adds a **SECURITY DEFINER** function, `public.stamp_requested_notified(uuid)`, that lets an enhancement request's OWNER set `requested_notified_at` on their own row and nothing else — the only mechanism in Postgres that expresses that, because there is no owner UPDATE policy on the table and column privileges cannot distinguish client from broker (all three personas are the `authenticated` role). It carries an **expected** advisor warning (0029) that must not be "fixed"; the file says why. The `notify-enhancement` Edge Function (enhancement-request emails) is deployed
   and ACTIVE — ⚠️ **but was NON-FUNCTIONAL from the day it shipped until the
   2026-10-13 rewrite, and "ACTIVE" is what hid that.** See the `service_role`
   constraint below for the measurement and the fix. The `notify-lead` /
@@ -475,6 +480,13 @@ profile**, never by listing a directory.
   paragraph over-stated what crossed the boundary while the feature
   under-delivered. Re-check this list against `ownRecords`'s `facts.push` calls,
   not just its `select`.
+  ⚠️ **`profiles.role` IS NOW SELECTED TOO (2026-10-14), AND IT CROSSES NOTHING.**
+  The invite read became `select("id, role")` so the response can name the model
+  that answered — to a BROKER only. Neither column reaches the prompt; what does
+  is pinned separately by `handler.test.mjs`'s sentinel sweep, and
+  `schema.test.mjs`'s `DOCUMENTED` table models what is SELECTED (the half that
+  catches a column fetched and then dropped), which is why `role` had to be added
+  there in the same edit and why that addition cannot widen the digest.
   ⚠️ **Take the names from the TABLES, not from the nested shape the views
   consume.** This function shipped selecting `assets.kind` and
   `policies.policy_number`; the columns are `type` and `number` (`js/supabase.js`
@@ -628,8 +640,14 @@ profile**, never by listing a directory.
   JWT), where `authenticated` does hold SELECT and RLS scopes rows to
   `owner = auth.uid()` — which is also stronger, since RLS cannot be removed by
   editing a `.eq()` out of the handler. `service_role` is used for `help_queries`
-  alone, and that works only because `migrations/20261006120000_help_queries.sql`
-  grants it explicitly. (This cited the `proposed/` path long after that file was
+  **and, since 2026-10-14, `help_settings`** — and both work only because their
+  own migrations grant it explicitly (`20261006120000_help_queries.sql`,
+  `20261014001500_help_settings.sql`). ⚠️ `handler.ts`'s doc comment said "USE IT
+  FOR `help_queries` AND NOTHING ELSE" while naming one table, and the second
+  arrived in the change that made that sentence false; it now names both and says
+  a third needs a grant of its own AND a line there. `help_settings` is read
+  through `admin` rather than as the caller because its policies are broker-only
+  and a CLIENT must still get an answer. (This cited the `proposed/` path long after that file was
   applied — the same stale-pointer defect Codex round 7 found two sections down.)
   **⚠️ NOW MEASURED, AND WORSE THAN "VERIFY BEFORE RELYING":** this said *"the
   deployed `notify-enhancement` reads `enhancement_requests` under the same key,
@@ -2629,6 +2647,21 @@ nothing, the same signature this file records for `DROP POLICY`/`DROP TABLE`; th
 earlier finding was written as a DDL constraint and does not cover DML. Verified
 by re-reading the table after each attempt — the row was still there both times.
 
+⚠️ **AND SO DOES A TOP-LEVEL `UPDATE` WITH NO `WHERE` CLAUSE (measured
+2026-10-14).** Found running the `help_settings` probes, and it is a trap because
+a timed-out probe is indistinguishable from a probe whose denial never fired.
+Measured as a pair, one trial each, on the identical statement:
+
+| statement | result |
+|---|---|
+| `update public.help_settings set updated_by = null;` | **60s timeout, nothing applied** |
+| `update public.help_settings set updated_by = null where id;` | **instant 42501** |
+| `with upd as (update … returning …) select …` | **instant, applied** |
+
+So add a `where` to every probe UPDATE, or wrap it in a CTE. Recorded as one
+trial each rather than as a general law: the DIFFERENCE is the `where`, and that
+is as far as two observations reach.
+
 ✅ **BUT `begin; … rollback;` IS HONOURED, and that is the technique for a write
 probe from a session.** Measured the same day: a client insert inside an explicit
 transaction was visible inside it (count 3) and gone after it (count 2). So a
@@ -2675,6 +2708,89 @@ Until that secret exists and one push to `main` has run it, the live function is
 still the stripped copy.
 ⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
 push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
+
+⚠️ **AND IT SHIPPED WITH THREE DEFECTS, ALL FOUND BY A REVIEW THAT LANDED AFTER
+THE MERGE** (Codex on #258, completed 00:03:24Z against a PR merged at
+00:00:33Z — a 3-minute window that no merge gate covers). All three were real
+and all three are fixed on the next branch; recorded because the second is a
+standard this file *already holds* and the third is an overclaiming comment,
+which is this repo's most repeated defect:
+
+| # | what shipped | why it was wrong |
+|---|---|---|
+| 1 | path filter omitted `supabase/config.toml` | the CLI reads it for `verify_jwt`, import maps and entrypoints, so a config-only change would merge and leave production on the old configuration. Invisible *because* this repo deliberately carries no `[functions.help-ask]` block — there is nothing there to change yet |
+| 2 | `concurrency` group and nothing else | **a group serializes, it does not ORDER.** GitHub gives no FIFO guarantee for queued runs, so with two pushes close together an older run can execute second and upload older code. This file already records that exact lesson for `pages-retry.yml`, and the new workflow did not carry it over |
+| 3 | one unauthenticated POST, asserting a 401 | it proved **neither** half of what its comment claimed |
+
+**Finding 3 is the instructive one.** The comment said a 401 proves "the route
+exists and is JWT-gated". Measured against six local fakes, the old check:
+
+| scenario | old | new |
+|---|---|---|
+| healthy and gated | pass | pass |
+| **worker fails to boot** (gateway 401 on the POST, 503 on the preflight) | **PASSED** | fail |
+| **`verify_jwt` OFF** (handler.ts answers the same 401 itself) | **PASSED** | fail |
+| not deployed (404) | fail | fail |
+| gateway refuses the preflight | passed | fail |
+| preflight body not `ok` | passed | fail |
+
+So an import error in `prompt.ts` — the module that defines what client data
+crosses the Anthropic boundary — shipped green. That is the exact catastrophe the
+workflow exists to prevent.
+
+**The fix is two probes, one that must REACH the function and one that must
+not.** `OPTIONS` is answered by `handler.ts` with the literal body `ok`, and the
+gateway forwards a preflight, so that body proves the worker booted and resolved
+all three modules; an unauthenticated `POST` must come back 401 **whose body is
+not** `{"error":"unauthorized"}`, because that shape is the handler's own and
+finding it there means `verify_jwt` is off. Neither probe sends a question, so
+neither is billable.
+⚠️ **No response HEADER is asserted, deliberately.** An `x-deno-execution-id`
+check would be the obvious way to tell gateway from worker, and it would be
+guessing at a name no session here can verify — HTTPS egress to the project is
+blocked. The body shapes are read off source.
+
+**Finding 2's fix asks whether a SUCCESSOR DEPLOY RUN EXISTS**, via the runs API
+on this workflow's own file name. `workflow_dispatch` is exempt (the manual
+escape hatch), and an API failure PROCEEDS — the stale overwrite then needs a
+double failure whose recovery is one dispatch, which is `pages-retry.yml`'s
+direction for the same reason.
+
+⚠️ **AND THE FIRST VERSION OF THAT FIX WAS A P1, found by asking for the review
+BEFORE merging rather than after.** It compared SHAs against `main`'s absolute
+head, on the stated reasoning that "this workflow fires on every qualifying push,
+so a superseded run always has a newer run behind it". **That is true only of
+commits touching the watched PATHS, and `main`'s head need not be one.** Push a
+function change, then push a CLAUDE.md edit: the second fires nothing while
+making the first look stale, so the first SKIPS and the function change sits
+undeployed until a manual dispatch. Two changes in the same commit — tightening
+the path filter (finding 1) and adding this check — producing a hole neither had
+alone. The error was in the reasoning, not the code.
+
+The runs API has no second copy of the path list to drift, which is why it is
+the right question: a run of this workflow exists exactly when a qualifying push
+or a dispatch happened, so the filter is consulted by construction.
+⚠️ **Keyed on the workflow's FILE NAME, which is not the `pages-retry.yml`
+trap.** That one is about a workflow's two DISPLAY names
+(`pages-build-deployment` in the workflows API vs `pages build and deployment`
+in the runs API), where the wrong one silently matches nothing. A file name is a
+documented exact identifier, and it is this file.
+
+**Measured against a stubbed `gh`, six cases:** newest run == mine → proceed
+(this is the P1 scenario: a docs-only push creates no run, so nothing supersedes
+me); newest > mine → skip with a notice; API failure → proceed with a warning;
+`workflow_dispatch` → exempt; and the two unreachable cases (newest < mine, no
+runs at all) proceed, correctly.
+
+⚠️ **AND THERE IS NOW A CHANGE WAITING ON IT.** `handler.ts` reads the broker's
+stored model tier from `help_settings` (2026-10-14). The LIVE function predates
+that, so it reads only `HELP_MODEL` — the Security page's switch stores a tier
+nothing consumes until `SUPABASE_ACCESS_TOKEN` exists and one push to `main` has
+run this workflow. Nothing breaks meanwhile (the row is simply unread, and the
+secret-or-default path is what shipped and works), and the control makes no claim
+that a save is in use — it points at the broker-only `.k-help__tier` readout as
+the only proof, which stays absent while the old deploy is live. That absence is
+the honest signal, not a bug.
 
 **The generalisable rule:** when a deploy path requires a human or a model to
 retype the artifact, the artifact will eventually differ from its source — and
@@ -2735,11 +2851,85 @@ only live proof the answer path works. Flagged so the first "why is the demo des
 rate-limited?" has an answer. (The *flake* half of this finding WAS fixed — S10's
 settle was 45s against the function's own 60s ceiling.)
 
-### `HELP_MODEL` — the model tier is a Supabase secret, allow-listed (2026-10-13)
+### The Help desk model tier — a BROKER CONTROL first, a Supabase secret second (2026-10-14)
 
-The Help desk's model is switchable from the Supabase dashboard (Project Settings
+⚠️ **THIS SECTION WAS TITLED "the model tier is a Supabase secret" AND THAT IS NO
+LONGER WHERE THE TIER LIVES.** The authoritative value is a row in
+`public.help_settings`, set by a broker on `#/keep/security`. `HELP_MODEL` is
+still read, and is now the **break-glass**: it applies only when the row is
+unreadable or absent.
+
+**Precedence: the stored row, then `HELP_MODEL`, then `claude-opus-5-5`.** The
+row wins on purpose, and the other order was the tempting one — if the secret
+overrode the row, a broker could move the switch, watch it save and read back,
+and change nothing about the answers, which FR-17 renders as indistinguishable
+from a working change. When both are set and disagree, the ignored one is
+**named** in the log (`where: "model"`, `ignoredSecret`).
+
+**Where each piece is:**
+
+| piece | file |
+|---|---|
+| the stored row + its RLS and grants | `supabase/migrations/20261014001500_help_settings.sql` |
+| what a broker may pick, and the prices shown | `js/keep/logic/help-model.js` |
+| the control | `helpTierCard()` in `js/keep/views/keep.js` (Security page) |
+| read/write | `getHelpModel` / `setHelpModel` in `js/supabase.js` |
+| the server read + precedence | `storedModel()` in `supabase/functions/help-ask/handler.ts` |
+| the broker-only readout on an answer | `.k-help__tier` in `js/keep/views/help-view.js` |
+
+**The row is NOT cached — not in the isolate, not in the Keep's `cache`.** A
+cached tier would take effect whenever the isolate happened to recycle, or would
+be read back from a `loadTree` snapshot taken before the broker changed it. Both
+are the same "appears to work" failure one layer down. One indexed single-row
+select per ask is the price of the switch being honest.
+
+**Broker only, in the database and not only in the UI.** `hs_broker_select` and
+`hs_broker_update` key on the caller's own `profiles.role`; `authenticated` holds
+`SELECT` and `UPDATE (model)` and nothing else — no INSERT, no DELETE — and the
+`updated_at`/`updated_by` stamps are set by an INVOKER trigger so they cannot be
+forged. The underwriter is excluded deliberately: that role owns
+underwriting → approved/declined, not help-desk spend. Eight probes measured as
+real `authenticated` sessions are recorded in the migration's footer with EXPECT
+and GOT.
+
+⚠️ **"SAVED" DOES NOT MEAN "IN USE", and the control says so rather than
+implying otherwise.** The write proves the ROW moved. If the deployed function
+predates this change it does not read the row at all — and FR-17 makes that look
+exactly like a tier being honoured. The only end-to-end proof is the other half:
+an answer shown to a **broker** carries `.k-help__tier`, "Answered by Haiku."
+That field is gated server-side on the caller's own `profiles.role`, so it never
+reaches a client's payload; the view renders on PRESENCE, because a second role
+check there would read as though the field were client-safe and merely hidden.
+⚠️ **As of this writing the live function is still the pre-change deploy**, so
+the switch stores a tier nothing reads yet. It needs `SUPABASE_ACCESS_TOKEN` and
+one run of `functions-deploy.yml` — see *DEPLOY PROVENANCE* above.
+
+**An unrecognised stored value falls back to the default and logs
+`where: "model", source: "settings"`.** The CHECK constraint makes that
+unreachable through PostgREST, and the function still allow-lists, because a
+function must not assume a constraint it does not own. The readout shows such an
+id **verbatim** rather than rounding it to a familiar label — a tier nobody
+recognises is exactly what an admin needs to see.
+
+⚠️ **THE ALLOWED IDS NOW EXIST IN THREE SOURCES THAT CANNOT IMPORT FROM ONE
+ANOTHER** — the SQL CHECK, `HELP_MODELS` in `handler.ts`, and
+`HELP_MODEL_CHOICES` in `help-model.js`. `js/keep/logic/help-model.test.mjs`
+parses all three and asserts they are IDENTICAL **in the same order**; order,
+because the default is positional in two of them, so set equality alone would
+let the default diverge silently. Each source is scoped to the declaration that
+owns the property *before* being comment-stripped — the migration's own probe
+footer names a deliberately REFUSED id in prose, and a whole-file scan would
+read it as allowed. **Mutation-tested 7/7**, with a control (a comment naming a
+fourth model) correctly clean.
+⚠️ Its precondition check earns its place: the strippers are not string-aware,
+so each parsed region is first asserted to contain no comment marker inside a
+string. The first version checked that over the whole of `handler.ts` and
+**failed on its first run**, correctly, on `"--no-verify-jwt"` — with a needle
+list that did not even match the strippers in use.
+
+The secret remains switchable from the Supabase dashboard (Project Settings
 → Edge Functions → Secrets) without a redeploy or a PR. Unset means
-`claude-opus-5-5`. Accepted values, and nothing else:
+`claude-opus-5-5`. Accepted values, in both halves, and nothing else:
 
 | value | $/1M in | $/1M out |
 |---|---|---|
@@ -2780,6 +2970,14 @@ so:
 |---|---|
 | the resolver maps values correctly | `handler.test.mjs`, executed |
 | the resolved id **reaches `messages.create`** | `handler.test.mjs`, executed — the fake captures `args.model` |
+| the **stored row** reaches `messages.create`, for every tier | `handler.test.mjs`, executed |
+| the row **beats** the secret, and the ignored one is logged | `handler.test.mjs`, executed |
+| a denied settings read is **not fatal** and logs `where: "settings"` | `handler.test.mjs`, executed |
+| the tier is read **fresh on every ask** | `handler.test.mjs`, executed — one store, mutated between two asks |
+| the payload names the model **for a broker and nobody else** | `handler.test.mjs`, executed |
+| the three allow-lists agree, in order | `help-model.test.mjs`, **source scan** of all three |
+| the control is absent for a client, reports what it READ, reverts a refused write, and sends exactly `{ model }` | **S26**, offline harness, four viewport projects |
+| a broker's answer names the model; a client's does not | **S27**, offline harness, four viewport projects |
 | the call site carries no literal | `contract.test.mjs`, **source scan** |
 | `index.ts` reads the env and injects it | `contract.test.mjs`, **source scan** |
 
@@ -2788,6 +2986,24 @@ leaves every resolver test green. **Mutation-tested 8/8** — literal at the cal
 site, allow-list accepting anything, deleted rejection log, dropped
 `toLowerCase`, blank no longer meaning unset, `index.ts` not injecting, `index.ts`
 not reading the env, and `HELP_MODEL` folded into `HAS_KEYS`.
+
+**The stored-tier half is mutation-tested 8/8** (precedence reversed, stored read
+dropped, payload field unconditional, payload field never sent, a settings error
+made fatal, each of the two log lines deleted, `source` pinned to the secret) and
+**the UI half 7/7** (role check deleted, revert deleted, the unread state given a
+default, a read failure showing the default, `setHelpModel` sending a column the
+live grant refuses, the readout rendered unconditionally, an unknown id rounded
+to a label).
+
+⚠️ **ONE MUTATION SURVIVED FIRST AND THE FIX IS THE USEFUL PART.** Setting
+`current` to a real tier instead of `null` in `helpTierCard()` passed everything,
+because `paint()` did not run until the read landed — so the initial value was
+unobservable and the `current === null` branch inside `paint()` was unreachable.
+The `disabled` attribute in each option's `attrs` was quietly doing the work.
+Fixed by painting once BEFORE the read, so the unread state is rendered *by* the
+guard; the mutation is then caught. Same family as every other entry in this
+file where a green assertion was held up by something other than the guard under
+test.
 
 ⚠️ The source scans claim only what a scan can: they cannot see whether the
 deployed function was built from this source. Nothing here executes `index.ts`,
@@ -2905,7 +3121,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states) |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states), `.k-help__tier` ("Answered by …" — **broker payloads only**, so absent for every client), model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
 
 ⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
 2026-10-05** (headless chromium, local static server) — not read off the source.
@@ -2953,6 +3169,8 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S23 | The Keep — a data load that outlived its login (offline harness, **runs locally**) | Same park, then a **different** client signs in on tab 1 and their tree fills the cache; the first client's load is then released. Its tree must never reach `cache`: asserted on the app's own `getUser()` through a dynamic import of the same module URL (bounded poll, decided in both directions) **and** on what the next render shows ("Welcome back, Other", never "Demo"). | The previous client's entities, assets and policies are served to the next person to sign in |
 | S24 | Help desk — a settling ask releases only ITS OWN gate, shared account (offline harness, **runs locally**) | A asks (held); A signs out; the next person signs in on the **same prefilled credential** and asks their own question, which must reach the endpoint; A's older response is released FIRST. Their controls must stay **disabled** while their own call runs, and re-enabling them in the page and calling `form.requestSubmit()` must not raise the endpoint's request count — then their own answer lands and the desk unlocks. ⚠️ Distinct from S16, which is this shape with a DIFFERENT client and so passes against an owner-keyed gate: only the shared credential makes two people one owner id. | A departed person's settling ask re-enables the next person's form mid-call, letting a second paid provider call through |
 | S25 | Help desk — a render parked on the CORPUS when the session ends (offline harness, **runs locally**) | Hold `content/help-guide.json`, start the first Help visit, then sign out **in the same page** through the app's own exported `signOut()` — the hash never changes, so neither the render generation nor the hash check can see it. Release: the login card must survive, no `.k-help__input` or `.k-help__ai` may mount, and **no `route error:` may be logged** — that last one is the only assertion that fails when the epoch check is deleted, because the DOM is otherwise saved by an accident (the stale build throws into `route()`'s generation-guarded catch). | An authenticated Help form mounts over the login card, or the stale render runs and throws instead of being refused |
+| S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
+| S27 | Help desk model tier — the ANSWER names the model, for a broker only (offline harness, **runs locally**) | A client payload (no `model` key — what `help-ask` sends to everyone who is not a broker) renders **no** `.k-help__tier`, and the answer is otherwise whole (`.k-help__ai`, `.k-help__broker` both present). A broker payload renders `.k-help__tier` reading "Answered by Haiku." — the friendly label, not the wire id. An id this build does not know is shown **verbatim**. ⚠️ This is the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours | A client is told which model answered, a broker is not, or an unrecognised id is rounded to a tier that is not in use |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

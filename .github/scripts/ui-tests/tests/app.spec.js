@@ -2680,14 +2680,24 @@ function subOf(jwt) {
 }
 
 const KEEP_USERS = {
-  a: { uid: '11111111-1111-1111-1111-111111111111', email: 'user@example.com', name: 'Demo Client' },
-  b: { uid: '22222222-2222-2222-2222-222222222222', email: 'other@example.com', name: 'Other Client' },
+  a: { uid: '11111111-1111-1111-1111-111111111111', email: 'user@example.com', name: 'Demo Client', role: 'client' },
+  b: { uid: '22222222-2222-2222-2222-222222222222', email: 'other@example.com', name: 'Other Client', role: 'client' },
+  // A BROKER, for the Help-desk model-tier control (S26/S27). Its `role` is what
+  // `helpTierCard()` reads to decide whether to render at all — and the control's
+  // real boundary is `hs_broker_select`/`hs_broker_update` in Postgres, which no
+  // offline harness can exercise. So these scenarios test what is RENDERED and
+  // what is SENT; the denials are measured in the migration's own probe.
+  k: { uid: '33333333-3333-3333-3333-333333333333', email: 'broker@example.com', name: 'Demo Broker', role: 'broker' },
 };
 
 // One entity, one asset, one policy — the Help page renders none of them, but
 // ensureData() must succeed and getUser() must return an id for the owner stamp.
 const keepRows = (u) => ({
-  profiles: [{ id: u.uid, full_name: u.name, role: 'client', reminder_email: true, reminder_schedule: [60, 30, 14, 7, 1] }],
+  // ⚠️ `u.role`, NOT a hardcoded 'client'. It was hardcoded until S26, so a
+  // broker identity would have rendered as a client and the control under test
+  // would have been absent — a scenario that passes because the thing it checks
+  // never appeared.
+  profiles: [{ id: u.uid, full_name: u.name, role: u.role, reminder_email: true, reminder_schedule: [60, 30, 14, 7, 1] }],
   entities: [{ id: 'e1', owner: u.uid, kind: 'personal', name: 'Me', label: 'UBO', created_at: '2026-01-01T00:00:00Z' }],
   assets: [{ id: 'a1', entity_id: 'e1', kind: 'home', name: 'Harbour House', value: 900000, created_at: '2026-01-01T00:00:00Z' }],
   policies: [{ id: 'p1', asset_id: 'a1', line: 'Home', carrier: 'Acme', policy_number: 'HO-1', renewal_date: '2027-03-12' }],
@@ -2716,7 +2726,21 @@ const sessionFor = (u) => ({
   user: userObj(u),
 });
 
-async function seedKeepSession(page, who = 'a') {
+// `help_settings` is the ONE table in this fixture that is WRITTEN, so it needs
+// state that outlives a request — `keepRows()` builds a fresh object per call,
+// so a PATCH against it would be discarded and the control would appear to save
+// while reading back the old value. Returned to the test so it can assert what
+// the row actually holds, rather than only what the screen says.
+//   · `model: null`  → the table is readable and EMPTY (a legitimate state)
+//   · `deny: true`   → every help_settings read and write answers 403, which is
+//                      what a lost `grant select … to service_role` would look
+//                      like, and the state the control must report honestly
+//                      instead of showing a default as though it were stored.
+function helpSettingsStore({ model = 'claude-opus-5-5', deny = false } = {}) {
+  return { row: model === null ? null : { id: true, model, updated_at: '2026-10-14T00:00:00Z', updated_by: null }, deny, patches: [] };
+}
+
+async function seedKeepSession(page, who = 'a', { settings = helpSettingsStore() } = {}) {
   const u = KEEP_USERS[who];
   await page.addInitScript(([key, session]) => {
     try { window.localStorage.setItem(key, JSON.stringify(session)); } catch { /* private mode */ }
@@ -2733,6 +2757,39 @@ async function seedKeepSession(page, who = 'a') {
     const caller = Object.values(KEEP_USERS).find((k) => k.uid === sub) || u;
     const rows = keepRows(caller);
     const table = (req.url().match(/\/rest\/v1\/([A-Za-z_]+)/) || [])[1];
+
+    // The written table, handled before the read-only ones.
+    if (table === 'help_settings') {
+      if (settings.deny) {
+        return route.fulfill({
+          status: 403, headers: { ...CORS, 'content-type': 'application/json' },
+          body: JSON.stringify({ code: '42501', message: 'permission denied for table help_settings' }),
+        });
+      }
+      if (req.method() === 'PATCH') {
+        let body = {};
+        try { body = JSON.parse(req.postData() || '{}'); } catch { /* ignore */ }
+        settings.patches.push(body);
+        // Mirrors the real table: `model` is the only column `authenticated` may
+        // write, and the stamps are set by a trigger. A fixture that echoed a
+        // client-supplied `updated_by` would let a test pass against code that
+        // sends one, which the live grant refuses with 42501.
+        if (settings.row && typeof body.model === 'string') {
+          settings.row = { ...settings.row, model: body.model, updated_at: new Date().toISOString(), updated_by: u.uid };
+        }
+        const patched = settings.row ? [settings.row] : [];
+        return route.fulfill({
+          status: 200, headers: { ...CORS, 'content-type': 'application/json' },
+          body: JSON.stringify(/pgrst\.object/.test(req.headers()['accept'] || '') ? (patched[0] ?? null) : patched),
+        });
+      }
+      const got = settings.row ? [settings.row] : [];
+      return route.fulfill({
+        status: 200, headers: { ...CORS, 'content-type': 'application/json' },
+        body: JSON.stringify(/pgrst\.object/.test(req.headers()['accept'] || '') ? (got[0] ?? null) : got),
+      });
+    }
+
     const list = rows[table] ?? [];
     // `.maybeSingle()` sets an Accept of application/vnd.pgrst.object+json and
     // the client then expects ONE object, not an array. Honouring the header is
@@ -4116,3 +4173,153 @@ test('S25: a Help render parked on the corpus does not mount after a sign-out', 
 
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S26 — THE HELP-DESK MODEL TIER CONTROL (broker only, offline harness).
+//
+// WHAT IT CAN AND CANNOT PROVE, stated up front because the distinction is the
+// whole value of the scenario. The real boundary on `help_settings` is in
+// Postgres — `hs_broker_select` / `hs_broker_update` keyed on the caller's own
+// `profiles.role`, plus `grant update (model)` and no INSERT or DELETE — and no
+// browser fixture can exercise a policy. Those denials are measured in the
+// migration's own probe footer, as real `authenticated` sessions.
+//
+// This proves the things only a browser can: that the control renders for a
+// broker and NOT for a client, that it reports a tier it has actually read
+// rather than a default it assumed, that moving it SENDS exactly `{ model }` and
+// nothing the live grant would refuse, and that a refused write REVERTS the
+// selection instead of leaving the screen claiming a tier the row does not hold.
+// ⚠️ That last one is the "appears to work" failure in its smallest form, and it
+// is the reason this scenario exists at all rather than being left to the probe.
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ TARGET THE LABEL ELEMENT, NOT THE BUTTON'S TEXT. `locator('.k-tier__opt',
+// { hasText: 'Opus' })` resolves to TWO buttons — Sonnet's blurb reads "Half the
+// cost of Opus" — and a strict-mode violation surfaces as a click TIMEOUT, which
+// reads like an app hang rather than a selector mistake. Measured on the first
+// run of this scenario. The `<b>` holds the tier name and nothing else.
+const tierOpt = (p, label) =>
+  p.locator('.k-tier__opt').filter({ has: p.locator('b', { hasText: new RegExp(`^${label}$`) }) });
+
+test('S26: the model tier control is broker-only, reports what it read, and reverts a refused write', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  // ── A CLIENT SEES NOTHING. First, because a scenario that only ever checks
+  // the broker case would pass just as well with the role check deleted.
+  await seedKeepSession(page, 'a');
+  await page.goto('./#/keep/security');
+  await expect(page.locator('.shero h1'), 'the Security page did not mount').toHaveText(/protected/i, { timeout: 15_000 });
+  await expect(page.locator('.k-tier'), 'a CLIENT was shown the admin tier control').toHaveCount(0);
+  // The rest of the page is untouched for them.
+  await expect(page.locator('.twofa')).toHaveCount(1);
+
+  // ── A BROKER SEES IT, showing the stored tier and not the default.
+  const settings = helpSettingsStore({ model: 'claude-sonnet-5-5' });
+  const broker = await page.context().newPage();
+  broker.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(broker, 'k', { settings });
+  await broker.goto('./#/keep/security');
+  await expect(broker.locator('.k-tier'), 'the broker was not shown the tier control').toHaveCount(1, { timeout: 15_000 });
+  await expect(broker.locator('.k-tier__opt')).toHaveCount(3);
+  // ⚠️ SONNET, not Opus. The fixture deliberately stores the NON-default tier,
+  // so a control that rendered `DEFAULT_HELP_MODEL` without reading anything
+  // would fail here. A fixture seeded with the default could not tell them apart.
+  await expect(broker.locator('.k-tier__status')).toContainText(/Sonnet is the stored tier/i, { timeout: 15_000 });
+  await expect(broker.locator('.k-tier__opt.is-on')).toHaveCount(1);
+  await expect(broker.locator('.k-tier__opt.is-on b')).toHaveText('Sonnet');
+
+  // ── MOVING IT SENDS EXACTLY `{ model }`.
+  await tierOpt(broker, 'Haiku').click();
+  await expect(broker.locator('.k-tier__status')).toContainText(/Haiku is now the stored tier/i, { timeout: 15_000 });
+  await expect(broker.locator('.k-tier__opt.is-on b')).toHaveText('Haiku');
+  expect(settings.patches, 'the write did not reach the endpoint').toHaveLength(1);
+  // ⚠️ EXACT KEYS, not "contains model". `authenticated` holds UPDATE on `model`
+  // ALONE, so sending `updated_at` or `updated_by` would be refused with 42501
+  // by the live grant while passing against any fixture that ignores extra keys.
+  expect(Object.keys(settings.patches[0]).sort(), 'the write carried columns the live grant refuses')
+    .toEqual(['model']);
+  expect(settings.patches[0].model).toBe('claude-haiku-5-5');
+  expect(settings.row.model, 'the stored row did not move').toBe('claude-haiku-5-5');
+
+  // ── A REFUSED WRITE REVERTS. Haiku is stored and showing; deny the table and
+  // click Opus. The screen must go back to Haiku, because that is what is stored.
+  settings.deny = true;
+  await tierOpt(broker, 'Opus').click();
+  await expect(broker.locator('.k-tier__status')).toContainText(/Could not switch tier/i, { timeout: 15_000 });
+  await expect(broker.locator('.k-tier__opt.is-on b'), 'a refused write left the screen claiming a tier the row does not hold')
+    .toHaveText('Haiku');
+  expect(settings.row.model, 'a denied write still changed the row').toBe('claude-haiku-5-5');
+
+  // ── AN UNREADABLE TIER IS REPORTED, NOT GUESSED. A fresh page with the table
+  // denied from the start: nothing may be selected, because nobody has read it.
+  const blind = await page.context().newPage();
+  blind.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(blind, 'k', { settings: helpSettingsStore({ deny: true }) });
+  await blind.goto('./#/keep/security');
+  await expect(blind.locator('.k-tier__status')).toContainText(/Could not read the current tier/i, { timeout: 15_000 });
+  await expect(blind.locator('.k-tier__opt.is-on'), 'an unread tier was shown as selected').toHaveCount(0);
+  // And every option stays disabled, so nothing can be "confirmed" against it.
+  await expect(blind.locator('.k-tier__opt[disabled]')).toHaveCount(3);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S27 — THE ANSWER NAMES THE MODEL, FOR A BROKER AND NOBODY ELSE.
+//
+// This is the only end-to-end proof that a stored tier is IN USE. FR-17 renders
+// every Help-desk failure as one quiet notice, so a tier the deployed function
+// never read looks exactly like one it honours — the Security page can only say
+// that the ROW moved. The function gates the field on the caller's own
+// `profiles.role`, so the view renders on PRESENCE: these two cases are the two
+// payloads the function actually emits.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S27: a broker answer names the model that produced it, and a client answer does not', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  // ── THE CLIENT PAYLOAD: no `model` key at all, which is what help-ask sends
+  // to everyone who is not a broker.
+  await seedKeepSession(page, 'a');
+  await routeHelpAsk(page, ANSWER_PAYLOAD);
+  await page.goto('./#/keep/help');
+  await expect(page.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await page.locator('.k-help__input').fill('Where do I see my policies?');
+  await page.locator('.k-help__ask').click();
+  await expect(page.locator('.k-help__a'), 'no answer rendered').toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('.k-help__tier'), 'a CLIENT was told which model answered').toHaveCount(0);
+  // The answer is otherwise whole — the gate must not cost them anything.
+  await expect(page.locator('.k-help__ai')).toHaveCount(1);
+  await expect(page.locator('.k-help__broker')).toHaveCount(1);
+
+  // ── THE BROKER PAYLOAD: `model` present, so the readout renders with the
+  // tier's FRIENDLY label rather than the wire id.
+  const broker = await page.context().newPage();
+  broker.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(broker, 'k');
+  await routeHelpAsk(broker, { ...ANSWER_PAYLOAD, model: 'claude-haiku-5-5' });
+  await broker.goto('./#/keep/help');
+  await expect(broker.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await broker.locator('.k-help__input').fill('Where do I see my policies?');
+  await broker.locator('.k-help__ask').click();
+  await expect(broker.locator('.k-help__tier'), 'the broker was not told which model answered')
+    .toHaveCount(1, { timeout: 15_000 });
+  await expect(broker.locator('.k-help__tier')).toHaveText(/Answered by Haiku\./);
+
+  // ── AN UNRECOGNISED id SHOWS ITSELF, rather than being rounded to a tier that
+  // is not in use. A model this build does not know is exactly what an admin
+  // needs to see; `helpModelLabel` returns "" for it and the raw id is shown.
+  const odd = await page.context().newPage();
+  odd.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(odd, 'k');
+  await routeHelpAsk(odd, { ...ANSWER_PAYLOAD, model: 'claude-future-9-9' });
+  await odd.goto('./#/keep/help');
+  await expect(odd.locator('.k-h1')).toHaveText(/help/i, { timeout: 15_000 });
+  await odd.locator('.k-help__input').fill('Where do I see my policies?');
+  await odd.locator('.k-help__ask').click();
+  await expect(odd.locator('.k-help__tier')).toHaveText(/Answered by claude-future-9-9\./, { timeout: 15_000 });
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

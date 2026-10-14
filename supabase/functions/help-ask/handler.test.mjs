@@ -124,6 +124,9 @@ function seed(extra = {}) {
   return {
     profiles: [{ id: OWNER }],
     help_queries: [],
+    // Empty by default ON PURPOSE, so every pre-existing test keeps exercising
+    // the `HELP_MODEL`-or-default path. The stored-tier tests seed a row.
+    help_settings: [],
     entities: [
       { id: "e1", owner: OWNER, name: "Me", kind: "personal" },
       { id: "e9", owner: OTHER, name: "Someone Else", kind: "personal" },
@@ -141,13 +144,28 @@ function seed(extra = {}) {
 }
 
 // The live ACL, encoded. `service_role` holds no SELECT/INSERT on any of these.
+// ⚠️ `help_queries` and `help_settings` are DELIBERATELY ABSENT: those two are
+// the only tables whose migrations grant `service_role` explicitly, which is the
+// whole reason the function may touch them with `admin`. Measured end state for
+// help_settings, 2026-10-14: anon nothing, service_role SELECT, authenticated
+// SELECT + UPDATE(model).
 const SERVICE_ROLE_DENIED = ["profiles", "entities", "assets", "policies", "enhancement_requests"];
 
 function deps(over = {}) {
   const tables = over.tables ?? seed();
   // ONE backing store, TWO clients with different privileges — exactly the live
   // split. `admin` may touch help_queries only; everything else is 42501.
-  const admin = over.db ?? fakeDb(tables, { ...(over.dbOpts ?? {}), denied: SERVICE_ROLE_DENIED });
+  // ⚠️ `denied` SITS AFTER THE SPREAD, so `dbOpts: { denied: [...] }` is silently
+  // DISCARDED here — a trap this file's first stored-tier test fell into, where
+  // the denial never engaged and the test read as a wrong fallback rather than
+  // as a harness error. `adminDenied` is the composable door, and it is
+  // admin-only on purpose: the two clients have different ACLs, and widening the
+  // CALLER's denials would break the invite read and fail the ask for an
+  // unrelated reason.
+  const admin = over.db ?? fakeDb(tables, {
+    ...(over.dbOpts ?? {}),
+    denied: [...SERVICE_ROLE_DENIED, ...(over.adminDenied ?? [])],
+  });
   const caller = fakeDb(tables, { ...(over.dbOpts ?? {}), denied: ["help_queries"] });
   return {
     // `rows(t)` rather than a captured array: the fake replaces the array on a
@@ -1068,4 +1086,125 @@ test("the model is never taken from the request body", async () => {
   });
   await ask(d, { question: "hi", model: "claude-opus-5-5", helpModel: "claude-opus-5-5" });
   assert.equal(sent?.model, "claude-haiku-5-5", "the request body chose the model");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE STORED TIER (`help_settings`) — the broker's switch, and its precedence.
+//
+// ⚠️ EVERY ONE OF THESE ASSERTS WHAT REACHED `messages.create`, not what
+// `resolveModel` returned. A resolver nobody calls is a resolver nobody checked:
+// CLAUDE.md records that reverting the call site to a literal left every
+// resolver test green, which is why the wiring is pinned separately — and this
+// adds a second hop (row -> resolver -> call site) that the same mutation class
+// can break without touching either end.
+// ─────────────────────────────────────────────────────────────────────────────
+const sentModel = async (over) => {
+  let sent = null;
+  const { d } = deps({
+    ...over,
+    anthropic: { messages: { create: async (a) => { sent = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } },
+  });
+  const res = await ask(d);
+  return { model: sent?.model ?? null, status: res.status, body: await res.json() };
+};
+
+test("the STORED tier reaches the provider, for every tier a broker can pick", async () => {
+  for (const m of HELP_MODELS) {
+    const got = await sentModel({ tables: seed({ help_settings: [{ id: true, model: m }] }) });
+    assert.equal(got.status, 200, m);
+    assert.equal(got.model, m, `help_settings.model=${m} did not reach messages.create`);
+  }
+});
+
+test("the STORED tier WINS over the HELP_MODEL secret, and the ignored one is named", async () => {
+  // ⚠️ THE OTHER PRECEDENCE IS THE TEMPTING ONE AND IT IS WRONG: a secret that
+  // overrode the row would let a broker move the switch, watch it save, and
+  // change nothing — which FR-17 renders as indistinguishable from working.
+  const [got, lines] = await capturingConsoleError(() => sentModel({
+    tables: seed({ help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
+    d: { helpModel: "claude-opus-5-5" },
+  }));
+  assert.equal(got.model, "claude-haiku-5-5", "the secret overrode the stored tier");
+
+  const hit = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+                   .find((o) => o && o.where === "model" && o.ignoredSecret);
+  assert.ok(hit, "a secret that is not taking effect was not logged");
+  assert.equal(hit.ignoredSecret, "claude-opus-5-5");
+  assert.equal(hit.using, "claude-haiku-5-5");
+});
+
+test("no stored row falls through to the secret, then to the default", async () => {
+  const withSecret = await sentModel({ tables: seed({ help_settings: [] }), d: { helpModel: "claude-sonnet-5-5" } });
+  assert.equal(withSecret.model, "claude-sonnet-5-5", "an empty settings table did not fall through to the secret");
+
+  const bare = await sentModel({ tables: seed({ help_settings: [] }) });
+  assert.equal(bare.model, DEFAULT_HELP_MODEL, "no row and no secret did not reach the default");
+});
+
+test("a DENIED settings read is not fatal — it logs and falls back to the secret", async () => {
+  // This is the shape that would be live if the migration's explicit
+  // `grant select … to service_role` were ever lost: 42501 on every ask. The
+  // desk must keep answering, because a missing tier has a correct answer.
+  const [got, lines] = await capturingConsoleError(() => sentModel({
+    adminDenied: ["help_settings"],
+    tables: seed({ help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
+    d: { helpModel: "claude-sonnet-5-5" },
+  }));
+  assert.equal(got.status, 200, "a settings read failure took the desk down");
+  assert.equal(got.model, "claude-sonnet-5-5", "a denied settings read did not fall back to the secret");
+
+  const hit = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+                   .find((o) => o && o.where === "settings");
+  assert.ok(hit, "a denied settings read was not logged as where:settings");
+  assert.equal(hit.code, "42501");
+});
+
+test("a stored value outside the allow-list falls back to the default and says so", async () => {
+  // The CHECK constraint makes this unreachable through PostgREST — but the
+  // function must not assume a constraint it does not own, and a row written as
+  // `postgres` bypasses nothing else either.
+  const [got, lines] = await capturingConsoleError(() => sentModel({
+    tables: seed({ help_settings: [{ id: true, model: "claude-opus-4-1" }] }),
+  }));
+  assert.equal(got.model, DEFAULT_HELP_MODEL, "an unlisted stored tier reached the provider");
+
+  const hit = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+                   .find((o) => o && o.where === "model" && o.rejected);
+  assert.ok(hit, "an unlisted stored tier was not logged");
+  assert.equal(hit.rejected, "claude-opus-4-1");
+  assert.equal(hit.source, "settings", "the log does not say where the bad value came from");
+});
+
+test("the answer names the model for a BROKER and withholds it from a client", async () => {
+  // The field exists so the Security page's switch can be proved to have taken
+  // effect at all — FR-17 makes every failure look identical, so without it an
+  // unread setting and a working one are the same screen. It is withheld from a
+  // client because the tier is the broker's spend decision; a payload field
+  // reaches devtools, so gating it in the view would not be the same claim.
+  const broker = await sentModel({
+    tables: seed({ profiles: [{ id: OWNER, role: "broker" }], help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
+  });
+  assert.equal(broker.body.model, "claude-haiku-5-5", "a broker cannot tell which tier answered");
+
+  for (const role of ["client", "underwriter", undefined]) {
+    const other = await sentModel({
+      tables: seed({ profiles: [{ id: OWNER, role }], help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
+    });
+    assert.equal(other.body.model, undefined, `role=${String(role)} was told which tier answered`);
+    // …and it still answered. The gate must not cost them the answer.
+    assert.ok(other.body.answer, `role=${String(role)} got no answer`);
+  }
+});
+
+test("the stored tier is read FRESH on every ask, never cached in the isolate", async () => {
+  // A cached tier would take effect whenever the isolate happened to recycle, so
+  // a broker who moved the switch and then asked would get the old one with
+  // nothing saying so. One backing store, mutated between two asks.
+  const tables = seed({ help_settings: [{ id: true, model: "claude-opus-5-5" }] });
+  const first = await sentModel({ tables });
+  assert.equal(first.model, "claude-opus-5-5");
+
+  tables.help_settings[0].model = "claude-haiku-5-5";
+  const second = await sentModel({ tables });
+  assert.equal(second.model, "claude-haiku-5-5", "the tier was cached across asks");
 });
