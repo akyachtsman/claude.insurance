@@ -16,9 +16,29 @@ The header records what the catalog returned — grants, owner, RLS, policy coun
 and `proacl` on all three functions — which is the check no source scan can
 replace.
 
-⚠️ **One thing is now unblocked and still not done:** `notify-enhancement` itself
-is **not deployed**. The claim table existing is what made deploying it safe; it
-did not deploy it. `functions-deploy.yml` deliberately deploys `help-ask` ONLY.
+✅ **AND IT IS NOW DEPLOYED (2026-10-14).** `functions-deploy.yml` became a
+per-function matrix and carries `notify-enhancement` as a second row, so it
+deploys from the runner's checkout with `verify_jwt` ON (no `[functions.*]` block,
+so the CLI applies the safe default).
+
+⚠️ **It was never "not deployed", which is what this said.** Measured before the
+change: ACTIVE, **version 2**, `verify_jwt: false`, entrypoint under
+`/tmp/user_fn_…` — an old inline tool-call deploy of the **pre-rewrite** source,
+answering **404 to every caller** because `service_role` holds no table
+privileges here. Two true observations ("deployed and ACTIVE", "the endpoint
+404s") were joined by a false inference. **A 404 is evidence about a response,
+not about a deployment.**
+
+⚠️ **Deployed is still not the same as SENDING.** `RESEND_API_KEY`,
+`BROKER_EMAIL` and `FROM_EMAIL` cannot be confirmed from a session (no MCP tool
+lists Edge Function secrets, and HTTPS egress to the project is blocked), and the
+smoke probes are unauthenticated so they cannot reach the send path. With the key
+unset the function returns 200 `{sent:false, reason:"no_provider_key"}` — and,
+verified in source at `index.ts` 529 and 678, **it returns BEFORE taking the
+notification claim**, so a keyless deployment sends nothing, claims nothing, and
+burns no permanent dedup row. That is fail-closed and strictly better than the
+404 it replaces; it is also why a green deploy here is not evidence that mail
+left the building.
 
 Was: ⛔ **BLOCKS THE notify-enhancement DEPLOY.** The function writes
 `public.enhancement_notifications` on every invocation, so until this is applied
