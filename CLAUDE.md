@@ -2802,8 +2802,24 @@ makes it worth recording rather than just red:
 **The attribution is sound rather than assumed**, because the comparison is
 controlled: run `38498409976` on `86aae05` was **green** at 01:56:37Z, and the
 only change to this workflow between the two is **19 added and 6 removed COMMENT
-lines** (`git diff 86aae05 origin/main -- .github/workflows/functions-deploy.yml`).
-Same executable code, same step, token revoked in between. ⚠️ The raw job log is
+lines**. Same executable code, same step, token revoked in between.
+
+⚠️ **BOTH ENDPOINTS ARE PINNED TO COMMITS, and the first version of this used
+`origin/main`** — Codex, #261. `git diff 86aae05 origin/main -- …` reproduced
+19/6 on the day it was written and stops doing so the moment `main` takes another
+workflow edit; it would then show **executable** changes and suggest the code
+differed between the green run and the red one, which is the attribution this
+paragraph exists to establish. A moving endpoint in a historical measurement
+drifts in the unsafe direction. The command is:
+
+```
+git diff --stat 86aae05 8e03068 -- .github/workflows/functions-deploy.yml
+```
+
+Those are the two runs' own `head_sha`s — `38498409976` ran on `86aae05`
+(success) and `38508387852` on `8e03068` (failure), both read back from the runs
+API rather than assumed — so the diff is between exactly the two files that
+executed, for good. ⚠️ The raw job log is
 not readable from a session — the logs endpoint redirects to blob storage this
 `gh` will not follow — so the diagnosis rests on the step ladder plus that
 controlled diff, not on the CLI's error text.
