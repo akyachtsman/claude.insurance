@@ -3342,3 +3342,40 @@ Agents write evidence to `.agent-reports/`:
 2. Verify the directives-toolkit plugin attached (commands/agents resolve) per global.md → Skill Bootstrap
 3. Confirm active branch: `git branch --show-current`
 4. Run `/env-chk` and report status
+5. **MEASURE WHAT THIS SESSION'S OWN CREDENTIALS CAN REACH, before touching the
+   database.** Two calls, and they take seconds:
+
+   ```
+   mcp__Supabase__execute_sql(bdsegmjcgfmgzuxwiplj):
+     select current_user, session_user,
+            (select rolsuper      from pg_roles where rolname = session_user) as is_superuser,
+            (select rolbypassrls  from pg_roles where rolname = session_user) as bypasses_rls,
+            (select application_name from pg_stat_activity where pid = pg_backend_pid()) as app_name;
+
+   mcp__Supabase__list_projects   -- how many projects the credential reaches
+   ```
+
+   **Expected, as of 2026-10-14:** `postgres` / `postgres`, `is_superuser` false,
+   `bypasses_rls` **true**, `app_name` `mgmt-api`, and **four** projects
+   (`trading dashboard`, `insurance`, `property dashboard`, `apfp`). Anything
+   narrower is good news and should be recorded; anything **wider** — a superuser
+   role, a fifth project, a different `app_name` — is a finding to report before
+   doing any work.
+
+   ⚠️ **THIS STEP EXISTS BECAUSE IT WAS SKIPPED FOR AN ENTIRE SESSION AND THE
+   OWNER HAD TO ASK.** On 2026-10-13/14 a session applied migrations, revoked
+   grants, read `auth.users` and probed RLS as three personas on the live project
+   — and in the same session wrote a careful security comment in
+   `functions-deploy.yml` about how broad a Supabase credential can be, while
+   never once measuring its own. It then walked the owner through scoping a CI
+   token down to one project and one capability, which made the disproportion
+   exact: fastidious about a credential that can deploy a function, incurious
+   about the one rewriting the database.
+   The failure was not difficulty — it is two calls — it was **never asking**.
+   This file's whole method is "measure, do not assume"; the thing most easily
+   exempted from it is the hand holding the instrument.
+
+   ⚠️ **Knowing the reach is not permission to use it.** The *Operating rule* in
+   the security constraints still binds: from this repo, only ever touch
+   `insurance`. `list_projects` is an account-level call that names the others;
+   reading from them is out of scope regardless of what the credential permits.
