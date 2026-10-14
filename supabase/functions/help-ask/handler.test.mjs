@@ -12,6 +12,7 @@
 // on the RESPONSE or on what the fake database was actually asked for.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL } from "./handler.ts";
 
 // ── A PostgREST-shaped fake. It records every query it is asked to run, so a
@@ -1175,25 +1176,44 @@ test("a stored value outside the allow-list falls back to the default and says s
   assert.equal(hit.source, "settings", "the log does not say where the bad value came from");
 });
 
-test("the answer names the model for a BROKER and withholds it from a client", async () => {
-  // The field exists so the Security page's switch can be proved to have taken
-  // effect at all — FR-17 makes every failure look identical, so without it an
-  // unread setting and a working one are the same screen. It is withheld from a
-  // client because the tier is the broker's spend decision; a payload field
-  // reaches devtools, so gating it in the view would not be the same claim.
-  const broker = await sentModel({
-    tables: seed({ profiles: [{ id: OWNER, role: "broker" }], help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
-  });
-  assert.equal(broker.body.model, "claude-haiku-5-5", "a broker cannot tell which tier answered");
-
-  for (const role of ["client", "underwriter", undefined]) {
-    const other = await sentModel({
+test("the answer names the model to EVERY caller, whatever their role", async () => {
+  // ⚠️ THIS TEST IS INVERTED FROM ITS FIRST VERSION, and the inversion is the
+  // point. It used to assert "for a BROKER and withholds it from a client", on
+  // the reasoning that the tier is the broker's spend decision and not a fact
+  // about the client's cover. The owner reversed it on 2026-10-14, and the old
+  // reasoning does not survive the product's own copy: the Security page calls
+  // Haiku "weakest on nuance", so a broker could move every client to a cheaper
+  // tier and the client had no way to know the answers got worse.
+  //
+  // The field is still the end-to-end proof the tier switch took effect — FR-17
+  // makes every failure look identical, so without it an unread setting and a
+  // working one are the same screen. What changed is who gets that proof.
+  //
+  // The role is varied deliberately rather than tested once: `undefined` is the
+  // case that would have slipped through a gate keyed on equality with a string,
+  // and it is a real row shape (a `profiles` row predating the role column'''s
+  // default would read that way).
+  for (const role of ["broker", "client", "underwriter", undefined]) {
+    const r = await sentModel({
       tables: seed({ profiles: [{ id: OWNER, role }], help_settings: [{ id: true, model: "claude-haiku-5-5" }] }),
     });
-    assert.equal(other.body.model, undefined, `role=${String(role)} was told which tier answered`);
-    // …and it still answered. The gate must not cost them the answer.
-    assert.ok(other.body.answer, `role=${String(role)} got no answer`);
+    assert.equal(r.body.model, "claude-haiku-5-5", `role=${String(role)} was NOT told which tier answered`);
+    // …and it still answered. Naming the tier must not cost anyone the answer.
+    assert.ok(r.body.answer, `role=${String(role)} got no answer`);
   }
+});
+
+test("the invite read selects `id` ONLY — `role` went with the gate that used it", () => {
+  // Narrowing a read when its last consumer disappears. `role` was selected from
+  // 2026-10-14 for exactly one purpose, deciding whether the payload named the
+  // model; that gate is gone, so the column is too. Pinned here because a column
+  // that stays selected "in case" is one the next person has to reason about,
+  // and because schema.test.mjs's DOCUMENTED table models what is SELECTED — the
+  // two must not drift.
+  const src = readFileSync(new URL("./handler.ts", import.meta.url), "utf8");
+  const m = src.match(/\.from\("profiles"\)\.select\((["'\`])([^"'\`]*)\1\)/);
+  assert.ok(m, "could not find the profiles select — the scan, not the code, may be wrong");
+  assert.equal(m[2].replace(/\s+/g, ""), "id", "the invite read selects more than `id`");
 });
 
 test("the stored tier is read FRESH on every ask, never cached in the isolate", async () => {

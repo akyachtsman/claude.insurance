@@ -500,13 +500,18 @@ profile**, never by listing a directory.
   paragraph over-stated what crossed the boundary while the feature
   under-delivered. Re-check this list against `ownRecords`'s `facts.push` calls,
   not just its `select`.
-  ⚠️ **`profiles.role` IS NOW SELECTED TOO (2026-10-14), AND IT CROSSES NOTHING.**
-  The invite read became `select("id, role")` so the response can name the model
-  that answered — to a BROKER only. Neither column reaches the prompt; what does
-  is pinned separately by `handler.test.mjs`'s sentinel sweep, and
-  `schema.test.mjs`'s `DOCUMENTED` table models what is SELECTED (the half that
-  catches a column fetched and then dropped), which is why `role` had to be added
-  there in the same edit and why that addition cannot widen the digest.
+  ✅ **`profiles.role` WAS SELECTED FOR PART OF 2026-10-14 AND IS NOT ANY MORE.**
+  The invite read became `select("id, role")` so the response could name the
+  model that answered — to a BROKER only. The owner then made the model visible
+  to **every** caller, which left `role` with no consumer, so the select narrowed
+  back to `select("id")` in the same change. **Narrowing a read when its last
+  consumer disappears is the cheap half of this discipline**: a column still read
+  "in case" is one the next person has to reason about, and this one survived
+  less than a day. Pinned on both sides so it cannot drift back unnoticed —
+  `handler.test.mjs` scans the select, and `schema.test.mjs`'s `DOCUMENTED` table
+  (which models what is SELECTED, the half that catches a column fetched and then
+  dropped) lists `profiles: ["id"]`. Neither ever reached the prompt; what does is
+  pinned separately by the sentinel sweep.
   ⚠️ **Take the names from the TABLES, not from the nested shape the views
   consume.** This function shipped selecting `assets.kind` and
   `policies.policy_number`; the columns are `type` and `number` (`js/supabase.js`
@@ -2746,13 +2751,59 @@ yet deployed), first `OPTIONS | 200` at 23:31:47, four `POST | 200` between
 `--list`**), one `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe,
 behaving as designed), and the proving ask at 03:21:17.
 
-### ✅ DEPLOY PROVENANCE — CLOSED 2026-10-14, MEASURED · ⛔ BUT THE DEPLOY PATH IS BLOCKED (revoked token)
+### ✅ DEPLOY PROVENANCE — CLOSED, AND THE DEPLOY PATH IS RESTORED (2026-10-14, both measured)
 
-**Read the two halves separately — they are not the same claim.** What is CLOSED
-is the *provenance* defect: the bytes now live match the repo, measured. What is
-**BLOCKED** is the *path*: `SUPABASE_ACCESS_TOKEN` holds a revoked value, so the
-next deploy fails. An earlier version of this heading said only "CLOSED", and a
-reader scanning headings would have taken the deployment path for healthy.
+**Read the two halves separately — they are not the same claim.** The
+*provenance* defect is closed (the bytes live match the repo) and the *path* is
+working (a deploy can reach production). Both measured. The heading has now been
+wrong in both directions — it said only "CLOSED" while the path was down, and
+then said BLOCKED after it was restored — so it states both halves explicitly.
+
+✅ **THE TOKEN WAS RESTORED 2026-10-14 AND THE PATH IS PROVEN GREEN.** Run
+`38579744467`, `workflow_dispatch` on `baad788`, **all seven steps success** —
+including step 7, the smoke probe, which is skipped on a failed deploy and so is
+the step that proves the worker booted and resolved all three modules. Verified
+from a session afterwards rather than taken from the green tick:
+
+| check | result |
+|---|---|
+| function version | **2 → 3**, `verify_jwt: true`, ACTIVE |
+| `entrypoint_path` | `/home/runner/work/…` — the RUNNER'S checkout |
+| `index.ts` / `handler.ts` / `prompt.ts` | **all three byte-identical to the repo** (sha256) |
+| comment lines | **935** (79 + 587 + 269), intact |
+
+✅ **AND THIS IS THE CONTROLLED EXPERIMENT THE RED RUN WAS NOT.** The section
+below was careful to say the failure only *corroborated* the revoked-token
+hypothesis, because the comment-only diff ruled out a workflow-logic change and
+nothing else — not the runner image, not network egress, not Supabase's service
+state. This run settles it: **same commit** (`baad788`), same workflow, same
+runner image, **one variable changed** (the secret), red → green. That is a
+stronger proof than the CLI error text would have been, because it tests the
+hypothesis instead of reading an error message's own account of itself — which
+is exactly what the paragraph below predicted when it named the restore as the
+better evidence.
+
+⚠️ **The token is scoped, and the review screen stated the scope better than
+this file could promise.** Expiry Never, Resource access Project → `insurance`,
+one capability: **Edge Functions read-write**. Supabase's own review step
+enumerated what that grants — `deploy_edge_function`, `get_edge_function`,
+`list_edge_functions`, `confirm_cost`, `search_docs` — i.e. **no database
+access and no secrets access**. `Edge Function Secrets` (HIGH RISK) is None, so
+a CI token cannot read `ANTHROPIC_API_KEY`; code it deploys still runs with
+access to that key at runtime, which is a different thing and is not closed by
+scoping the token.
+
+⚠️ **AND THE URGENCY IN THE SECTION BELOW WAS OVERSTATED, which is worth more
+than the fix.** It said production "cannot receive a fix" — true of the PATH and
+misleading about the STATE. Measured when the owner questioned it: every
+undeployed line in `help-ask/` and `config.toml` was **a comment or blank**, zero
+behavioural change, so production's behaviour was identical to `main` the whole
+time. What was actually waiting was stale comments. The owner also correctly
+pointed out that the token was never required to DEPLOY at all —
+`mcp__Supabase__deploy_edge_function` works from a session and is how `help-ask`
+first shipped; the token buys "deployed == repo **by construction**", not the
+ability to deploy. Overstating urgency is the same defect class as understating
+it, and this file does both.
 
 ⚠️ **This heading said "is NOT byte-equal" and that is no longer true.** Kept,
 heading and all, because the defect and the way it was closed are both worth
@@ -3019,6 +3070,9 @@ What settles it: the readout **is not absent**. `edge_logs` dates the deploy's
 own smoke probe to 01:57:02 and the proving ask to 03:21:17, and that ask
 returned a `.k-help__tier` line — a field the pre-change build has no code to
 send. So the live function is the post-change one and it does consult the row.
+⚠️ **`.k-help__tier` NO LONGER EXISTS**: the model moved into `.k-help__ai` for
+every caller later the same day. The measurement above stands as taken; the
+selector does not, and a reader must not go looking for that element today.
 ⚠️ Note the narrower reading above: that proves the deployed build READS a tier
 and gates the field on role; it does not by itself prove the value came from the
 row rather than from `HELP_MODEL`. The paragraph's own standard — the readout is
@@ -3108,7 +3162,7 @@ from a working change. When both are set and disagree, the ignored one is
 | the control | `helpTierCard()` in `js/keep/views/keep.js` (Security page) |
 | read/write | `getHelpModel` / `setHelpModel` in `js/supabase.js` |
 | the server read + precedence | `storedModel()` in `supabase/functions/help-ask/handler.ts` |
-| the broker-only readout on an answer | `.k-help__tier` in `js/keep/views/help-view.js` |
+| the model named on an answer, to everyone | `aiNote()` → `.k-help__ai` in `js/keep/views/help-view.js` |
 
 **The row is NOT cached — not in the isolate, not in the Keep's `cache`.** A
 cached tier would take effect whenever the isolate happened to recycle, or would
@@ -3129,10 +3183,33 @@ and GOT.
 implying otherwise.** The write proves the ROW moved. If the deployed function
 predates this change it does not read the row at all — and FR-17 makes that look
 exactly like a tier being honoured. The only end-to-end proof is the other half:
-an answer shown to a **broker** carries `.k-help__tier`, "Answered by Haiku."
-That field is gated server-side on the caller's own `profiles.role`, so it never
-reaches a client's payload; the view renders on PRESENCE, because a second role
-check there would read as though the field were client-safe and merely hidden.
+the answer itself names the model.
+
+✅ **AND THAT PROOF IS NOW SHOWN TO EVERY CALLER, FOLDED INTO FR-10'S OWN
+SENTENCE (owner decision, 2026-10-14):** *"Answers are AI-generated by Anthropic
+**(Sonnet)** from this app's help guide …"*. It was a separate broker-only
+`.k-help__tier` line, gated server-side on `profiles.role`.
+**Why it changed, and why the original reasoning was wrong.** The gate was
+justified as "which tier they are getting is a spend decision of the broker's,
+not a fact about their cover". That does not survive the product's own copy: the
+tier card calls Haiku *"weakest on nuance"*, so a broker could move every client
+to a cheaper model and **the client had no way to know the answers got worse** —
+an asymmetry running in the broker's favour at the client's expense, on a surface
+that **already** discloses "AI-generated by Anthropic". Naming the model is a
+small increment on a disclosure already made. The file's own justification was an
+argument for showing BROKERS, never an argument for hiding it from clients; those
+were treated as one claim and they are not.
+**Folded rather than appended, deliberately:** inside a disclosure the client is
+already reading it reads as transparency; a separate system label reads as an
+operational detail they cannot act on, and invites "why did I get that one?" on a
+product with no mechanism to answer it. One fact, one place — the broker's
+separate line is gone, not duplicated.
+⚠️ **`AI_NOTE` is COMPOSED FROM HEAD + TAIL, not patched with `.replace()`.** The
+model is inserted between them, so a reword would silently no-op a replace-based
+version — a defect that shows up only as a missing word nobody asserts. S27 pins
+**both** halves: that the model appears AND that FR-10's wording survives, because
+a check for the model alone passes a mutation that drops the rest of the
+sentence (measured: it does).
 ✅ **PROVEN END TO END ON THE LIVE SITE, 2026-10-14.** This read "the live
 function is still the pre-change deploy, so the switch stores a tier nothing
 reads yet" — true when written, false within the hour, which is exactly the
@@ -3169,7 +3246,7 @@ it. What step 3 does establish, exactly:
 | the deployed function is the post-change build (it reads a tier at all and gates the field on role) | **proven** — the pre-change deploy had no `model` field to send |
 | the resolved tier was `claude-haiku-5-5` | **proven** |
 | a broker sees the readout and a client does not | **proven** |
-| the resolved tier came from `help_settings` rather than from `HELP_MODEL` | **NOT proven** |
+| the resolved tier came from `help_settings` rather than from `HELP_MODEL` | ✅ **PROVEN 2026-10-14 — see the Sonnet test below** |
 
 Steps 1 and 2 cannot close the last row either: they are the **browser's** reads
 and writes (anon key + the broker's JWT, under `hs_broker_select` /
@@ -3196,14 +3273,39 @@ exactly the kind of evidence this repo has already been burned by (the auth-gate
 window, the "no webkit in the image" directory listing). It is recorded as
 suggestive and nothing more.
 
-✅ **THE TEST THAT WOULD DECIDE IT, and it is cheap:** set the stored tier to
-**Sonnet** — a value that is neither the default (`claude-opus-5-5`) nor the one
-already observed (`claude-haiku-5-5`) — and ask once as a broker. "Answered by
-Sonnet." cannot come from the fallback chain unless `HELP_MODEL` is *also*
-sonnet, and the fallback cannot produce a value nobody configured. It costs one
-paid ask and two clicks. Until it is run, the last row above stays open; what is
-NOT in doubt is that the switch is reaching a post-change deploy, so nothing here
-blocks the feature.
+✅ **THE DECIDING TEST WAS RUN 2026-10-14, AND IT PASSED.** The stored tier was
+set to **Sonnet** — neither the default (`claude-opus-5-5`) nor the value already
+observed (`claude-haiku-5-5`) — and one question was asked as a broker. The row
+was confirmed from a session first (`claude-sonnet-5-5`, `updated_at`
+14:22:58Z), and the answer ended **"Answered by Sonnet."**
+
+**Why that is proof rather than more corroboration:** the fallback chain is
+stored row → `HELP_MODEL` → default, and **it cannot produce a value nobody
+configured**. Haiku could not distinguish the branches because a secret set to
+haiku yields a byte-identical payload; Sonnet can, because reaching it requires
+the row to have been read. The test was designed to be informative in all three
+directions, which is what makes it a test and not a confirmation: Opus would have
+meant the settings read failed to the default, and Haiku would have meant
+`HELP_MODEL` is overriding and the precedence is backwards.
+
+⚠️ **THE ANSWER ALSO SAID "nothing on file for you yet", AND THAT IS CORRECT —
+do not read it as a records-digest failure.** The caller was the **broker**, and
+the digest is owner-scoped from the JWT under RLS, so it reported the BROKER's
+records; the seeded entities, assets and policies belong to `user@example.com`.
+Two independently-wired things are visible in that one answer, and it is worth
+noting they stayed independent: the tier readout rendered (then gated on
+`profiles.role`) while the digest stayed empty (gated on `owner = auth.uid()`).
+Had those been wired to the same check, one of them would have been wrong.
+⚠️ That observation is **historical in one respect**: the role gate on the tier
+was removed later the same day, so only the owner-scoping half still gates
+anything. The point it demonstrates — two gates on one answer staying
+independent — is why it is kept. The
+staff read path (`er_broker_select`) covers enhancement requests only — it does
+not widen the digest, and this answer is the practical demonstration.
+⚠️ A consequence worth stating for the next operator: **a broker is the wrong
+account for testing the RECORDS half of the desk.** Use the client for that; use
+the broker only for the tier readout, which is the one thing a client cannot
+see.
 
 **An unrecognised stored value falls back to the default and logs
 `where: "model", source: "settings"`.** The CHECK constraint makes that
@@ -3275,10 +3377,11 @@ so:
 | the row **beats** the secret, and the ignored one is logged | `handler.test.mjs`, executed |
 | a denied settings read is **not fatal** and logs `where: "settings"` | `handler.test.mjs`, executed |
 | the tier is read **fresh on every ask** | `handler.test.mjs`, executed — one store, mutated between two asks |
-| the payload names the model **for a broker and nobody else** | `handler.test.mjs`, executed |
+| the payload names the model **for every caller, whatever the role** | `handler.test.mjs`, executed — `undefined` is in the role list deliberately, being the shape a gate keyed on string equality would have let through |
+| the invite read selects **`id` only** | `handler.test.mjs`, source scan + `schema.test.mjs`'s `DOCUMENTED` |
 | the three allow-lists agree, in order | `help-model.test.mjs`, **source scan** of all three |
 | the control is absent for a client, reports what it READ, reverts a refused write, and sends exactly `{ model }` | **S26**, offline harness, four viewport projects |
-| a broker's answer names the model; a client's does not | **S27**, offline harness, four viewport projects |
+| every answer names the model inside FR-10's sentence, and FR-10's wording survives | **S27**, offline harness, four viewport projects |
 | the call site carries no literal | `contract.test.mjs`, **source scan** |
 | `index.ts` reads the env and injects it | `contract.test.mjs`, **source scan** |
 
@@ -3422,7 +3525,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states), `.k-help__tier` ("Answered by …" — **broker payloads only**, so absent for every client), model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
 
 ⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
 2026-10-05** (headless chromium, local static server) — not read off the source.
@@ -3471,7 +3574,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S24 | Help desk — a settling ask releases only ITS OWN gate, shared account (offline harness, **runs locally**) | A asks (held); A signs out; the next person signs in on the **same prefilled credential** and asks their own question, which must reach the endpoint; A's older response is released FIRST. Their controls must stay **disabled** while their own call runs, and re-enabling them in the page and calling `form.requestSubmit()` must not raise the endpoint's request count — then their own answer lands and the desk unlocks. ⚠️ Distinct from S16, which is this shape with a DIFFERENT client and so passes against an owner-keyed gate: only the shared credential makes two people one owner id. | A departed person's settling ask re-enables the next person's form mid-call, letting a second paid provider call through |
 | S25 | Help desk — a render parked on the CORPUS when the session ends (offline harness, **runs locally**) | Hold `content/help-guide.json`, start the first Help visit, then sign out **in the same page** through the app's own exported `signOut()` — the hash never changes, so neither the render generation nor the hash check can see it. Release: the login card must survive, no `.k-help__input` or `.k-help__ai` may mount, and **no `route error:` may be logged** — that last one is the only assertion that fails when the epoch check is deleted, because the DOM is otherwise saved by an accident (the stale build throws into `route()`'s generation-guarded catch). | An authenticated Help form mounts over the login card, or the stale render runs and throws instead of being refused |
 | S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
-| S27 | Help desk model tier — the ANSWER names the model, for a broker only (offline harness, **runs locally**) | A client payload (no `model` key — what `help-ask` sends to everyone who is not a broker) renders **no** `.k-help__tier`, and the answer is otherwise whole (`.k-help__ai`, `.k-help__broker` both present). A broker payload renders `.k-help__tier` reading "Answered by Haiku." — the friendly label, not the wire id. An id this build does not know is shown **verbatim**. ⚠️ This is the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours | A client is told which model answered, a broker is not, or an unrecognised id is rounded to a tier that is not in use |
+| S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
