@@ -2799,20 +2799,29 @@ channel carries a handler's own `console.error`. The `where` field this file
 tells readers to go and read remains unproven as *reachable* — which is a
 narrower and more honest version of what the retracted paragraph was groping at.
 
-⚠️ **THESE LOGS DROP ROWS — MEASURED 2026-10-14 17:35, AND IT FALSIFIES THE
-SENTENCE BELOW.** That sentence said the two sources give **every** `help-ask`
-request with method and status. They do not, and this is the rare case where the
-absence can be *proved* rather than suspected, because there is a positive
-control:
+⚠️ **`function_edge_logs` DROPS INBOUND REQUEST ROWS — MEASURED 2026-10-14
+17:35, AND IT FALSIFIES THE SENTENCE BELOW.** That sentence said the two sources
+give **every** `help-ask` request with method and status. They do not. The
+heading is scoped to **inbound request logs** on purpose — see consequence 2 for
+the extrapolation this section originally made and should not have.
 
 `functions-deploy.yml`'s smoke step exits 1 on any status other than 401
 (`case "$code" in 401) ;; *) exit 1`). On run `38607811541` it reported
 **success** at 17:35:13. So an unauthenticated POST was made and the gateway
 answered 401. **There is no row for it** — not in `function_edge_logs`, not in
 `edge_logs`, not in any source, across a two-minute window queried with no
-`source` filter and re-queried three minutes later (identical, so not ingestion
-lag). Its `OPTIONS` at 17:35:08 *is* there, and so is the worker's
+`source` filter. Its `OPTIONS` at 17:35:08 *is* there, and so is the worker's
 `booted (time: 65ms)` in `function_logs`.
+
+⚠️ **ON INGESTION LAG, PRECISELY.** The first version of this said "re-queried
+three minutes later … so not ingestion lag", which rules out a delay of under
+three minutes and nothing more (Codex, #266). Re-queried again at **17:50, ~15
+minutes after the fact**: still absent, same two-minute window, same no-filter
+query. So the bound is **15 minutes, not 3** — and Supabase publishes no
+ingestion-latency SLA that this repo has read, so **"dropped" is the best
+explanation, not a proved one.** The claim that survives either way is the
+operationally useful one: *the row was absent 15 minutes after a request that
+provably happened*, so a reader must not treat these logs as complete.
 
 And the comparison is like-for-like: the other three deploys today
 (**15:37:18, 14:21:37, 01:57:02**) each have their smoke `POST | 401` present.
@@ -2824,28 +2833,52 @@ consistent with the same loss rather than a missing ask.
 
 1. **A missing row is not a missing request.** Do not conclude from these logs
    that something did not happen.
-2. ⚠️ **It weakens the `where: "answer"` positive control recorded below.** That
-   control says a billed non-answer with no matching `function_logs` line means
-   the channel is the defect. With row loss established, a missing line is
-   *also* consistent with the row being dropped — so the control can confirm the
-   channel works (a line appears) but can no longer condemn it (a line absent).
-   Stated here rather than left for a reader to discover, because this file has
-   already been burned twice today by reading an absence as a fact.
-3. **Do not count requests from these logs.** The "4 paid calls per Pages
-   deploy" figure stands on `npx playwright test --list | grep -c S10` returning
-   4, which is what originally established it; the log observation that was
-   added as corroboration is not a reliable instrument for a count.
+2. ⚠️ **IT DOES *NOT* WEAKEN THE `where: "answer"` CONTROL — AND THE FIRST
+   VERSION OF THIS BULLET SAID IT DID, WRONGLY.** It read: "a missing line is
+   also consistent with the row being dropped — so the control … can no longer
+   condemn it". **That extrapolates loss across two different pipelines.** The
+   positive control above is an **inbound request** row, which this very section
+   places in `function_edge_logs`; `where: "answer"` is **handler stderr**, which
+   belongs to `function_logs`. Nothing measured here shows a handler-emitted
+   `function_logs` row being dropped — and the one `function_logs` row in the
+   window (`booted (time: 65ms)` at 17:35:08) was present, from the same second
+   as the missing inbound row. So the caveat is **scoped to inbound request
+   logs**, and the channel check below stands at full strength until loss is
+   observed in `function_logs` itself. Found by Codex on #266, and it is the
+   sharpest finding of the three: by over-generalising one measurement I had
+   undermined the only working check I had, on evidence that did not apply to
+   it. **Weakening a valid check with irrelevant evidence is a worse outcome
+   than the overclaim it was trying to correct.**
+3. **Do not count requests from these logs** — and ⚠️ **`--list` is not a cost
+   instrument either, which the first version of this bullet got wrong.** It
+   said the "4 paid calls per Pages deploy" figure "stands on `npx playwright
+   test --list | grep -c S10` returning 4". `--list` **enumerates selected test
+   instances and executes nothing**, and the handler has several pre-provider
+   exits (no keys, no `profiles` row, a failed reservation, either cap, an
+   unreachable corpus, a records error) — each of which costs £0. So `--list`
+   bounds the number of S10 **instances** at 4; it does not establish four
+   provider calls. Codex, #266.
+   **What does evidence billing:** a retained `help_queries` reservation, per
+   the kept-reservation note above — and because these logs drop rows, a count
+   taken from them is a **floor**, not a total. State the cost as *up to 4 asks
+   per Pages deploy, each of which can bill*, and read the billed count off
+   retained reservations while treating it as a lower bound.
 
-⚠️ This is the **fourth** correction to this section in one day, and the first
-three were all the same shape: a claim about what the logs show, stated more
-strongly than the measurement supported. The quantifier "every" was the defect
-both times it appeared.
+⚠️ This is the **fifth** correction to this section in one day, and every one
+has been the same shape: **a claim about what the logs show, stated more
+strongly than the measurement supported.** The forms it has taken so far —
+the quantifier "every" (twice); an absence read through the wrong `source`
+filter; a 3-minute re-query called "not lag"; loss in one pipeline extrapolated
+to another; and `--list` offered as evidence of spend. ⚠️ Three of those five
+were introduced **in commits written to correct the previous one**. The
+generalisation is the defect, not any individual sentence, and naming it has
+not yet stopped me writing it.
 
 What it *is* good for, with that caveat: the two sources give `help-ask`
 requests with method and status, which dated the deployment and the asks — `OPTIONS | 404` through 2026-10-13 18:13 (not yet deployed),
 first `OPTIONS | 200` at 23:31:47, four `POST | 200` between 00:03 and 00:58
-(**that is `qa-live`'s S10 on its four viewport projects — the "4 paid calls per
-Pages deploy" record, now observed rather than counted from `--list`**), one
+(**that is `qa-live`'s S10 on its four viewport projects — four INVOCATIONS,
+which is not the same as four paid calls; see consequence 3 above**), one
 `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe, behaving as
 designed), and the proving ask at 03:21:17.
 
@@ -3325,11 +3358,19 @@ question rather than answer it.
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
 question as the shared demo `user`.
-⚠️ **4 paid calls per clean run, up to 8 on a failing one — not "up to 2", which
+⚠️ **Up to 4 asks per clean run, up to 8 on a failing one — not "up to 2", which
 is what this said.** S10 carries no project filter, and `playwright.config.js`
 declares **four** projects (desktop, tablet, mobile-chrome, iphone), so
 `npx playwright test --list | grep -c S10` returns **4**. Measured by review
 round 5; I had counted the scenario, not its instantiations.
+⚠️ **"4 PAID calls" overstated it, and `--list` cannot establish spend** (Codex,
+#266). `--list` enumerates selected INSTANCES and executes nothing, and the
+handler has pre-provider exits that cost nothing — no keys, no `profiles` row, a
+failed reservation, either cap, an unreachable corpus, a records error. So the
+ceiling is **4 asks, each of which can bill**; the billed count is read off
+retained `help_queries` reservations, and because the logs drop rows that count
+is a floor. The cap arithmetic below is unchanged, because a CEILING is the right
+input to a spend bound — it is the *reporting* that was wrong, not the caution.
 That makes the **20/hour per-account** cap the sharp edge: about **5 clean runs**
 exhausts it (2-3 failing ones), not "ten deploys" — and after owner-gate step 7
 those 4 CI asks run *before* the operator's own step-8 proof, so a burst of
