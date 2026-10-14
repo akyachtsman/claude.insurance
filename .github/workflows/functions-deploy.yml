@@ -1,4 +1,4 @@
-# functions-deploy.yml — deploy the help-ask Edge Function from the repo.
+# functions-deploy.yml — deploy this project's Edge Functions from the repo.
 #
 # WHY THIS EXISTS, and it is not convenience. Until now the only way to deploy
 # was the Supabase MCP's `deploy_edge_function`, which takes file CONTENT inline
@@ -15,14 +15,22 @@
 # files as they exist in git, so "deployed == repo" becomes true by construction
 # rather than by anyone's care.
 #
-# ⚠️ IT DEPLOYS help-ask AND NOTHING ELSE, deliberately. `supabase functions
-# deploy` with no slug deploys EVERY function in supabase/functions/, which here
-# would include notify-enhancement — whose claim table
-# (supabase/proposed/20261013_enhancement_notifications.sql) is WRITTEN AND NOT
-# APPLIED. Deploying it would replace a dead endpoint with one that fails closed
-# on every call, silently, and this repo's own gate says that migration is a
-# prerequisite. When notify-enhancement is ready, add it here in the same change
-# that applies its migration — not before.
+# ⚠️ IT DEPLOYS A NAMED LIST, NEVER "everything". `supabase functions deploy`
+# with no slug deploys EVERY directory under supabase/functions/, so a function
+# added to the repo would go live the moment it merged, with no decision taken.
+# The matrix below is that decision, one row per function, and a new row is the
+# place to state the prerequisites it waits on.
+#
+# notify-enhancement was held out of this list until 2026-10-14 because its claim
+# table was written and NOT APPLIED; the entry said to add it "in the same change
+# that applies its migration — not before". The migration
+# (20261014195128_enhancement_notifications.sql) was applied 2026-10-14 with the
+# catalog read back, so the condition is met and the row is here.
+#
+# ⚠️ EVERY ROW REDEPLOYS ON EVERY QUALIFYING PUSH, including a push that touched
+# only the other function. That is an idempotent re-upload of identical source —
+# the same trade already accepted above for config.toml, and the alternative is a
+# per-function path filter that has to be kept in step with each file's internals.
 #
 # Required setup (one repository secret):
 #   SUPABASE_ACCESS_TOKEN — a Supabase personal access token.
@@ -57,6 +65,7 @@ on:
     # not redeploy a live endpoint.
     paths:
       - "supabase/functions/help-ask/**"
+      - "supabase/functions/notify-enhancement/**"
       - ".github/workflows/functions-deploy.yml"
       # ⚠️ config.toml IS A DEPLOY INPUT, not documentation. The CLI reads it for
       # per-function settings (verify_jwt, import maps, entrypoints), so a
@@ -85,9 +94,11 @@ on:
 # group is mutual exclusion, not FIFO"), and this file shipped without carrying
 # it over; found by an automated review of the merged PR that added it. The
 # freshness check in the job below is what actually closes it.
-concurrency:
-  group: functions-deploy-help-ask
-  cancel-in-progress: false
+#
+# ⚠️ THE GROUP IS PER-FUNCTION AND LIVES ON THE JOB, not here. A single
+# repo-wide group would serialize a help-ask deploy behind a notify-enhancement
+# one for no reason — they touch different endpoints and cannot race each other.
+# A top-level `concurrency:` cannot see `matrix`, so it has to be on the job.
 
 # `actions: read` is for the successor check below — listing this workflow's own
 # runs. `contents: read` alone cannot, and the check failing open would leave the
@@ -98,9 +109,38 @@ permissions:
 
 jobs:
   deploy:
-    name: help-ask
+    name: ${{ matrix.fn }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One job per function, independent: `fail-fast: false` so a broken deploy of
+    # one does not cancel the other's, which would leave "what is live" depending
+    # on which failed first.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ⚠️ `probe` IS THE UNAUTHENTICATED POST BODY, AND IT MUST BE ONE THE
+          # HANDLER WOULD ACCEPT. Measured 2026-10-14: BOTH handlers parse and
+          # VALIDATE the body BEFORE they look at the Authorization header
+          # (help-ask handler.ts 478-483 then 486; notify-enhancement index.ts
+          # 447-450 then 456). Probe 2 detects "verify_jwt is OFF" by finding the
+          # handler's own `{"error":"unauthorized"}` — which the handler only
+          # reaches if the body got past validation. An invalid body returns 400
+          # `bad_request` instead, the `case` below reports "Unexpected 400", and
+          # the real cause (every unauthenticated request reaching the worker) is
+          # never named. So a generic `{}` would have silently degraded the one
+          # check this step exists for.
+          # With verify_jwt ON — the expected state — neither body reaches the
+          # worker at all, so neither is a billable call and neither can create
+          # anything. The all-zeros requestId is belt for the case where it does:
+          # it matches no row, so the probe cannot take a notification claim.
+          - fn: help-ask
+            probe: '{"question":"ping"}'
+          - fn: notify-enhancement
+            probe: '{"requestId":"00000000-0000-0000-0000-000000000000","event":"requested"}'
+    concurrency:
+      group: functions-deploy-${{ matrix.fn }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -205,19 +245,28 @@ jobs:
           # path that changes under us between two identical pushes.
           version: 2.120.0
 
-      # The three modules must go together: index.ts imports handler.ts and
-      # prompt.ts, so a partial upload fails at bundle time. The CLI sends the
-      # whole directory, which is the entire point of this workflow.
+      # A function's modules must go together: help-ask's index.ts imports
+      # handler.ts and prompt.ts, so a partial upload fails at bundle time. The
+      # CLI sends the whole directory, which is the entire point of this workflow.
       #
       # verify_jwt is NOT passed: supabase/config.toml deliberately carries no
-      # [functions.help-ask] block, so the CLI applies the default (true). That
-      # default is the safe one and the config file says at length why.
-      - name: Deploy help-ask
+      # [functions.*] block for either function, so the CLI applies the default
+      # (true). That default is the safe one and the config file says at length
+      # why — for BOTH, since notify-enhancement's block was removed 2026-10-13
+      # once its service-role caller path was dropped.
+      #
+      # ⚠️ FOR notify-enhancement THIS DEPLOY ALSO FLIPS verify_jwt false -> true.
+      # Measured before this change: it was live at version 2 with verify_jwt
+      # FALSE and an entrypoint under /tmp/user_fn_… — i.e. an old inline tool-call
+      # deploy of the PRE-REWRITE source, which answered 404 to every caller
+      # because service_role holds no table privileges here. Removing the config
+      # block changed nothing on its own; only the CLI reads that file.
+      - name: Deploy ${{ matrix.fn }}
         if: steps.fresh.outputs.current == 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          supabase functions deploy help-ask \
+          supabase functions deploy ${{ matrix.fn }} \
             --project-ref bdsegmjcgfmgzuxwiplj
 
       # ── SMOKE: TWO PROBES, BECAUSE ONE 401 PROVED NEITHER THING ─────────────
@@ -244,7 +293,8 @@ jobs:
       - name: Smoke — the worker boots, and the gateway gates it
         if: steps.fresh.outputs.current == 'true'
         env:
-          FN: https://bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/help-ask
+          FN: https://bdsegmjcgfmgzuxwiplj.supabase.co/functions/v1/${{ matrix.fn }}
+          PROBE: ${{ matrix.probe }}
         run: |
           set -u
 
@@ -253,8 +303,9 @@ jobs:
           # carried the same flag; that stub was deleted 2026-10-14, so the
           # measurement stands but has no live control), and handler.ts answers
           # it with the literal
-          # body `ok`. So that body is proof the deployed worker booted, resolved
-          # all three modules, and is running THIS repo's code. It depends on no
+          # body `ok` — both functions do, measured from source. So that body is
+          # proof the deployed worker booted, resolved every module it imports,
+          # and is running THIS repo's code. It depends on no
           # response header, deliberately: an assertion on x-deno-execution-id
           # would be guessing at a name nobody here can verify from a session.
           pre=$(curl -s -o /tmp/pre.body -w '%{http_code}' -X OPTIONS "$FN")
@@ -266,7 +317,8 @@ jobs:
           if [ "$pre" -lt 200 ] || [ "$pre" -ge 300 ] || [ "$(cat /tmp/pre.body)" != "ok" ]; then
             echo "::error::The deployed worker did not answer a preflight with 'ok'."
             echo "::error::Either it failed to boot (check the function logs for an"
-            echo "::error::import error — index.ts needs handler.ts AND prompt.ts), or the"
+            echo "::error::import error — e.g. help-ask's index.ts needs handler.ts AND"
+            echo "::error::prompt.ts), or the"
             echo "::error::gateway stopped forwarding OPTIONS. The status and body above"
             echo "::error::say which: a 401 means the gateway refused the preflight;"
             echo "::error::a 5xx or an empty body means the worker itself."
@@ -280,7 +332,7 @@ jobs:
           # every unauthenticated request is reaching the worker.
           code=$(curl -s -o /tmp/post.body -w '%{http_code}' -X POST \
             -H 'Content-Type: application/json' \
-            -d '{"question":"ping"}' "$FN")
+            -d "$PROBE" "$FN")
           body=$(cat /tmp/post.body)
           echo "unauthenticated POST -> HTTP $code, body: $body"
           case "$code" in
@@ -292,7 +344,7 @@ jobs:
             echo "::error::That 401 came from handler.ts, not from the gateway — so"
             echo "::error::verify_jwt is OFF and unauthenticated requests are reaching the"
             echo "::error::worker. Redeploy with the default (config.toml must carry no"
-            echo "::error::[functions.help-ask] verify_jwt = false)."
+            echo "::error::[functions.${{ matrix.fn }}] verify_jwt = false)."
             exit 1
           fi
           echo "OK: the worker boots (OPTIONS reached it) and the gateway refuses an unauthenticated POST before it runs."

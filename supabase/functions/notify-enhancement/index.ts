@@ -315,7 +315,29 @@
 //   Also confirm RESEND_API_KEY / BROKER_EMAIL / FROM_EMAIL are set (unknowable
 //   from a session, see above) and that verify_jwt is ON for the deploy.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+// ⚠️ PINNED EXACTLY, AND IT WAS `@2` — A FLOATING MAJOR — UNTIL 2026-10-14.
+// There is no Deno lockfile here, so a major-only JSR constraint resolves to the
+// latest satisfying release AT BUILD TIME: two deploys of byte-identical
+// repository source could produce different bundles, which flatly contradicts
+// the "idempotent re-upload" claim functions-deploy.yml makes when it redeploys
+// this function on a push that only touched the other one.
+//
+// It also contradicted a standard this repo states at length elsewhere and had
+// not carried here. CLAUDE.md -> "No third-party code on the render path": the
+// browser client was VENDORED and pinned precisely because an unpinned major put
+// a third party on the critical path, and "an ES module import cannot carry an
+// integrity hash". That argument is not weaker for an Edge Function — this one
+// holds the service-role key and reads client rows.
+//
+// help-ask already pinned 2.117.2; the two now match deliberately, so a reader
+// cannot find two versions of one dependency in one project and have to work out
+// which is intended. Raised by Codex on #270, with the JSR semver-resolution
+// docs cited; verified here by diffing the two import lines.
+//
+// ⚠️ `functions-js/edge-runtime.d.ts` above is left unpinned ON PURPOSE: it is a
+// types-only import that Deno strips, so it contributes nothing to the runtime
+// bundle, and both functions carry it identically. Pinning it would be noise.
+import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
 
 // Validated at module load, not asserted away with `!`. With a missing value the
 // `!` deferred the failure to createClient(undefined, ...) inside the request

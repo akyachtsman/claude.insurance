@@ -2578,13 +2578,23 @@ migrations contradict.
 
 ⚠️ **What is NOT closed, and must not be read as closed:** the owner gate below.
 A clean review is a statement about the diff, not about production.
-Half of that gate has since cleared: the claim migration was **applied
-2026-10-14** as `migrations/20261014195128_enhancement_notifications.sql`, with
-the catalog read back and every probe run. **`notify-enhancement` is still NOT
-DEPLOYED** — `functions-deploy.yml` deliberately deploys `help-ask` only, so the
-endpoint 404s and no enhancement-request email has ever been sent. Applying the
-table made deploying it safe; it did not deploy it, and those are easy to
-conflate because one was the stated blocker for the other.
+✅ That gate is now fully cleared: the claim migration was **applied 2026-10-14**
+(`migrations/20261014195128_enhancement_notifications.sql`) with the catalog read
+back and every probe run, and `notify-enhancement` was **deployed from the
+runner's checkout the same day**, once `functions-deploy.yml` gained it as a
+second matrix row.
+
+⚠️ **AND THE SENTENCE THIS REPLACES WAS WRONG IN AN INSTRUCTIVE WAY.** It read
+*"`notify-enhancement` is still NOT DEPLOYED … so the endpoint 404s"*. Measured
+2026-10-14 before deploying: the function **was** deployed — ACTIVE, **version
+2**, `verify_jwt: false`, `entrypoint_path` under `/tmp/user_fn_…` (an old inline
+tool-call deploy of the PRE-REWRITE source). It answered **404 to every caller**
+for the privilege reason in its own header: `service_role` holds no table
+privileges here, the first query returned 42501, and the error was folded into
+`rowErr`. **Two real observations — "deployed and ACTIVE" and "the endpoint
+404s" — were joined by an inference that was false**, and this file carried both
+halves in different sections for days. The lesson is the familiar one in a new
+place: *a 404 is evidence about a response, not about a deployment.*
 
 ### ⚠️ ROUND 27 — A WRONG `EXPECT` IS WORSE THAN A MISSING ONE
 
@@ -3374,8 +3384,11 @@ files are the repo's files and "deployed == repo" holds by construction instead
 of by anyone's care. It needs one repository secret, `SUPABASE_ACCESS_TOKEN`.
 ✅ That secret was added and the workflow ran on 2026-10-14; the live function is
 no longer the stripped copy.
-⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
-push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
+⚠️ It deploys a **named matrix**, never "everything" — a bare `supabase functions
+deploy` pushes every directory under `supabase/functions/`, so a new function
+would go live the moment it merged with no decision taken. It carried `help-ask`
+alone until 2026-10-14, while `notify-enhancement`'s claim table was unapplied;
+that condition is met and it is now a second row.
 
 ⚠️ **AND IT SHIPPED WITH THREE DEFECTS, ALL FOUND BY A REVIEW THAT LANDED AFTER
 THE MERGE** (Codex on #258, completed 00:03:24Z against a PR merged at
@@ -3417,6 +3430,28 @@ neither is billable.
 check would be the obvious way to tell gateway from worker, and it would be
 guessing at a name no session here can verify — HTTPS egress to the project is
 blocked. The body shapes are read off source.
+
+⚠️ **AND PROBE 2'S REQUEST BODY IS LOAD-BEARING, WHICH NOTHING SAID UNTIL
+2026-10-14.** It must be a payload **the handler would accept**. Measured from
+source when `notify-enhancement` was added to this workflow: **both** handlers
+parse and VALIDATE the body **before** they read the `Authorization` header —
+`help-ask`'s `handler.ts` parses at 478 and rejects an empty/oversized question
+at 481-483, then checks auth at 486; `notify-enhancement`'s `index.ts` parses at
+447 and rejects a missing `requestId` or bad `event` at 450, then checks auth at
+456. Probe 2 detects *"`verify_jwt` is OFF"* by finding the handler's **own**
+`{"error":"unauthorized"}` — which the handler only ever reaches if the body got
+**past validation**. A generic `{}` returns `400 bad_request` instead, the
+`case` reports *"Unexpected 400"*, and the real cause — every unauthenticated
+request reaching the worker — is never named.
+So `help-ask`'s `{"question":"ping"}` was never arbitrary, and copying the step
+for a second function with the same body would have silently degraded the one
+check it exists for. The matrix now carries a `probe` per function and says why.
+⚠️ With `verify_jwt` ON — the expected state — neither body reaches the worker,
+so neither is billable and neither can create anything; the all-zeros
+`requestId` is belt for the case where it does, since it matches no row and so
+cannot take a notification claim. Same reasoning as the claim migration's probe
+2b, and the same rule as that migration's footer: **a probe for a suppression
+bug must not be able to suppress.**
 
 **Finding 2's fix asks whether a SUCCESSOR DEPLOY RUN EXISTS**, via the runs API
 on this workflow's own file name. `workflow_dispatch` is exempt (the manual
@@ -3541,10 +3576,56 @@ still says "3 Lapsed, action needed" — which is **true and actionable**. Seedi
 more careful demo data would have hidden the question; so would making the badge
 agree with a column nobody maintains.
 
-⚠️ **WHAT IS STILL OPEN IS THE DATA QUESTION, and it is the broker's:** three
-policies carry `status = 'active'` with a renewal date months past. Were they
-renewed and the row not updated, or did cover end? The code now reports both
-facts honestly instead of picking one; it cannot answer that.
+✅ **AND THE DATA QUESTION IS CLOSED (2026-10-14) — IT WAS NEITHER OF THE TWO
+ANSWERS I OFFERED.** This read: *"three policies carry `status = 'active'` with a
+renewal date months past. Were they renewed and the row not updated, or did cover
+end? The code cannot answer that."* Both options were wrong, and one query
+settled it: **the live demo data had ROTTED, and `status` was never the problem.**
+
+Measured: all seven policies were seeded **2026-06-24** with absolute one-year
+terms. Computing their position *on that date* against
+`js/keep/fixtures/sample.mjs`:
+
+| line | fixture `renewalInDays` | live renewal on the seed date |
+|---|---|---|
+| Homeowners (HO-3) | 263 | 2027-03-14 → **+263** |
+| Scheduled personal property | 205 | 2027-01-15 → **+205** |
+| Personal auto | 140 | 2026-11-11 → **+140** |
+| Commercial auto | 120 | 2026-10-22 → **+120** |
+| BOP | 88 | 2026-09-20 → **+88** |
+| Flood (NFIP) | 12 | 2026-07-06 → **+12** |
+| Windstorm | −23 | 2026-06-01 → **−23** |
+
+Exact, all seven. So **the fixture is a RELATIVE snapshot of this very seed**, and
+the designed demo is **1 lapsed · 1 expiring in 12 days · 5 active** — which is
+also what `policies.test.mjs` pins (`ho3-marina` ok, `flood-marina` warn,
+`wind-marina` exp). The fixture never rotted because it stores offsets; the live
+table did, by **112 days**, turning the demo into **3 lapsed · 1 expiring · 3
+active** with nobody deciding that.
+
+**This is the S28 defect one layer out** — absolute dates standing in for a
+*relative* state — found by Codex in the Playwright harness on the same day and
+present all along in the live seed. ⚠️ Note which way round the two sources were:
+the Node fixture was **right**, and production had drifted from it.
+
+**Fixed by re-basing the live rows onto `current_date` using the fixture's own
+offsets** (`effective_date = current_date + eff_off`, same for renewal), so the
+database now agrees with the artefact the unit tests already check. ⚠️ **`status`
+was not touched, and must not be:** all seven genuinely are active, and the one
+remaining policy whose renewal date has passed (Windstorm, −23) is the demo's
+deliberate *"1 Lapsed, action needed"* call to action — a realistic state, since
+a renewal the broker has not yet processed is exactly when a client needs to act.
+Both readers are honest about it: the badge says `Expired <date>` (the cover
+period ended) and the desk says the status is active while flagging the past
+date. That was never a contradiction; it is two true facts, which is what the
+whole section above is about.
+
+⛔ **IT WILL ROT AGAIN, and there is no durable fix** — a `policies` table holds
+real dates, so a demo built on one drifts with the calendar. The re-basing
+statement is in the PR that applied it; re-run it when the demo stops reading
+1/1/5. ⚠️ **The tell is the home page disagreeing with `sample.mjs`**, not
+anything failing: no test goes red when this rots, because the fixture is
+relative and never moves.
 
 ⚠️ **THE UNIT TESTS COULD NOT CATCH THIS FIX, AND ONLY MUTATION TESTING SAID
 SO.** With 392 unit tests green, **four view mutations SURVIVED**: deleting

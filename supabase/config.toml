@@ -42,7 +42,16 @@ project_id = "bdsegmjcgfmgzuxwiplj"
 # a signed-in client, so the gateway flag now costs nothing and kills junk
 # traffic before it is a billable invocation.
 #
-# ⚠️ AND IT IS STILL `false` ON THE LIVE DEPLOYMENT until the function is
-# redeployed. Removing a block from this file changes nothing by itself: only the
-# CLI reads it, and this project deploys through the Supabase MCP, which takes
-# verify_jwt as an explicit parameter. Deploy with verify_jwt: true.
+# ✅ AND IT IS `true` ON THE LIVE DEPLOYMENT AS OF 2026-10-14, when
+# functions-deploy.yml gained notify-enhancement as a second matrix row and
+# deployed it from the runner's checkout. Because there is no block here, the CLI
+# applied the default — which is the whole mechanism, and the only reason this
+# file's absence of a block is load-bearing rather than tidiness.
+#
+# ⚠️ IT WAS `false` UNTIL THEN, AND REMOVING THE BLOCK IS NOT WHAT CHANGED IT.
+# Measured 2026-10-14 before that deploy: ACTIVE, version 2, verify_jwt FALSE,
+# entrypoint under /tmp/user_fn_… — an old inline tool-call deploy. Only the CLI
+# reads this file, so a config edit alone can never move a live flag; it takes
+# effect on the next deploy THROUGH THE CLI. (The Supabase MCP's deploy tool,
+# which is how that version 2 got there, takes verify_jwt as an explicit
+# parameter and ignores this file entirely.)
