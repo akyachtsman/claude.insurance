@@ -741,7 +741,20 @@ profile**, never by listing a directory.
   re-measuring `GET /auth/v1/settings` is the way to confirm it when it is.
   Deliberately NOT reworded to match the current setting — the wording describes
   the intended state, and the config is what is wrong.
-- **Shared Supabase account (accepted trade-off, temporary):** this project (`insurance`, ref `bdsegmjcgfmgzuxwiplj`) and `apfp` (ref `qnjrwbgxywkdfbfuzwas`) share one Supabase account/org, and a Supabase PAT is account-wide — so the MCP credential can reach both. Accepted for now (both pre-production, same owner). **Before production: split into per-project Supabase accounts/orgs** so a leaked PAT can't cross projects.
+- **⚠️ Shared Supabase account — FOUR projects, not two, and the grant is ACCOUNT-level; the `postgres`/BYPASSRLS role is measured for `insurance` ONLY (2026-10-14).** This entry said "`insurance` and `apfp` share one account … so the MCP credential can reach both", which understated it on both counts.
+  **What a session's Supabase connection actually is:** NOT a personal access token — the Access Tokens page was EMPTY while all of this session's migrations and probes ran. It is the **Management API** (`application_name = 'mgmt-api'`), authorized by the account's OAuth grant to Claude, and it lands as `current_user = session_user = postgres`, `rolbypassrls = true`, `rolsuper = false`. That is why a session can apply migrations, read `auth.users`, and `set local role` to probe as any persona. Revoking it is done where it was granted (the Supabase ↔ Claude integration), not on the Access Tokens page.
+  **What it reaches** (`list_projects`, one org `akyachtsman`): `trading dashboard` (`kwugzhyfjevzwgplhtsd`), **`insurance`** (`bdsegmjcgfmgzuxwiplj`), `property dashboard` (`yucnxlimmrgzbqtdizle`), `apfp` (`qnjrwbgxywkdfbfuzwas`). Accepted for now (same owner).
+  ⚠️ **BE PRECISE ABOUT WHICH HALF OF THAT IS MEASURED — an earlier version of this bullet said the credential is `postgres` with BYPASSRLS "on all of them", and it measured one.** Found by Codex on #260, and it is this file's own overclaiming defect on a fifth surface. What the two calls establish, separately:
+
+  | claim | status |
+  |---|---|
+  | the SQL connection to **`insurance`** lands as `postgres`, `rolbypassrls = true`, `rolsuper = false`, `application_name = 'mgmt-api'` | **measured** |
+  | the grant is **account-level, not project-scoped** — so account-level tools enumerate all four | **measured** (`list_projects` returned four) |
+  | SQL execution against the other three is authorized, and lands as the same role | **NOT measured, and deliberately not measurable from here** |
+
+  The third row cannot be closed by this repo's sessions at all: the *Operating rule* below forbids touching those projects, so the only instrument that would settle it is the one thing a session must not do. Read the blast radius as "an account-level grant whose per-project SQL role is confirmed for `insurance`" — which is already enough reason for the split below, and is not the same sentence as "`postgres` on four projects".
+  ⚠️ List-level visibility is not permission to read. No byte was read from the other three.
+  **Before production: split into per-project Supabase accounts/orgs.** Note the deploy token created 2026-10-14 is the counter-example worth copying — scoped to one project and one capability (see *DEPLOY PROVENANCE*).
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
 ### Auth-gate readiness: proven, not windowed (wired 2026-10-06)
@@ -2671,10 +2684,133 @@ than insert-then-delete — which is what should have been done the first time.
 one throwaway probe row is outstanding and needs one line from the owner (see
 `migrations/20261013014854_enhancement_requests_insert_column_scope.sql`).
 
-### ⚠️ DEPLOY PROVENANCE — the live `help-ask` is NOT byte-equal to this repo (2026-10-13)
+### ✅ HOW TO READ THE EDGE FUNCTION LOGS FROM A SESSION (measured 2026-10-14)
 
-`help-ask` is deployed and working. **The deployed source is the repo's code with
-every comment block removed**, and that is a defect to close, not a style choice.
+This file tells a reader to "read the function logs — the `where` field names the
+stage" in four separate places and has never once said **how**, which on an
+HTTPS-egress-blocked session reads as advice for somebody else. It is doable, and
+these are the parts that are not guessable:
+
+- the tool is `mcp__Supabase__query_logs`, and it takes **ClickHouse SQL**, not a
+  service name. A `service:` parameter is rejected by its schema.
+- there is **one** table, `logs`, filtered by `source` — **not** `edge_logs` or
+  `function_logs` as tables. Querying those by name returns
+  `Table "edge_logs" does not exist.`, which reads like a permissions problem and
+  is a naming one.
+- the window **defaults to the last 24 hours and is capped at 24**, so anything
+  older is simply unreachable from here. Pass
+  `iso_timestamp_start`/`iso_timestamp_end` for a narrower one.
+- `select distinct source from logs` enumerates what this project has. Measured:
+  `edge_logs` (HTTP requests through the gateway), `function_logs` (an Edge
+  Function's own stdout/stderr **plus** platform `booted`/`shutdown`),
+  `function_edge_logs`, `postgres_logs`, `postgrest_logs`, `auth_logs`,
+  `auth_audit_logs`, `pgbouncer_logs`, `storage_logs`, `realtime_logs`.
+
+⚠️ **WHAT IT CANNOT SEE, which is the half that matters for `help-ask`:** a
+function's own PostgREST calls do **not** appear. Measured — the browser's
+`GET`/`PATCH` on `help_settings` are both in `edge_logs` with status codes, and
+the same function's `admin.from("help_settings")` read in the same minute is in
+no source at all; `postgrest_logs` carries only Warp idle-timeout noise, not
+request lines. So **the logs cannot tell you whether a server-side read
+succeeded** — only whether the handler chose to log about it. Do not reason from
+their silence without a positive control that the channel carries app lines at
+all; every `function_logs` row in the 2026-10-14 window was a platform message,
+so that control did not exist.
+
+What it *is* good for, and did settle on sight: `edge_logs` gives every
+`/functions/v1/help-ask` request with method and status, which dated the
+deployment and the asks exactly — `OPTIONS | 404` through 2026-10-13 18:13 (not
+yet deployed), first `OPTIONS | 200` at 23:31:47, four `POST | 200` between
+00:03 and 00:58 (**that is `qa-live`'s S10 on its four viewport projects — the
+"4 paid calls per Pages deploy" record, now observed rather than counted from
+`--list`**), one `POST | 401` at 01:57:02 (`functions-deploy.yml`'s smoke probe,
+behaving as designed), and the proving ask at 03:21:17.
+
+### ✅ DEPLOY PROVENANCE — CLOSED 2026-10-14, MEASURED · ⛔ BUT THE DEPLOY PATH IS BLOCKED (revoked token)
+
+**Read the two halves separately — they are not the same claim.** What is CLOSED
+is the *provenance* defect: the bytes now live match the repo, measured. What is
+**BLOCKED** is the *path*: `SUPABASE_ACCESS_TOKEN` holds a revoked value, so the
+next deploy fails. An earlier version of this heading said only "CLOSED", and a
+reader scanning headings would have taken the deployment path for healthy.
+
+⚠️ **This heading said "is NOT byte-equal" and that is no longer true.** Kept,
+heading and all, because the defect and the way it was closed are both worth
+reading — but a reader must not take the sections below as current.
+
+**Measured 2026-10-14 after the first run of `functions-deploy.yml`** (run
+`38498409976`, `workflow_dispatch`, all seven steps green), by fetching the
+deployed source and hashing it against the working tree at `86aae05`:
+
+| file | deployed sha256 | repo sha256 | match |
+|---|---|---|---|
+| `index.ts` | `091c9f3685791bc9…` | `091c9f3685791bc9…` | ✅ |
+| `handler.ts` | `171fed205113eb71…` | `171fed205113eb71…` | ✅ |
+| `prompt.ts` | `92f13c9868b5ada8…` | `92f13c9868b5ada8…` | ✅ |
+
+Function **version 2**, `verify_jwt: true`, and `entrypoint_path` reads
+`/home/runner/work/claude.insurance/…` — i.e. deployed from the RUNNER'S
+CHECKOUT, not retyped into a tool call. The comments are back: **1,027 comment
+lines** across the three modules (78 + 632 + 317) where the stripped copy had
+none. "Deployed == repo" now holds by construction rather than by anyone's care,
+which was the whole point.
+
+⛔ **AND THE TOKEN THAT DID IT NO LONGER EXISTS — SO THE DEPLOY PATH IS DOWN
+UNTIL THE OWNER REPLACES IT.** The owner rotated and then deleted both access
+tokens, so `SUPABASE_ACCESS_TOKEN` in GitHub holds a **revoked** value.
+
+⚠️ **THIS PARAGRAPH USED TO OPEN "Nothing is broken", AND THAT WAS THE WRONG
+READING** (Codex, #260). The already-deployed function is indeed live and
+unaffected — but the *path* is what this section exists to be about, and the path
+is broken in three ways worth naming rather than filing as a to-do:
+
+1. **Production cannot receive a fix.** Every push touching
+   `supabase/functions/help-ask/**`, `supabase/config.toml` or the workflow
+   itself passes the non-empty gate and then **fails at `supabase functions
+   deploy`**. An urgent change to `prompt.ts` — the module that defines what
+   client data crosses the Anthropic boundary — cannot reach production today.
+2. **It recreates the divergence this section declares closed.** "Deployed ==
+   repo" holds *by construction* only while the construction runs. With the
+   deploy failing, every merge to `main` widens the gap between the live function
+   and the repo again, which is precisely the defect the workflow was written to
+   end.
+3. **It fails loudly, which is the one piece of good news.** A red run is not the
+   FR-17 quiet notice: the failure is visible in Actions rather than
+   indistinguishable from a working deploy. That bounds the harm; it does not
+   remove it.
+
+⚠️ It will NOT fail at the `Require SUPABASE_ACCESS_TOKEN` gate, which only
+checks the secret is non-empty: a revoked token is non-empty. That is the
+`hasKeys` lesson on a third surface — **present is not valid**. Tightening that
+gate to prove the token *works* is not free either (it costs an API call per run
+and an auth probe is a credential the gate would then need), so the honest fix is
+the credential, not a cleverer gate.
+
+✅ **TO RESTORE — one owner action, two minutes:** a new Supabase access token
+(Expiry **Never**, Resource access **Project → `insurance`**, permissions
+**Edge Functions: Read-write** and nothing else — notably NOT Edge Function
+Secrets), pasted over the `SUPABASE_ACCESS_TOKEN` repository secret, then one
+`workflow_dispatch` of `functions-deploy.yml` to confirm green. Until that is
+done, treat **any** merged change under `supabase/functions/help-ask/` as *not in
+production*, whatever this file says about the code.
+
+⚠️ **A SUPABASE PAT IS NO LONGER NECESSARILY ACCOUNT-WIDE**, and this file and
+`functions-deploy.yml` both said it was. Measured in the dashboard 2026-10-14:
+token creation now offers **Resource access** (Project / Organization) and
+per-capability permissions. The token used here was scoped to the `insurance`
+project with **Edge Functions: read-write** and nothing else — notably NOT
+`Edge Function Secrets` (HIGH RISK), so a CI token cannot read
+`ANTHROPIC_API_KEY`, though code it deploys still runs with access to it. That
+weakens, but does not remove, the "split into per-project accounts" item under
+*Shared Supabase account*: the MCP credential is a separate path and is not a
+PAT (the token list was EMPTY before this one was created).
+⚠️ **Access cannot be changed after creation** — widening means a new token.
+
+---
+
+**What the defect was, and why it is kept below.** `help-ask` was deployed and
+working. **The deployed source was the repo's code with every comment block
+removed**, and that was a defect to close, not a style choice.
 
 **How it happened.** `mcp__Supabase__deploy_edge_function` takes file CONTENT
 inline — there is no path parameter — so deploying from a session means
@@ -2697,15 +2833,15 @@ reviewable, and nobody can diff live against `main`.
 | the function is ACTIVE, `verify_jwt: true` | **verified** (`get_edge_function`) |
 | stripping comments does not change behaviour | **verified** — 96 behavioural tests (`handler.test.mjs`, `prompt.node.test.mjs`) pass against a mechanically comment-stripped copy |
 | one real client ask returns a correct grounded answer | **verified** — owner-gate step 8 |
-| deployed bytes == repo bytes | **FALSE, and known to be false** |
+| deployed bytes == repo bytes | **was FALSE and known to be false; now TRUE, measured — see the top of this section** |
 | hand-stripped == mechanically-stripped, byte for byte | **not checked** |
 
 **The fix is `.github/workflows/functions-deploy.yml`**, added in the same change:
 it runs `supabase functions deploy help-ask` from the checkout, so the uploaded
 files are the repo's files and "deployed == repo" holds by construction instead
 of by anyone's care. It needs one repository secret, `SUPABASE_ACCESS_TOKEN`.
-Until that secret exists and one push to `main` has run it, the live function is
-still the stripped copy.
+✅ That secret was added and the workflow ran on 2026-10-14; the live function is
+no longer the stripped copy.
 ⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
 push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
 
@@ -2782,15 +2918,23 @@ me); newest > mine → skip with a notice; API failure → proceed with a warnin
 `workflow_dispatch` → exempt; and the two unreachable cases (newest < mine, no
 runs at all) proceed, correctly.
 
-⚠️ **AND THERE IS NOW A CHANGE WAITING ON IT.** `handler.ts` reads the broker's
-stored model tier from `help_settings` (2026-10-14). The LIVE function predates
-that, so it reads only `HELP_MODEL` — the Security page's switch stores a tier
-nothing consumes until `SUPABASE_ACCESS_TOKEN` exists and one push to `main` has
-run this workflow. Nothing breaks meanwhile (the row is simply unread, and the
-secret-or-default path is what shipped and works), and the control makes no claim
-that a save is in use — it points at the broker-only `.k-help__tier` readout as
-the only proof, which stays absent while the old deploy is live. That absence is
-the honest signal, not a bug.
+✅ **THE CHANGE THAT WAS WAITING ON IT HAS SHIPPED — and this paragraph claimed
+otherwise for a commit.** It read: *"The LIVE function predates that, so it reads
+only `HELP_MODEL` — the Security page's switch stores a tier nothing consumes
+until `SUPABASE_ACCESS_TOKEN` exists and one push to `main` has run this
+workflow … the broker-only `.k-help__tier` readout … stays absent while the old
+deploy is live."* True when written and false a few hours later, in the same
+session, which is the staleness this file keeps paying for.
+
+What settles it: the readout **is not absent**. `edge_logs` dates the deploy's
+own smoke probe to 01:57:02 and the proving ask to 03:21:17, and that ask
+returned a `.k-help__tier` line — a field the pre-change build has no code to
+send. So the live function is the post-change one and it does consult the row.
+⚠️ Note the narrower reading above: that proves the deployed build READS a tier
+and gates the field on role; it does not by itself prove the value came from the
+row rather than from `HELP_MODEL`. The paragraph's own standard — the readout is
+the only proof — was right about the instrument and too generous about what it
+measures.
 
 **The generalisable rule:** when a deploy path requires a human or a model to
 retype the artifact, the artifact will eventually differ from its source — and
@@ -2900,9 +3044,77 @@ an answer shown to a **broker** carries `.k-help__tier`, "Answered by Haiku."
 That field is gated server-side on the caller's own `profiles.role`, so it never
 reaches a client's payload; the view renders on PRESENCE, because a second role
 check there would read as though the field were client-safe and merely hidden.
-⚠️ **As of this writing the live function is still the pre-change deploy**, so
-the switch stores a tier nothing reads yet. It needs `SUPABASE_ACCESS_TOKEN` and
-one run of `functions-deploy.yml` — see *DEPLOY PROVENANCE* above.
+✅ **PROVEN END TO END ON THE LIVE SITE, 2026-10-14.** This read "the live
+function is still the pre-change deploy, so the switch stores a tier nothing
+reads yet" — true when written, false within the hour, which is exactly the
+staleness this file keeps paying for. What was actually done, in order, by the
+owner against production:
+
+1. Signed in as `broker@example.com` → the `.k-tier` card RENDERED (a client
+   never sees it), and its status read **"Opus is the stored tier."** — the value
+   READ BACK from `help_settings`, not a default, so `hs_broker_select` admitted
+   a real broker session.
+2. Clicked **Haiku** → **"Haiku is now the stored tier."** — so
+   `hs_broker_update` admitted the write, the `(model)` column grant allowed it,
+   and the CHECK accepted the value.
+3. Asked a question on `#/keep/help` → the answer ended **"Answered by Haiku."**
+
+Step 3 is the one that matters: that line is appended by the FUNCTION, gated on
+the caller's own `profiles.role`, and it is the only thing either half can show
+that the OTHER half produced. ⚠️ **Asking the model "which model are you using"
+does NOT prove it** — it was tried first, and the model correctly answered that
+the help guide does not say, because the corpus and the client's records are all
+it sees. A model cannot verify its own tier, and the readout is deliberately not
+something it can say.
+
+⚠️ **BUT STEP 3 DOES NOT PROVE THE FUNCTION READ THE *ROW*, AND THIS SAID IT
+DID.** Codex, #260. `storedModel()` falls back to `HELP_MODEL` by design, and the
+payload carries the **resolved** id without naming its source — so if that secret
+also held `claude-haiku-5-5`, a denied or failed settings read produces a
+byte-identical "Answered by Haiku." The three branches are observationally equal
+at the UI, which is FR-17's lesson arriving inside the proof written to escape
+it. What step 3 does establish, exactly:
+
+| claim | status |
+|---|---|
+| the deployed function is the post-change build (it reads a tier at all and gates the field on role) | **proven** — the pre-change deploy had no `model` field to send |
+| the resolved tier was `claude-haiku-5-5` | **proven** |
+| a broker sees the readout and a client does not | **proven** |
+| the resolved tier came from `help_settings` rather than from `HELP_MODEL` | **NOT proven** |
+
+Steps 1 and 2 cannot close the last row either: they are the **browser's** reads
+and writes (anon key + the broker's JWT, under `hs_broker_select` /
+`hs_broker_update`), while the function reads through its own `admin` client
+under the explicit `service_role` grant. Two different readers, two different
+grants — proving one says nothing about the other, which is the whole reason that
+grant is called out as load-bearing.
+
+**What the logs could and could not settle** (measured from a session 2026-10-14,
+and the *method* is the keeper — see the box below):
+
+| evidence | reading |
+|---|---|
+| `PATCH /rest/v1/help_settings?id=eq.true` → **200** at 03:20:45.226 | the broker's write landed |
+| `POST /functions/v1/help-ask` → **200** at 03:21:17.908 | the proving ask, 32s later |
+| **no `{"where":"settings"}` line** in `function_logs` anywhere in 24h | *suggestive only* — see the limit below |
+
+⚠️ That last row is **not** treated as proof, and the reason is the positive
+control: `storedModel()` logs only on FAILURE, so its silence is informative only
+if that channel is known to carry the function's `console.error` at all — and
+every `function_logs` row in the window is a platform `booted`/`shutdown`
+message, so **nothing establishes the channel works**. Absence of a log line is
+exactly the kind of evidence this repo has already been burned by (the auth-gate
+window, the "no webkit in the image" directory listing). It is recorded as
+suggestive and nothing more.
+
+✅ **THE TEST THAT WOULD DECIDE IT, and it is cheap:** set the stored tier to
+**Sonnet** — a value that is neither the default (`claude-opus-5-5`) nor the one
+already observed (`claude-haiku-5-5`) — and ask once as a broker. "Answered by
+Sonnet." cannot come from the fallback chain unless `HELP_MODEL` is *also*
+sonnet, and the fallback cannot produce a value nobody configured. It costs one
+paid ask and two clicks. Until it is run, the last row above stays open; what is
+NOT in doubt is that the switch is reaching a post-change deploy, so nothing here
+blocks the feature.
 
 **An unrecognised stored value falls back to the default and logs
 `where: "model", source: "settings"`.** The CHECK constraint makes that
@@ -3274,3 +3486,40 @@ Agents write evidence to `.agent-reports/`:
 2. Verify the directives-toolkit plugin attached (commands/agents resolve) per global.md → Skill Bootstrap
 3. Confirm active branch: `git branch --show-current`
 4. Run `/env-chk` and report status
+5. **MEASURE WHAT THIS SESSION'S OWN CREDENTIALS CAN REACH, before touching the
+   database.** Two calls, and they take seconds:
+
+   ```
+   mcp__Supabase__execute_sql(bdsegmjcgfmgzuxwiplj):
+     select current_user, session_user,
+            (select rolsuper      from pg_roles where rolname = session_user) as is_superuser,
+            (select rolbypassrls  from pg_roles where rolname = session_user) as bypasses_rls,
+            (select application_name from pg_stat_activity where pid = pg_backend_pid()) as app_name;
+
+   mcp__Supabase__list_projects   -- how many projects the credential reaches
+   ```
+
+   **Expected, as of 2026-10-14:** `postgres` / `postgres`, `is_superuser` false,
+   `bypasses_rls` **true**, `app_name` `mgmt-api`, and **four** projects
+   (`trading dashboard`, `insurance`, `property dashboard`, `apfp`). Anything
+   narrower is good news and should be recorded; anything **wider** — a superuser
+   role, a fifth project, a different `app_name` — is a finding to report before
+   doing any work.
+
+   ⚠️ **THIS STEP EXISTS BECAUSE IT WAS SKIPPED FOR AN ENTIRE SESSION AND THE
+   OWNER HAD TO ASK.** On 2026-10-13/14 a session applied migrations, revoked
+   grants, read `auth.users` and probed RLS as three personas on the live project
+   — and in the same session wrote a careful security comment in
+   `functions-deploy.yml` about how broad a Supabase credential can be, while
+   never once measuring its own. It then walked the owner through scoping a CI
+   token down to one project and one capability, which made the disproportion
+   exact: fastidious about a credential that can deploy a function, incurious
+   about the one rewriting the database.
+   The failure was not difficulty — it is two calls — it was **never asking**.
+   This file's whole method is "measure, do not assume"; the thing most easily
+   exempted from it is the hand holding the instrument.
+
+   ⚠️ **Knowing the reach is not permission to use it.** The *Operating rule* in
+   the security constraints still binds: from this repo, only ever touch
+   `insurance`. `list_projects` is an account-level call that names the others;
+   reading from them is out of scope regardless of what the credential permits.
