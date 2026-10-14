@@ -386,13 +386,152 @@ test("a provider HTTP error refunds the reservation; a connection error does not
   assert.equal(conn.rows('help_queries').length, 1, "a timeout released the slot, but billing was unknown");
 });
 
-test("a billed non-answer keeps the reservation", async () => {
-  for (const res of [{ stop_reason: "max_tokens", content: [{ type: "text", text: "half an ans" }] },
-                     { stop_reason: "end_turn", content: [] }]) {
-    const t = deps({ anthropic: { messages: { create: async () => res } } });
-    assert.equal((await (await ask(t.d)).json()).reason, "incomplete");
-    assert.equal(t.rows('help_queries').length, 1, "output was generated and billed, but the slot was refunded");
+// ─────────────────────────────────────────────────────────────────────────────
+// A BILLED NON-ANSWER MUST BE FINDABLE, not just correct.
+//
+// ⚠️ These three exits were COMPLETELY SILENT until 2026-10-14. `unavailable()`
+// carries no `console.error`, so unlike the provider-error path (`where:
+// "provider"`) they left no log line anywhere — and they return HTTP 200 with
+// the reservation kept, exactly like a success. So in `edge_logs` /
+// `function_edge_logs` a billed call that produced no answer was
+// INDISTINGUISHABLE from one that did: same 201 reservation, same absent
+// DELETE, same fast 200. S10 does not separate them either; it accepts an
+// answer or the notice by design.
+//
+// That is how a quietly degrading desk would have stayed invisible: every ask
+// billed, nobody answered, and no signal anywhere to find it by. Found while
+// correcting a CLAUDE.md claim that read a kept reservation as proof of an
+// answer (Codex #264).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The three billed non-answers, their provider response, and what each must say.
+// ⚠️ `trailer_only` is the one the old test did not cover at all.
+const BILLED_NON_ANSWERS = [
+  {
+    name: "a max_tokens cut",
+    res: { stop_reason: "max_tokens", content: [{ type: "text", text: "half an ans" }], usage: { output_tokens: 8192 } },
+    stage: "stop_reason",
+    expect: { stopReason: "max_tokens", outputTokens: 8192, maxTokens: 8192 },
+  },
+  {
+    name: "a refusal",
+    res: { stop_reason: "refusal", content: [], usage: { output_tokens: 12 } },
+    stage: "stop_reason",
+    expect: { stopReason: "refusal", outputTokens: 12, maxTokens: 8192 },
+  },
+  {
+    name: "no text blocks (thinking only)",
+    // ⚠️ THE THINKING BLOCK CARRIES THE SENTINELS ON PURPOSE, and an earlier
+    // version read "mulling it over" — which made a whole class of mutation
+    // INERT. A thinking block's content lives in `.thinking`, not `.text`, so
+    // `blocks.map((b) => b.text ?? b.type)` silently fell through to the type
+    // name and the privacy test passed against code that was trying to log block
+    // content. Model reasoning is the realistic leak here: it restates the
+    // client's question and quotes their records back. CLAUDE.md, "four ways a
+    // mutation test lies" #4 — a mutation can apply cleanly and still encode a
+    // state the fixture cannot reach.
+    res: { stop_reason: "end_turn", content: [
+      { type: "thinking", thinking: "The client asked: Where are my policies? Their Harbour House home policy HO-1 with Acme renews 2027-03-12, Dwelling $400,000, value 900000." },
+      // A text block whose text is EMPTY — so `answer` is still falsy and this
+      // path is still the one under test, while `b.text` is "" rather than
+      // undefined. That is what stops `b.text ?? b.type` looking harmless.
+      { type: "text", text: "   " },
+    ] },
+    stage: "no_text",
+    expect: { stopReason: "end_turn", blockTypes: ["thinking", "text"] },
+  },
+  {
+    name: "a trailer and nothing else",
+    res: { stop_reason: "end_turn", content: [{ type: "text", text: "[[SOURCES]] insurance" }] },
+    stage: "trailer_only",
+    expect: { rawLength: "[[SOURCES]] insurance".length },
+  },
+];
+
+const answerLogs = (lines) => lines
+  .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+  .filter((o) => o && o.where === "answer");
+
+test("a billed non-answer keeps the reservation AND names its stage in the log", async () => {
+  for (const c of BILLED_NON_ANSWERS) {
+    const t = deps({ anthropic: { messages: { create: async () => c.res } } });
+    const [res, lines] = await capturingConsoleError(() => ask(t.d));
+    assert.equal((await res.json()).reason, "incomplete", c.name);
+    assert.equal(t.rows("help_queries").length, 1,
+      `${c.name}: output was generated and billed, but the slot was refunded`);
+
+    const hit = answerLogs(lines);
+    assert.equal(hit.length, 1, `${c.name}: expected exactly one where:answer line, got ${hit.length}`);
+    assert.equal(hit[0].stage, c.stage, `${c.name}: wrong stage`);
+    for (const [k, v] of Object.entries(c.expect)) {
+      assert.deepEqual(hit[0][k], v, `${c.name}: ${k} should be ${JSON.stringify(v)}`);
+    }
   }
+});
+
+// ⚠️ THE PRIVACY HALF, and it is the reason this is a structural check rather
+// than a needle hunt. These lines are emitted from inside the safety boundary,
+// so a future field added "to help debug" is a disclosure: the function's own
+// log is the one place a question or a record value could leak without any
+// client ever seeing it. So the assertion is an ALLOW-LIST of keys plus a type
+// check on every value — a new field fails this test by construction, which is
+// what a needle list for today's fixture could never do.
+const ANSWER_LOG_KEYS = {
+  stop_reason: { where: "s", stage: "s", stopReason: "s?", outputTokens: "n?", maxTokens: "n" },
+  no_text: { where: "s", stage: "s", stopReason: "s?", blockTypes: "a" },
+  trailer_only: { where: "s", stage: "s", rawLength: "n" },
+};
+
+test("a billed non-answer logs a CAUSE, never content", async () => {
+  // Sentinels from the seeded fixture: the question the caller typed, and record
+  // values that DO legitimately reach the prompt — so finding one here would be
+  // a leak out of the boundary rather than a harmless echo.
+  const QUESTION = "Where are my policies?";
+  const RECORD_SENTINELS = ["Harbour House", "900000", "HO-1", "$400,000", "Acme", "2027-03-12"];
+
+  for (const c of BILLED_NON_ANSWERS) {
+    const t = deps({ anthropic: { messages: { create: async () => c.res } } });
+    const [, lines] = await capturingConsoleError(() => ask(t.d, { question: QUESTION }));
+
+    for (const line of lines) {
+      assert.ok(!line.includes(QUESTION), `${c.name}: the question text reached a log line`);
+      for (const needle of RECORD_SENTINELS) {
+        assert.ok(!line.includes(needle), `${c.name}: record value ${JSON.stringify(needle)} reached a log line`);
+      }
+    }
+
+    const o = answerLogs(lines)[0];
+    const allowed = ANSWER_LOG_KEYS[c.stage];
+    assert.deepEqual(Object.keys(o).sort(), Object.keys(allowed).sort(),
+      `${c.name}: the where:answer line's keys are not exactly the allow-list — a new field here is a disclosure`);
+    for (const [k, kind] of Object.entries(allowed)) {
+      const v = o[k];
+      if (kind === "s") assert.equal(typeof v, "string", `${c.name}: ${k} should be a string`);
+      if (kind === "s?") assert.ok(v === null || typeof v === "string", `${c.name}: ${k} should be a string or null`);
+      if (kind === "n") assert.equal(typeof v, "number", `${c.name}: ${k} should be a number`);
+      if (kind === "n?") assert.ok(v === null || typeof v === "number", `${c.name}: ${k} should be a number or null`);
+      if (kind === "a") {
+        assert.ok(Array.isArray(v) && v.every((x) => typeof x === "string"),
+          `${c.name}: ${k} should be an array of strings — block TYPE names, never block text`);
+      }
+    }
+  }
+});
+
+// ⚠️ ONE SOURCE for the ceiling. The log reports a cut against `maxTokens`, so a
+// literal at the call site could drift from the number the log claims and send a
+// reader hunting a cliff that is not there.
+test("max_tokens at the call site is MAX_TOKENS, not a literal", async () => {
+  let args = null;
+  const { d } = deps({ anthropic: { messages: { create: async (a) => { args = a; return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; } } } });
+  await ask(d);
+  assert.equal(args.max_tokens, 8192, "the provider call no longer sends 8192");
+
+  const src = readFileSync(new URL("./handler.ts", import.meta.url), "utf8");
+  assert.ok(/max_tokens:\s*MAX_TOKENS\b/.test(src),
+    "the call site passes a literal — the where:answer log's maxTokens can then disagree with it");
+  assert.ok(/maxTokens:\s*MAX_TOKENS\b/.test(src),
+    "the log reports a literal ceiling rather than the one actually sent");
 });
 
 test("a failure before the provider call always refunds", async () => {

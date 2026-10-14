@@ -245,12 +245,29 @@ test("past the model call, ONLY a provider HTTP error releases the reservation",
   assert.ok(/status[\s\S]{0,200}typeof status === "number"/.test(guard),
     "the post-call release is not guarded by a provider HTTP status — a billed failure would refund quota");
 
-  // The three BILLED outcomes must each still return without releasing.
-  for (const path of [/stop_reason[\s\S]{0,120}?return (\w+)\("incomplete"/,
-                      /if \(!answer\) return (\w+)\("incomplete"/,
-                      /if \(!split\.answer\) return (\w+)\("incomplete"/]) {
-    const m = path.exec(after);
-    assert.ok(m, `could not locate a billed-outcome exit (${path}) — did the parse break?`);
+  // The BILLED outcomes must each still return without releasing.
+  //
+  // ⚠️ INVERTED, after this loop failed on a change that only ADDED A LOG LINE.
+  // It used to carry one regex per exit, each pinned to that exit's exact
+  // surrounding syntax (`/stop_reason[\s\S]{0,120}?return .../`, `/if \(!answer\)
+  // return .../`). Inserting a `console.error` between `stop_reason` and its
+  // `return` pushed the window past 120 chars and turned the two one-liners into
+  // blocks, so all three patterns missed and the test failed closed — correctly,
+  // but on a change that broke nothing.
+  //
+  // The brittleness ran the other way too, and that is the real reason for the
+  // rewrite: a per-exit pattern list cannot see an exit nobody wrote a pattern
+  // for, so a FOURTH billed outcome added later would have been silently
+  // unchecked — the enumeration failure this repo has now hit on
+  // `privilege.test.mjs`, `BACK_ELIGIBLE` and `check-keep-back-routes.js`.
+  // So: find EVERY `"incomplete"` return past the call and check all of them.
+  const incompletes = [...after.matchAll(/return (\w+)\("incomplete"\)/g)];
+  assert.equal(incompletes.length, 3,
+    `expected 3 billed-outcome exits past the provider call, found ${incompletes.length}. ` +
+    "If a path was ADDED, confirm it keeps the reservation (output was generated, " +
+    "so it is billed) and raise this count deliberately. If one VANISHED, a billed " +
+    "non-answer is now rendering as something other than the quiet notice.");
+  for (const m of incompletes) {
     assert.equal(m[1], "unavailable",
       `a billed outcome returns via ${m[1]}(...) — output was generated, so the reservation must stand`);
   }
