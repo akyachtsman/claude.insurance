@@ -2786,6 +2786,38 @@ gate to prove the token *works* is not free either (it costs an API call per run
 and an auth probe is a credential the gate would then need), so the honest fix is
 the credential, not a cleverer gate.
 
+✅ **AND IT IS NO LONGER A PREDICTION — MEASURED ON THE VERY NEXT MERGE, 2026-10-14.**
+Run `38508387852` on `8e03068`, which is the merge of the commit that wrote the
+paragraph above. The step ladder is exactly the shape predicted, which is what
+makes it worth recording rather than just red:
+
+| step | result |
+|---|---|
+| 3. Is a newer deploy run already queued? | success |
+| 4. **Require SUPABASE_ACCESS_TOKEN** | **success** — the revoked token passes the non-empty gate, as predicted |
+| 5. setup-cli | success |
+| 6. **Deploy help-ask** | **failure**, exit 1 |
+| 7. Smoke — the worker boots, and the gateway gates it | skipped, correctly (gated on the deploy) |
+
+**The attribution is sound rather than assumed**, because the comparison is
+controlled: run `38498409976` on `86aae05` was **green** at 01:56:37Z, and the
+only change to this workflow between the two is **19 added and 6 removed COMMENT
+lines** (`git diff 86aae05 origin/main -- .github/workflows/functions-deploy.yml`).
+Same executable code, same step, token revoked in between. ⚠️ The raw job log is
+not readable from a session — the logs endpoint redirects to blob storage this
+`gh` will not follow — so the diagnosis rests on the step ladder plus that
+controlled diff, not on the CLI's error text.
+
+⚠️ **AND IT FIRED ON A COMMENT-ONLY EDIT, which the path filter's own comment
+says it is trying to avoid** (*"A README or CLAUDE.md edit must not redeploy a
+live endpoint"*). The merge touched only `CLAUDE.md` and this workflow's header
+comments — but the workflow is in its **own** path filter, and a path filter
+cannot tell a comment from logic. Deliberately not changed: firing is the SAFE
+direction (with a working token it would have redeployed identical bytes and kept
+"deployed == repo" true), and the alternative — dropping the workflow from its
+own filter — means a real change to the deploy logic does not re-run the deploy.
+Expect a deploy run on any edit to this file, comments included.
+
 ✅ **TO RESTORE — one owner action, two minutes:** a new Supabase access token
 (Expiry **Never**, Resource access **Project → `insurance`**, permissions
 **Edge Functions: Read-write** and nothing else — notably NOT Edge Function
