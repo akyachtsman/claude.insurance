@@ -4394,24 +4394,61 @@ test('S27: every answer names the model, folded into the AI-generated disclosure
 // so its `.k-imuted` line has always been blank; nothing asserts on it, which is
 // why nobody noticed. Take fixture field names from the TABLE, not from the
 // nested shape the views consume.
+// ⚠️ DATES ARE RELATIVE TO THE RUN, NOT LITERALS. The first version hard-coded
+// 2027-03-12 and 2027-09-30: from March 2027 the control would have stopped
+// reading "Active · renews" and failed on every viewport with the behaviour
+// under test unchanged, and from September 2027 the cancelled policy would have
+// had a PAST renewal date — at which point the date logic alone renders
+// "Expired" and the scenario silently stops exercising the bug it exists for.
+// The second is the worse half: a test that expires loudly gets fixed, one that
+// quietly stops testing anything does not. Found by review, 2026-10-14.
+const dayOffset = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const S28_POLICIES = [
   // In force: the control. If this one stops reading "Active", the fix has
   // over-reached and every policy now looks broken.
   { id: 'p-ok', asset_id: 'a1', line: 'Home', carrier: 'Acme', number: 'HO-1',
-    status: 'active', effective_date: '2026-01-01', renewal_date: '2027-03-12' },
-  // CANCELLED, with a renewal date a year out. Date logic alone says "Active".
+    status: 'active', effective_date: dayOffset(-300), renewal_date: dayOffset(300) },
+  // CANCELLED, with a renewal date well in the future. Date logic alone says
+  // "Active", which is exactly the regression.
   { id: 'p-cx', asset_id: 'a1', line: 'Windstorm', carrier: 'Gulfstream', number: 'WS-9',
-    status: 'cancelled', effective_date: '2026-01-01', renewal_date: '2027-09-30' },
+    status: 'cancelled', effective_date: dayOffset(-300), renewal_date: dayOffset(300) },
   // Status never recorded — nullable, no default, no CHECK (measured on the live
   // table 2026-10-14), so this is a real row and not a defensive branch.
   { id: 'p-ns', asset_id: 'a1', line: 'Flood (NFIP)', carrier: 'NFIP', number: 'FL-3',
-    status: null, effective_date: '2026-01-01', renewal_date: '2027-06-30' },
+    status: null, effective_date: dayOffset(-300), renewal_date: dayOffset(200) },
+  // A status that is NOT affirmative and NOT terminal. It must be shown
+  // verbatim and NEUTRALLY — never styled as ended cover, which is what the
+  // first version of this fix did to every non-`active` value.
+  { id: 'p-un', asset_id: 'a1', line: 'Umbrella', carrier: 'Acme', number: 'UM-7',
+    status: 'pending', effective_date: dayOffset(-300), renewal_date: dayOffset(250) },
 ];
 
 test('S28: a cancelled policy is never shown as active', async ({ page, renderWitness }) => {
   renderWitness();
   const pageErrors = [];
   page.on('pageerror', e => pageErrors.push(e.message));
+
+  // ── THE SCENARIO'S OWN PRECONDITION, asserted rather than assumed.
+  //
+  // The whole point is a cancelled policy WHOSE RENEWAL DATE HAS NOT PASSED:
+  // with a past one the date logic alone renders "Expired", the landing
+  // `lapsed` counter reaches 1 by the old date-only route, and every assertion
+  // below still passes against the unfixed code. `dayOffset` keeps that true
+  // forever, but an edit back to a literal would quietly DISARM the scenario
+  // rather than break it — so this says so by name.
+  //
+  // ⚠️ Checked on the FIXTURE's own date rather than on the adapted
+  // `renewalInDays`, deliberately: it fails before any browser work, with a
+  // message naming the cause, and `daysFromToday` is a pure function of exactly
+  // this value. The reviewer asked for the adapted field; this is the same
+  // claim, taken one step earlier and more cheaply.
+  const future = (d) => new Date(`${d}T00:00:00Z`).getTime() > Date.now();
+  for (const id of ['p-cx', 'p-ok']) {
+    const row = S28_POLICIES.find((x) => x.id === id);
+    expect(future(row.renewal_date),
+      `S28 is disarmed: ${id}'s renewal_date ${row.renewal_date} is in the past, so the date logic alone decides the badge and this scenario no longer tests the status rule`).toBe(true);
+  }
 
   await seedKeepSession(page, 'a', { policies: S28_POLICIES });
   await page.goto('./#/keep/insurance');
@@ -4439,6 +4476,20 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
   // is still telling the client they have cover they do not have.
   const activeTile = page.locator('.k-stat').filter({ hasText: 'Active' }).first();
   await expect(activeTile.locator('.k-stat__v'), 'the Active tile counts policies that are not in force').toHaveText('1');
+  // ⚠️ AND ITS SUBTITLE MUST NOT CALL A DATED POLICY UNDATED. The first version
+  // folded every not-in-force kind into `undated`, which this tile renders
+  // literally — so a cancelled policy with a perfectly good renewal date was
+  // reported as having no date on file. One false summary for another.
+  await expect(activeTile.locator('.k-stat__s'), 'a dated policy is being reported as undated')
+    .not.toHaveText(/undated/);
+  await expect(activeTile.locator('.k-stat__s')).toHaveText(/needs attention/);
+
+  // ── A NON-TERMINAL, UNRECOGNISED STATUS IS NEUTRAL, NOT "ENDED". Verbatim
+  // text either way; only the alarm treatment differs.
+  const un = rowFor('UM-7').locator('.k-exp');
+  await expect(un).toHaveText(/Pending/);
+  await expect(un, 'a merely unrecognised status is styled as ended cover')
+    .not.toHaveClass(/k-exp--exp/);
 
   // ── THE DETAIL PAGE IS A SECOND READER with its OWN copy of the label, in
   // `policies-view.js`. Note its heading is `.k-phead__t h1`, NOT `.k-h1` — the
@@ -4477,6 +4528,23 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
   // The card's own treatment, which is a second thing that call site decides.
   await expect(card).toHaveClass(/lapsed/);
   await expect(page.locator('.k-pcard').filter({ hasText: 'Home' }).locator('.k-exp')).toHaveText(/Active · renews/);
+
+  // ── THE LANDING PAGE IS THE FIFTH AND SIXTH READER, and the badge fix missed
+  // BOTH — so a policy reading "Cancelled" on three other screens was still
+  // counted under "Active policies" here. Found by review on the commit that
+  // fixed the other four, which is why this block exists at all.
+  //
+  // `lapsed` was the worse of the two: it tested `p.renewalInDays < 0` directly
+  // and never consulted `status`, so a cancelled policy with a future renewal
+  // date was neither counted as active-correct nor as lapsed — it simply
+  // vanished from both numbers.
+  await page.goto('./#/keep');
+  await expect(page.locator('.k-welcome__h')).toBeVisible({ timeout: 15_000 });
+  const tile = (label) => page.locator('.k-stat').filter({ hasText: label }).first().locator('.k-stat__v');
+  await expect(tile('Active policies'), 'the home page counts policies that are not in force')
+    .toHaveText('1');
+  await expect(tile('Lapsed'), 'a cancelled policy with a future renewal date is in neither count')
+    .toHaveText('1');
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

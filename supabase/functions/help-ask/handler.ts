@@ -493,25 +493,40 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // INVITE CHECK, before anything billable and before the throttle row.
   //
   // HOURLY_CAP is keyed on `owner`, so it is a per-ACCOUNT cap — and it is only a
-  // per-PERSON cap if accounts cannot be freely created. On 2026-10-06 the live
-  // project answered `disable_signup: false`: public sign-up is ON, so an
-  // outsider can confirm a plus-addressed mailbox, sign in, and collect their own
-  // 20 paid asks an hour. About twenty such accounts exhaust DAILY_TOTAL_CAP and
-  // the desk is refused to every real client for a day.
+  // per-PERSON cap if accounts cannot be freely created.
   //
-  // ⚠️ THIS CHECK ONLY HOLDS ONCE `supabase/proposed/20261006_profiles_no_client_insert.sql`
-  // IS APPLIED, and the first version of this comment claimed otherwise.
-  // `authenticated` currently holds INSERT on `public.profiles` with a
+  // ⚠️ THE TWO PARAGRAPHS BELOW ARE HISTORY. Both halves are now closed, and the
+  // text is kept because the SHAPE of the hole is why this check exists at all.
+  //   · 2026-10-09 — `revoke insert on public.profiles from authenticated` is
+  //     live (`migrations/20261005120100_profiles_role_not_self_assignable.sql`).
+  //     Measured as a client session: `insert into profiles` → 403 / 42501. So
+  //     this check is a BOUNDARY now, not defence in depth.
+  //   · 2026-10-14 — public sign-up is OFF. `GET /auth/v1/settings` returns
+  //     `disable_signup: true`, `external.email: true`,
+  //     `external.anonymous_users: false`.
+  // ⚠️ The second is a project SETTING, not schema: no migration, policy or test
+  // in this repo can see it, and nothing here goes red if it is switched back on.
+  // The first is what makes this check hold REGARDLESS — which is the whole
+  // reason it was done as a privilege rather than a config change.
+  //
+  // WAS (2026-10-06): the live project answered `disable_signup: false`: public
+  // sign-up is ON, so an outsider can confirm a plus-addressed mailbox, sign in,
+  // and collect their own 20 paid asks an hour. About twenty such accounts
+  // exhaust DAILY_TOTAL_CAP and the desk is refused to every real client for a
+  // day.
+  //
+  // WAS: ⚠️ THIS CHECK ONLY HOLDS ONCE
+  // `supabase/proposed/20261006_profiles_no_client_insert.sql` IS APPLIED, and
+  // the first version of this comment claimed otherwise. `authenticated`
+  // currently holds INSERT on `public.profiles` with a
   // `with check (id = auth.uid())` policy, so a self-signed-up caller can create
   // the very row this reads — gating on a row the client can write is not a gate.
   // Measured on the live project; found by a security review of the commit that
   // added the check. That migration revokes the grant and drops the policy, which
   // is safe because nothing in `js/` inserts a profile and no trigger creates one
-  // (verified both). Until it is applied this is defence in depth and not a
-  // boundary, which is why the migration is part of the same owner gate.
-  //
-  // Turning sign-up off in the dashboard is the other half and is the owner's to
-  // do; this half then holds even if it is ever turned back on.
+  // (verified both). ⚠️ The REVOKE shipped in `20261005120100` instead, which
+  // carries the identical statement — so the pointer above was stale as well as
+  // the state.
   //
   // Returns the generic notice rather than a new reason: a stranger is owed
   // nothing more specific, and FR-17 means the client never sees a cause anyway.

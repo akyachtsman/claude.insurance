@@ -16,8 +16,40 @@ export const REMINDER_SCHEDULE = [60, 30, 14, 7, 1];
 // reason: a status nobody recognises is exactly what somebody needs to see.
 const IN_FORCE_STATUS = new Set(["active"]);
 
+// Statuses we are confident mean COVER HAS ENDED. Used for the alarm treatment
+// (red badge, `lapsed` card class) and nothing else — never to decide whether a
+// policy is in force, which `IN_FORCE_STATUS` alone decides.
+//
+// ⚠️ ADDED 2026-10-14 ON A REVIEW FINDING, and the finding is the useful part.
+// The first version had ONE non-affirmative kind, `ended`, and gave it the red
+// treatment. Since the column is unconstrained, that classified `pending`,
+// `quoted`, `bound` and `pending-cancel` as ended cover — so the app invented a
+// terminal state in the very place `statusText` claims it "does not own this
+// vocabulary". The comment overclaimed relative to the code, which is this
+// repo's signature defect, and I had talked myself into it explicitly ("fail
+// loud in the direction of check this").
+//
+// **Why a list here is not the guessing `statusText` refuses.** Being wrong in
+// THIS list costs a NEUTRAL badge on a policy that has ended — and the badge
+// still reads the broker's own word, so the client is told "Rescinded" either
+// way. Being wrong the old way cost a RED, lapsed-styled badge on a policy that
+// is merely pending. One failure direction is cosmetic, the other is a false
+// alarm about someone's cover. The list only ever moves a status from neutral to
+// loud; it can never make a non-active policy read as active.
+const ENDED_STATUS = new Set([
+  "cancelled", "canceled", "lapsed", "expired", "void", "voided",
+  "terminated", "non-renewed", "nonrenewed", "non renewed", "rescinded",
+]);
+
+const normStatus = (status) =>
+  typeof status === "string" ? status.trim().toLowerCase() : "";
+
 export function statusIsAffirmative(status) {
-  return typeof status === "string" && IN_FORCE_STATUS.has(status.trim().toLowerCase());
+  return IN_FORCE_STATUS.has(normStatus(status));
+}
+
+export function statusIsEnded(status) {
+  return ENDED_STATUS.has(normStatus(status));
 }
 
 // A non-affirmative status, shown to the client VERBATIM apart from an initial
@@ -60,15 +92,23 @@ export function statusText(status) {
 // Status must come first, or a cancelled policy with no renewal date on file
 // would report "Renewal date not on file" instead of "Cancelled".
 //
-// Kinds: "nostatus" · "ended" · "pending" · null (no renewal date) · "exp" ·
-// "warn" · "ok". Only "ok" and "warn" mean in force.
+// Kinds: "nostatus" · "ended" · "unknown" · "pending" · null (no renewal date) ·
+// "exp" · "warn" · "ok". Only "ok" and "warn" mean in force.
+//
+// ⚠️ `ended` AND `unknown` ARE BOTH "NOT ACTIVE" AND THEY ARE NOT THE SAME
+// THING. `ended` is a status this app recognises as terminal and styles loudly;
+// `unknown` is any other non-affirmative value, shown verbatim and NEUTRALLY,
+// because the app cannot tell a dead policy from one that has not been bound
+// yet. Collapsing them is what the first version did, and it invented a
+// terminal state for `pending`.
 export function policyKind(policy) {
   const p = policy || {};
   // Absent status is NOT a fall-through to the dates. The prompt's comment says
   // why: `status` is nullable, so "no status, cover started in the past" is a
   // real row, and a cancelled policy with no status would read as active.
   if (p.status == null || String(p.status).trim() === "") return "nostatus";
-  if (!statusIsAffirmative(p.status)) return "ended";
+  if (statusIsEnded(p.status)) return "ended";
+  if (!statusIsAffirmative(p.status)) return "unknown";
   // Cover has not begun. `effectiveInDays` is nullable too; absent means the
   // start is unrecorded, which is not evidence that cover is pending.
   if (p.effectiveInDays != null && p.effectiveInDays > 0) return "pending";
@@ -217,22 +257,48 @@ export function reminderInfo(renewalInDays, schedule = REMINDER_SCHEDULE) {
 // provably in force nor provably urgent, so it is surfaced on its own and the
 // view labels it — absent data reported as absent, not guessed either way.
 // ⚠️ TAKES POLICIES, NOT A LIST OF DAYS, since policyKind does. Passing
-// `rows.map((r) => r.policy.renewalInDays)` here now yields `undated` for every
+// `rows.map((r) => r.policy.renewalInDays)` here now yields `unclear` for every
 // row (a bare number has no `.status`), which is loud rather than silent — the
 // deliberate direction for a signature change nothing else can catch.
 //
-// `undated` keeps its name and now covers every policy that is not PROVABLY in
-// force or in trouble: no renewal date, no status, a status we do not recognise,
-// or cover that has not started. All four are "absent or unclear data reported
-// as such, never guessed into one of the other two counts", which is the rule
-// this function was extracted to make testable in the first place.
+// ⚠️ `undated` MEANS WHAT ITS NAME SAYS AGAIN. The first version of this change
+// folded `nostatus`, `unknown`, `ended` and `pending` into it, on the reasoning
+// that all of them are "not provably in force". But the Policies view renders
+// the number LITERALLY — "N undated" — so a cancelled policy with a perfectly
+// good renewal date was reported to the client as having no date on file. That
+// replaced one false summary with another, which is the thing this whole change
+// set out to stop. Found by review, 2026-10-14.
+//
+// Five buckets, each meaning exactly one thing, and every kind lands in one:
+//   active    ok | warn       — in force ("warn" = expiring soon, still in force)
+//   attention exp | warn |    — a deadline passed or imminent, or cover has ended
+//             ended
+//   undated   null            — NO RENEWAL DATE ON FILE, and nothing else
+//   unclear   nostatus |      — the records do not say whether this is in force
+//             unknown
+//   pending   pending         — cover has not started yet
 export function renewalCounts(policies) {
-  const out = { active: 0, attention: 0, undated: 0 };
+  const out = { active: 0, attention: 0, undated: 0, unclear: 0, pending: 0 };
   for (const p of policies || []) {
     const k = policyKind(p);
-    if (k === null || k === "nostatus" || k === "ended" || k === "pending") out.undated += 1;
-    if (k === "ok" || k === "warn") out.active += 1;        // "warn" = expiring soon, still in force
-    if (k === "exp" || k === "warn") out.attention += 1;    // lapsed, or inside 30 days
+    if (k === "ok" || k === "warn") out.active += 1;
+    if (k === "exp" || k === "warn" || k === "ended") out.attention += 1;
+    if (k === null) out.undated += 1;
+    if (k === "nostatus" || k === "unknown") out.unclear += 1;
+    if (k === "pending") out.pending += 1;
   }
   return out;
+}
+
+// The subtitle for an "Active / in force" tile, naming only the buckets that are
+// non-zero. One place, because two views need the same sentence and this file
+// already learned what two copies of a count cost.
+export function inForceNote(counts) {
+  const c = counts || {};
+  const bits = [];
+  if (c.attention) bits.push(`${c.attention} need${c.attention === 1 ? "s" : ""} attention`);
+  if (c.pending) bits.push(`${c.pending} not started`);
+  if (c.unclear) bits.push(`${c.unclear} unclear`);
+  if (c.undated) bits.push(`${c.undated} undated`);
+  return bits.length ? `in force · ${bits.join(" · ")}` : "in force";
 }
