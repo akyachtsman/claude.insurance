@@ -174,7 +174,15 @@ test("every column help-ask SELECTs exists in that table", () => {
 // sat selected-and-dropped for four review rounds while the docs claimed it was
 // sent. Keep the two lists in step or change the constraint deliberately.
 const DOCUMENTED = {
-  profiles: ["id"],
+  // ⚠️ NEITHER profiles COLUMN CROSSES THE PROVIDER BOUNDARY, and this table is
+  // not a model of what does — it is a model of what is SELECTED, which is the
+  // half that catches a column fetched and then dropped (the `policy_number`
+  // lesson above). `id` is the invite gate; `role` decides whether the response
+  // names the model that answered, and is the caller's OWN role because RLS on
+  // `profiles` is `id = auth.uid()`. What reaches the prompt is pinned
+  // separately, by handler.test.mjs's sentinel sweep — so adding a column here
+  // cannot quietly widen the digest.
+  profiles: ["id", "role"],
   entities: ["id", "name", "kind"],
   assets: ["id", "name", "type", "value", "entity_id"],
   // `status` and `effective_date` added 2026-10-09: the prompt invited the model
