@@ -556,6 +556,16 @@ function helpTierCard() {
     status.textContent = `${helpModelLabel(res.model)} is now the stored tier. Ask a question on the Help desk to confirm it is in use.`;
   }
 
+  // ⚠️ PAINTED ONCE BEFORE THE READ, and that is not cosmetic. Without it
+  // `paint()` never ran until the read landed, so `current`'s initial value was
+  // unobservable — a mutation setting it to a real tier instead of `null`
+  // SURVIVED every assertion, because no button had been given `is-on` yet. The
+  // `disabled` attribute in each option's `attrs` was doing the work, and the
+  // `current === null` branch inside `paint()` was unreachable belt. Now the
+  // unread state is rendered BY the guard, so the guard is what holds it, and
+  // the mutation is caught.
+  paint();
+
   getHelpModel().then((res) => {
     if (!res.ok) {
       // Honest, and deliberately leaves every option unchecked: a broker who
