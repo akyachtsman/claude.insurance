@@ -262,7 +262,8 @@ This is the one to follow; the others defer to it.
    question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
    deploy worked.) If it still shows the notice, read the function logs: the
-   `where` field names the stage (`guide`, `records`, `reserve`, `provider`).
+   `where` field names the stage (`guide`, `records`, `reserve`, `provider`,
+   `model`, `settings`, `release`, and since 2026-10-14 **`answer`**).
 
 ### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
 
@@ -2841,10 +2842,55 @@ it accepts an answer **or** the notice by design.
 
 **So the logs bound the SPEND exactly and say nothing about the OUTCOME.** What
 the latency still does separate is a billed **timeout** (no status, row kept,
-~60s) from everything else, which is worth the query. To learn whether an answer
-rendered you need the response body, the UI, or answer-specific telemetry the
-function does not currently emit — a `reason` on the `incomplete` exits would be
-the cheap fix, and is deliberately not smuggled in here.
+~60s) from everything else, which is worth the query.
+
+✅ **AND THE SILENCE IS FIXED (2026-10-14).** All three exits now log
+`where: "answer"` with a `stage` that says which one fired:
+
+| stage | fired by | carries |
+|---|---|---|
+| `stop_reason` | a refusal, or a `max_tokens` cut | `stopReason`, `outputTokens`, `maxTokens` |
+| `no_text` | no text blocks (thinking only, or nothing) | `stopReason`, `blockTypes` |
+| `trailer_only` | the model emitted protocol and no prose | `rawLength` |
+
+`outputTokens` against `maxTokens` is the measurement the `max_tokens: 8192`
+note below asks for and had no way to take: a cut AT the ceiling is the ~137
+tok/s cliff, while a `refusal` at 12 tokens is a different problem. The ceiling
+is now a named constant read by both the call and the log, because two copies of
+a number is how one goes stale — and a log naming a ceiling the call does not use
+sends a reader hunting a cliff that is not there.
+
+⚠️ **A CAUSE, NEVER CONTENT — and this is gated structurally, not by a needle
+list.** These lines are emitted from INSIDE the safety boundary, so a field added
+later "to help debug" is a disclosure with no client in the loop. The test
+asserts the payload's keys are **exactly** an allow-list per stage, plus a type
+check on every value, so a new field fails by construction. Block **type names**
+only, never `b.text` or `b.thinking`.
+
+⚠️ **WHAT THIS STILL DOES NOT PROVE: that `function_logs` carries a handler's
+`console.error` at all.** Every row in that source in the 2026-10-14 window is a
+platform `booted`/`shutdown` message, because every ask that day succeeded and no
+error path fired. The channel is *documented* to carry stdout/stderr and the
+provider path has logged there by construction since the feature shipped — but
+nothing here has observed one. **The first real billed non-answer in production
+is the positive control**, and this is the query:
+
+```sql
+select cast(timestamp as datetime) as t, event_message
+from logs
+where source = 'function_logs' and event_message like '%"where":"answer"%'
+order by timestamp desc
+```
+
+If a billed non-answer is ever visible in `edge_logs` (201, no DELETE, fast 200)
+with **no** matching line here, the channel is the defect and not the handler.
+Recorded this way round deliberately: the retraction above exists because an
+absence was read as a fact, and this one is labelled an open question.
+
+⚠️ The proven-channel alternative, **not** taken: a column on `help_queries`
+written by the function would appear in `edge_logs`, which is measured to carry
+its PostgREST traffic. It needs a migration, so it is an owner decision rather
+than a bug fix, and it is the fallback if the control above comes back empty.
 
 ⚠️ Recorded because of *where* this happened: it was written in the same commit
 that retracts an overclaim, in the section about not overclaiming from logs, and

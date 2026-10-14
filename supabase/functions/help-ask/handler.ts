@@ -135,6 +135,18 @@ const DAILY_TOTAL_CAP = 400;
 // broker-written jsonb with no length limit and it is re-sent on every question.
 const COVERAGES_PER_POLICY = 20;
 const QUESTION_MAX = 500;
+// ⚠️ ONE SOURCE, because it is read in TWO places now: the provider call and the
+// `where: "answer"` log that reports a `max_tokens` cut against it. Two copies of
+// a number is how one of them goes stale — and a log claiming a ceiling the call
+// does not use would send a reader looking for a cliff that is not there.
+//
+// 8192, not 2048. Thinking cannot be disabled on this model and counts against
+// this budget; a cut is billed, spends one of the caller's 20 hourly slots, and
+// shows them the quiet notice. A help-desk answer is a few short paragraphs, so
+// the ceiling costs nothing when it is not needed and buys thinking room when it
+// is. Filling it inside the 60s non-streaming timeout needs ~137 tok/s sustained
+// — see the `max_tokens` note in CLAUDE.md, which the log above now measures.
+const MAX_TOKENS = 8192;
 
 // ─── THE MODEL, AND WHY THE SECRET IS AN ALLOW-LIST RATHER THAN A PASS-THROUGH ─
 // `HELP_MODEL` lets the owner move between tiers from the Supabase dashboard
@@ -843,19 +855,23 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   // because the call has been paid for. No `releaseAnd` below this point. ───
 
   let answer: string | null = null;
+  // ⚠️ HOISTED so the `!answer` check BELOW the try can name a cause. `blocks` is
+  // scoped to the try, and the check that needs it is outside — moving the check
+  // inside would put it on the same line as the extraction and lose the
+  // distinction between "the provider threw" and "the provider returned nothing
+  // usable", which is the whole point of logging them apart.
+  let stopReason: string | null = null;
+  let blockTypes: string[] = [];
   try {
     const res = await anthropic.messages.create({
       // From `HELP_MODEL`, allow-listed by resolveModel above — NOT a literal, and
       // not from the request body. A test asserts what actually reaches this
       // argument, because a resolver nothing calls is a resolver nobody checked.
       model,
-      // 8192, not 2048. Thinking cannot be disabled on this model and counts
-      // against this budget, and the comment below already calls a max_tokens cut
-      // "realistic" — each cut is billed, spends one of the caller's 20 hourly
-      // slots, and shows them "didn't come through in full". A help-desk answer
-      // is a few short paragraphs, so the ceiling costs nothing when it is not
-      // needed and buys the thinking room when it is.
-      max_tokens: 8192,
+      // MAX_TOKENS, not a literal: the `where: "answer"` log reports a cut
+      // against this same number, and the reasoning for 8192 now lives at its
+      // declaration so the two cannot disagree.
+      max_tokens: MAX_TOKENS,
       system,
       messages,
     });
@@ -865,10 +881,27 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     // is a realistic outcome rather than a theoretical one.
     // The reservation is NOT released on any path below: the call was made and
     // therefore billed, whatever came back.
-    if (res.stop_reason !== "end_turn") return unavailable("incomplete");
+    stopReason = res.stop_reason ?? null;
+    if (res.stop_reason !== "end_turn") {
+      // A CAUSE, NOT CONTENT — see the `where: "answer"` note below. `stop_reason`
+      // is a provider enum and `output_tokens` is a number, so neither can carry
+      // the client's question or a record value.
+      //
+      // `outputTokens` against `maxTokens` is the measurement this repo's
+      // `max_tokens: 8192` note asks for and had no way to take: a cut at or near
+      // the ceiling is the 137 tok/s cliff, while a `refusal` at 40 tokens is a
+      // different problem entirely. Logging the pair is what tells them apart.
+      console.error(JSON.stringify({
+        where: "answer", stage: "stop_reason", stopReason,
+        outputTokens: (res as { usage?: { output_tokens?: number } }).usage?.output_tokens ?? null,
+        maxTokens: MAX_TOKENS,
+      }));
+      return unavailable("incomplete");
+    }
     // Extract by BLOCK TYPE, never content[0]: with thinking on, the first block
     // is a thinking block and content[0].text is undefined.
     const blocks = (res.content ?? []) as Array<{ type: string; text?: string }>;
+    blockTypes = [...new Set(blocks.map((b) => b.type))];
     answer = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n").trim() || null;
   } catch (err) {
     // ⚠️ THE ONE RELEASE PAST THE BILLING LINE, and it is deliberate.
@@ -892,7 +925,13 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     if (typeof status === "number") return await releaseAnd("unavailable");
     return unavailable("unavailable");
   }
-  if (!answer) return unavailable("incomplete");
+  if (!answer) {
+    // Block TYPE NAMES only, never `b.text`. "the model returned only a thinking
+    // block" and "the model returned nothing at all" are different failures and
+    // `blockTypes` is the only thing that separates them.
+    console.error(JSON.stringify({ where: "answer", stage: "no_text", stopReason, blockTypes }));
+    return unavailable("incomplete");
+  }
 
   // The trailer carries the two things this function cannot know by itself:
   // WHICH help topics the answer drew on, and whether it declined a coverage
@@ -902,7 +941,14 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   const split = splitTrailer(answer);
   // Stripping the trailer can leave nothing — a reply that is only protocol is
   // not an answer, and must not render as an empty bubble.
-  if (!split.answer) return unavailable("incomplete");
+  if (!split.answer) {
+    // A LENGTH, not the text. This one is the model emitting protocol and no
+    // prose; the raw length distinguishes "a trailer and nothing else" from "a
+    // long reply the splitter ate", which would be a bug in splitTrailer rather
+    // than a bad generation.
+    console.error(JSON.stringify({ where: "answer", stage: "trailer_only", rawLength: answer.length }));
+    return unavailable("incomplete");
+  }
 
   // Intersected with the ids actually SENT, here and not in prompt.ts, because
   // this is the only place that holds the corpus. A hallucinated id is dropped
