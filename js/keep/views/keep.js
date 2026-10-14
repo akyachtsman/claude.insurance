@@ -13,7 +13,7 @@ import {
   getHelpModel, setHelpModel,
 } from "../../supabase.js";
 import { entitySummary } from "../logic/analysis.js";
-import { renewalBand, renewalCounts, annualPremium, formatPremium } from "../logic/policies.js";
+import { renewalBand, renewalCounts, inForceNote, policyKind, annualPremium, formatPremium } from "../logic/policies.js";
 import { statusDisplay, stageInfo, isPending } from "../logic/requests.js";
 import { docName } from "../logic/docfile.js";
 import { OWNERSHIP_ROLES, totalStake, validateOwnership, stakeLabel } from "../logic/ownership.js";
@@ -137,7 +137,20 @@ export async function renderKeepLanding() {
     assets += sum.assets; gaps += sum.gaps;
     for (const a of e.assets) {
       insured += a.value || 0;
-      for (const p of (a.policies || [])) { policies++; if (p.renewalInDays < 0) lapsed++; }
+      // ⚠️ THESE TWO COUNTERS WERE THE FIFTH AND SIXTH READERS OF THIS FACT, and
+      // the 2026-10-14 badge fix missed both — so a cancelled policy read
+      // "Cancelled" on the Policies, policy and asset pages while STILL being
+      // counted under "Active policies" here. Found by review on the very commit
+      // that fixed the other four. `lapsed` was worse than missed: it tested
+      // `renewalInDays < 0` directly, so it never consulted `status` at all and
+      // a cancelled policy with a future renewal date was neither active-correct
+      // nor lapsed. Both now route through `policyKind`, which is the only thing
+      // that stops a seventh reader drifting again.
+      for (const p of (a.policies || [])) {
+        const k = policyKind(p);
+        policies += (k === "ok" || k === "warn") ? 1 : 0;
+        lapsed += (k === "exp" || k === "ended") ? 1 : 0;
+      }
     }
   }
 
@@ -238,7 +251,8 @@ export function renderKeepInsurance() {
   // logic/policies.js so the unknown-date case is unit-tested: an undated
   // policy counts as neither active nor needing attention, and is surfaced
   // under its own label rather than guessed into one of them.
-  const { active, attention, undated } = renewalCounts(rows.map((r) => r.policy));
+  const counts = renewalCounts(rows.map((r) => r.policy));
+  const { active, attention } = counts;
   const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
   const premiumTotal = premiums.reduce((s, n) => s + n, 0);
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;
@@ -252,7 +266,11 @@ export function renderKeepInsurance() {
     el("p", { class: "k-sub", text: `Every policy across your entities — ${rows.length} on file.` }),
     el("div", { class: "k-astats" }, [
       statTile("Policies", String(rows.length), `across ${insuredEntities} ${insuredEntities === 1 ? "entity" : "entities"}`),
-      statTile("Active", String(active), undated ? `in force · ${undated} undated` : "in force"),
+      // ⚠️ `inForceNote` rather than an inline `${undated} undated`. That literal
+      // reported a CANCELLED policy with a perfectly good renewal date as having
+      // no date on file, because the first version of this change folded every
+      // not-in-force kind into `undated`. One false summary for another.
+      statTile("Active", String(active), inForceNote(counts)),
       statTile("Needs attention", String(attention), attention ? "expiring or lapsed" : "all current"),
       statTile("Annual premium", premiums.length ? (money(premiumTotal) || "$0") : "—", "total on file"),
     ]),

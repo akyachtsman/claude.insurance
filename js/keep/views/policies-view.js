@@ -28,7 +28,7 @@ export function renderKeepPolicy(params, id) {
   // this app does not own that vocabulary. (Before 2026-10-14 `policyKind` saw
   // only the renewal date, so a cancelled policy read "Active" here.)
   const statusLabel = kind === "nostatus" ? "Status not on file"
-    : kind === "ended" ? statusText(policy.status)
+    : (kind === "ended" || kind === "unknown") ? statusText(policy.status)
     : kind === "pending" ? "Cover not started"
     : kind == null ? "Renewal date not on file"
     : kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")

@@ -669,9 +669,15 @@ function expiryBadge(policy) {
   // or a cancelled policy with no date on file reports the missing date instead
   // of the cancellation, which is the less important of the two facts.
   if (kind === "nostatus") return el("span", { class: "k-exp" }, [el("span", { text: "Status not on file" })]);
-  // The status VERBATIM. This app does not own that vocabulary, so it reports
-  // what the record says rather than rounding it to a word of its own.
+  // The status VERBATIM in both branches. This app does not own that vocabulary,
+  // so it reports what the record says rather than rounding it to a word of its
+  // own. ⚠️ ONLY A STATUS WE RECOGNISE AS TERMINAL GETS THE ALARM. `unknown` —
+  // anything non-affirmative we cannot classify, e.g. `pending` or `quoted` —
+  // renders NEUTRAL. The first version gave both the red/expired treatment, so
+  // the app invented an ended state for a policy that was merely not yet bound,
+  // while the line above claimed it owned no vocabulary. Found by review.
   if (kind === "ended") return el("span", { class: "k-exp k-exp--exp" }, [icon("x", { size: 14 }), el("span", { text: statusText(policy.status) })]);
+  if (kind === "unknown") return el("span", { class: "k-exp" }, [el("span", { text: statusText(policy.status) })]);
   if (kind === "pending") return el("span", { class: "k-exp" }, [el("span", { text: `Cover starts ${dateFromDays(policy.effectiveInDays)}` })]);
   // No renewal date on file. Must come before the Active fallthrough: dateShort
   // (null) would render "Expired <today>" and the plain fallthrough claims the

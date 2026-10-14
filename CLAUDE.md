@@ -3532,6 +3532,68 @@ records that a `.k-h1` assertion after a navigation matches the page being LEFT;
 on these two it matches **nothing**, which is the louder failure and is how both
 were found.
 
+### ⚠️ THE FIX ABOVE WAS INCOMPLETE IN FOUR WAYS, ALL FOUND BY ONE REVIEW
+
+Codex reviewed `90b4970` — **after** it had merged, which is the operational
+lesson on its own and is recorded at the end. All four findings were real, all
+four were mine, and three of them are the *same defect class the fix was about*,
+arriving one layer out.
+
+| # | finding | why it survived |
+|---|---|---|
+| **P1** | `renderKeepLanding` counts `policies++` unconditionally and renders it as **"Active policies"**, and `lapsed` tests `renewalInDays < 0` **directly** | the badge fix found four readers and stopped. These are the **fifth and sixth** |
+| **P2b** | every non-affirmative status got the red/`lapsed` treatment, so `pending`, `quoted` and `bound` were presented as **ended cover** | I considered this explicitly and talked myself out of it: *"I'm overthinking a branch with zero production instances … fail loud in the direction of check this"* |
+| **P2c** | `renewalCounts` folded `nostatus`/`unknown`/`ended`/`pending` into **`undated`**, which the Policies tile renders **literally** as "N undated" | I checked the counter and not the **label that consumes it** |
+| **P2a** | S28's fixed dates (`2027-03-12`, `2027-09-30`) expire | the control fails loudly in March 2027; the cancelled policy **quietly stops testing the bug** in September |
+
+**P1 is the one to learn from.** The whole change was "a fact with several
+readers, made to agree through one module", and I shipped it having found four
+readers of six. `lapsed` was worse than missed — it never consulted `status` at
+all, so a cancelled policy with a future renewal date was in **neither** number.
+⚠️ **Counting readers by grepping the function you are changing finds the ones
+that CALL it, never the ones that re-implement it.** `policies++` and
+`renewalInDays < 0` are invisible to a grep for `policyKind` or `expiryBadge`.
+
+**P2b is the comment-overclaims-code defect, caught in the act.** `statusText`'s
+own comment says the app *"does not own the vocabulary of `policies.status`…
+rounding 'non-renewed' to 'Cancelled' would state something the record does not
+say"* — and the view then rounded **every** unrecognised value to a terminal
+state. Now split: `ended` (a documented terminal list) is loud; `unknown` is
+neutral and verbatim. ⚠️ **The terminal list is not the guessing `statusText`
+refuses, and the asymmetry is the justification:** being wrong there costs a
+*neutral* badge on a dead policy — whose text still reads the broker's own word —
+while being wrong the old way cost a *false alarm* about live cover. The list can
+only move a status from neutral to loud; it can never make a non-active policy
+read as in force.
+
+**P2c is the scoping defect again** — the sixth instance in this file. I verified
+the bucket and not the sentence rendered from it. `undated` now means *no renewal
+date on file* and nothing else; `unclear` and `pending` are their own buckets,
+and `inForceNote()` builds the subtitle in one place for both views.
+
+**P2a has no mutation that fails today**, so S28 now asserts its own
+**precondition**: the cancelled policy's renewal date must be in the future, with
+a message saying the scenario is *disarmed* otherwise. Dates are computed with
+`dayOffset()`. ⚠️ The dangerous half was never the expiry — it was that after
+September 2027 the fixture's own date logic would render "Expired" and **every
+assertion would still pass against unfixed code**. A test that expires loudly
+gets fixed; one that quietly stops testing anything does not.
+
+**Measured: 8/8 mutations caught** on the four fixes (both landing counters, both
+halves of the ended/unknown split, both halves of the undated split), plus the
+precondition, with a future-literal control correctly surviving.
+
+⚠️ **AND THE PROCESS FINDING, which cost nothing this time and will not always.**
+I merged `#268` without waiting for a review, on a standing "don't keep asking"
+instruction, and said I would stay subscribed to catch a late one. **The
+subscription auto-ended on merge**, so the notification stream reported only my
+own actions and showed **zero** reviews; the four findings were sitting on the
+PR and were found only by querying it directly. Two rules follow: a merged PR's
+review is not pushed to you, so **fetch `/reviews` and `/comments` explicitly
+after merging**; and this repo's reviewer habitually lands **minutes after** a
+merge (`#258` was 3 minutes, this was ~5), so "merge now, catch the review
+later" is a real tactic only if the catching is done by hand.
+
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
@@ -4008,7 +4070,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S25 | Help desk — a render parked on the CORPUS when the session ends (offline harness, **runs locally**) | Hold `content/help-guide.json`, start the first Help visit, then sign out **in the same page** through the app's own exported `signOut()` — the hash never changes, so neither the render generation nor the hash check can see it. Release: the login card must survive, no `.k-help__input` or `.k-help__ai` may mount, and **no `route error:` may be logged** — that last one is the only assertion that fails when the epoch check is deleted, because the DOM is otherwise saved by an accident (the stale build throws into `route()`'s generation-guarded catch). | An authenticated Help form mounts over the login card, or the stale render runs and throws instead of being refused |
 | S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
 | S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
-| S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | Three seeded policies — in force, **cancelled with a FUTURE renewal date**, and status never recorded. On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`) and the **asset** page's `.k-pcard` — four readers of one fact, in two files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
+| S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

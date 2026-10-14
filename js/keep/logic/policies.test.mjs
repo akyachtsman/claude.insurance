@@ -2,7 +2,7 @@
 // Run: node --test js/keep/logic/policies.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { policyKind, reminderInfo, renewalBand, renewalCounts, policyType, annualPremium, policyPresentation, formatPremium, statusIsAffirmative, statusText } from "./policies.js";
+import { policyKind, reminderInfo, renewalBand, renewalCounts, inForceNote, policyType, annualPremium, policyPresentation, formatPremium, statusIsAffirmative, statusIsEnded, statusText } from "./policies.js";
 
 // A policy that is in force apart from whatever the test overrides. policyKind
 // takes the POLICY now, not a number, so every case has to name the status it
@@ -229,9 +229,16 @@ test("premium guards reject non-numeric amounts instead of coercing to 0", () =>
 // from absent data — while the neighbouring "needs attention" counter already
 // (correctly) excluded it. Four counters, two answers. (Codex P2, round 3.)
 test("renewalCounts puts an undated policy in neither active nor attention", () => {
-  const c = renewalCounts([null]);
-  assert.deepEqual(c, { active: 0, attention: 0, undated: 1 },
+  // ⚠️ `pol({ renewalInDays: null })`, NOT a bare `null`. This used to pass
+  // `[null]` — a null POLICY, not an undated one — which happened to land in
+  // `undated` while the function took bare numbers. It now lands in `unclear`
+  // (no policy has no status), which is correct and is a different claim. The
+  // test was asserting the right number for the wrong input.
+  const c = renewalCounts([pol({ renewalInDays: null })]);
+  assert.deepEqual(c, { active: 0, attention: 0, undated: 1, unclear: 0, pending: 0 },
     "an undated policy is neither provably in force nor provably urgent");
+  // And a null policy is `unclear`, not `undated` — it says nothing about dates.
+  assert.deepEqual(renewalCounts([null]), { active: 0, attention: 0, undated: 0, unclear: 1, pending: 0 });
 });
 
 test("renewalCounts classifies each known state once", () => {
@@ -243,26 +250,67 @@ test("renewalCounts classifies each known state once", () => {
   assert.equal(c.attention, 3, "lapsed + due today + expiring soon");
 });
 
-test("renewalCounts: not-provably-in-force states land in `undated`, never `active`", () => {
+// ⚠️ EACH BUCKET MEANS EXACTLY ONE THING, and the first version of this change
+// did not. It folded `nostatus`, `unknown`, `ended` and `pending` into
+// `undated`, which the Policies view renders LITERALLY as "N undated" — so a
+// cancelled policy with a perfectly good renewal date was reported to the client
+// as having no date on file. One false summary swapped for another. Found by
+// review, 2026-10-14.
+test("renewalCounts keeps `undated` to mean NO RENEWAL DATE, and nothing else", () => {
   const c = renewalCounts([
-    pol({ renewalInDays: 400 }),                         // ok
-    pol({ status: "cancelled", renewalInDays: 400 }),    // ended
-    pol({ status: null, renewalInDays: 400 }),           // nostatus
-    pol({ effectiveInDays: 30, renewalInDays: 400 }),    // pending
-    pol({ renewalInDays: null }),                        // no date
+    pol({ renewalInDays: 400 }),                         // ok       -> active
+    pol({ status: "cancelled", renewalInDays: 400 }),    // ended    -> attention
+    pol({ status: "pending-cancel", renewalInDays: 400 }), // unknown -> unclear
+    pol({ status: null, renewalInDays: 400 }),           // nostatus -> unclear
+    pol({ effectiveInDays: 30, renewalInDays: 400 }),    // pending  -> pending
+    pol({ renewalInDays: null }),                        // no date  -> undated
   ]);
-  assert.equal(c.active, 1, "only the one provably-in-force policy counts as active");
-  assert.equal(c.undated, 4, "cancelled / no-status / not-started / undated are all 'unclear'");
-  assert.equal(c.attention, 0, "none of them is a renewal deadline");
+  assert.equal(c.active, 1, "only the provably-in-force policy is active");
+  assert.equal(c.undated, 1, "ONLY the one with no renewal date on file");
+  assert.equal(c.unclear, 2, "no status, and a status we do not recognise");
+  assert.equal(c.pending, 1, "cover not started");
+  assert.equal(c.attention, 1, "a cancelled policy is something to act on");
+});
+
+test("inForceNote names only the non-zero buckets, and never lies about dates", () => {
+  assert.equal(inForceNote({ active: 3 }), "in force");
+  assert.equal(inForceNote({ undated: 1 }), "in force · 1 undated");
+  assert.equal(inForceNote({ attention: 1 }), "in force · 1 needs attention");
+  assert.equal(inForceNote({ attention: 2 }), "in force · 2 need attention");
+  // The regression: a cancelled DATED policy must not be described as undated.
+  const note = inForceNote(renewalCounts([pol({ status: "cancelled", renewalInDays: 400 })]));
+  assert.match(note, /needs attention/);
+  assert.doesNotMatch(note, /undated/);
+  assert.equal(inForceNote(undefined), "in force");
 });
 
 test("renewalCounts given bare numbers fails LOUDLY, not silently", () => {
   // The signature changed from a list of days to a list of policies. A caller
-  // that was not updated now reports every row as `undated` — visibly wrong on
+  // that was not updated now reports every row as `unclear` — visibly wrong on
   // screen — rather than quietly producing a plausible count from `.status`
   // being undefined on a Number. Pinned so the failure mode stays the loud one.
   const c = renewalCounts([400, 12, -40]);
-  assert.deepEqual(c, { active: 0, attention: 0, undated: 3 });
+  assert.deepEqual(c, { active: 0, attention: 0, undated: 0, unclear: 3, pending: 0 });
+});
+
+// ⚠️ ONLY A STATUS WE RECOGNISE AS TERMINAL IS STYLED AS ENDED. Everything else
+// non-affirmative is `unknown` and renders neutrally, verbatim. The first
+// version had one kind and gave it the red/expired treatment, so `pending` and
+// `quoted` were presented as ended cover while `statusText`'s own comment
+// claimed the app owns no vocabulary here. Found by review, 2026-10-14.
+test("policyKind separates KNOWN-terminal statuses from merely unrecognised ones", () => {
+  for (const t of ["cancelled", "canceled", "lapsed", "expired", "void", "voided",
+                   "terminated", "non-renewed", "nonrenewed", "non renewed", "rescinded"])
+    assert.equal(policyKind(pol({ status: t, renewalInDays: 365 })), "ended", t);
+  // Non-terminal or simply unknown: not in force, but NOT presented as ended.
+  for (const u of ["pending", "quoted", "bound", "pending-cancel", "in force", "submitted"])
+    assert.equal(policyKind(pol({ status: u, renewalInDays: 365 })), "unknown", u);
+  assert.equal(statusIsEnded("  CANCELLED "), true, "case and padding forgiven, as for affirmative");
+  assert.equal(statusIsEnded("pending"), false);
+  assert.equal(statusIsEnded(null), false);
+  // Neither list can ever make a non-active policy read as in force.
+  for (const v of ["cancelled", "pending", "anything"])
+    assert.notEqual(policyKind(pol({ status: v })), "ok", v);
 });
 
 test("renewalCounts never counts more rows than it was given", () => {
@@ -278,6 +326,7 @@ test("renewalCounts never counts more rows than it was given", () => {
 });
 
 test("renewalCounts tolerates an empty or absent list", () => {
-  assert.deepEqual(renewalCounts([]), { active: 0, attention: 0, undated: 0 });
-  assert.deepEqual(renewalCounts(), { active: 0, attention: 0, undated: 0 });
+  const zero = { active: 0, attention: 0, undated: 0, unclear: 0, pending: 0 };
+  assert.deepEqual(renewalCounts([]), zero);
+  assert.deepEqual(renewalCounts(), zero);
 });
