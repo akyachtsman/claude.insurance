@@ -174,7 +174,11 @@ This is the one to follow; the others defer to it.
    review of the repairing commit; recorded rather than acted on because it is a
    credential decision on the owner's project, and rotating silently would break
    both the logins this file documents and the ui-tester that consumes them.
-5. ⛔ **OWNER ACTION — THE ONE HARD BLOCKER.** Set `ANTHROPIC_API_KEY` as an Edge
+5. ✅ **DONE 2026-10-13.** `ANTHROPIC_API_KEY` is set as an Edge Function secret
+   (owner, via the dashboard; digest `cd8950de…`, saved 22:33:51Z). Auto-reload on
+   the Anthropic credit balance is OFF and the Max plan's $200/month API credits
+   were claimed the same day, so the balance is a real ceiling rather than a
+   float — which is what the Console spend limit below was for. Was: Set `ANTHROPIC_API_KEY` as an Edge
    Function secret. No session can do this: the key is the owner's and is not in
    this environment. `mcp__Supabase__create_edge_function_secret` exists, so once
    the value is in hand a session can set it — the missing thing is the value,
@@ -188,7 +192,9 @@ This is the one to follow; the others defer to it.
    The moment a key exists, `qa-live`'s S10 asks **4 real questions per Pages
    deploy** without anyone touching the UI. The code's caps are the first line;
    the Console limit is the backstop if they have a bug.
-6. ⏸️ **DELIBERATELY WAITS FOR STEP 5 — one MCP call, not started.** Deploy
+6. ✅ **DONE 2026-10-13 23:13:03Z — BUT NOT CLEANLY; see the deploy-provenance
+   section below before trusting "deployed == repo".** `help-ask` is ACTIVE,
+   version 1, `verify_jwt: true`, function id `89dca147`. Was: Deploy
    `help-ask` **with the default `verify_jwt` (ON)** — see the `help-ask`
    entry above for the probe that reversed the earlier `--no-verify-jwt` advice.
    ⚠️ **A session CAN do this** (`mcp__Supabase__deploy_edge_function`, `files`
@@ -223,9 +229,14 @@ This is the one to follow; the others defer to it.
    ⚠️ **The first live run of S10 then turned `main` red, on webkit only** — see
    *A CORS-BLOCKED FETCH IS A `pageerror` ON WEBKIT AND NOT ON CHROMIUM* below.
    Test-side, not the app: the notice rendered correctly on all four projects.
-8. Ask one question as a signed-in client and confirm an answer renders. FR-17
+8. ✅ **DONE 2026-10-13.** A signed-in client asked "What policies do I have?"
+   and got a grounded answer naming all seven policies, their carriers and their
+   renewal dates, with `.k-help__src` credits, the AI-generated label and the
+   broker channel — and it correctly declined the coverage determination. The
+   feature is proven end to end for the first time. (Original wording: ask one
+   question as a signed-in client and confirm an answer renders. FR-17
    makes every failure look identical, so this is the only step that proves the
-   deploy worked. If it still shows the notice, read the function logs: the
+   deploy worked.) If it still shows the notice, read the function logs: the
    `where` field names the stage (`guide`, `records`, `reserve`, `provider`).
 
 ### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
@@ -2626,6 +2637,84 @@ than insert-then-delete — which is what should have been done the first time.
 ⚠️ It does not help retrospectively: a committed row cannot be rolled back, so
 one throwaway probe row is outstanding and needs one line from the owner (see
 `migrations/20261013014854_enhancement_requests_insert_column_scope.sql`).
+
+### ⚠️ DEPLOY PROVENANCE — the live `help-ask` is NOT byte-equal to this repo (2026-10-13)
+
+`help-ask` is deployed and working. **The deployed source is the repo's code with
+every comment block removed**, and that is a defect to close, not a style choice.
+
+**How it happened.** `mcp__Supabase__deploy_edge_function` takes file CONTENT
+inline — there is no path parameter — so deploying from a session means
+re-emitting the three modules (96KB) into one tool call. Two attempts went out
+carrying only `index.ts` and were refused by the bundler (fail-closed, nothing
+deployed). The third fitted only because the comments were stripped.
+
+**This is the risk owner-gate step 6 named, arriving by a different route than it
+predicted.** The gate worried about a single-character corruption in `prompt.ts`
+— the module that defines what client data crosses the Anthropic boundary —
+being indistinguishable from an undeployed function, because FR-17 renders every
+failure as the same quiet notice. What actually happened is not corruption but
+divergence: the live function no longer carries the reasoning that makes it
+reviewable, and nobody can diff live against `main`.
+
+**What was verified, and what was not:**
+
+| claim | status |
+|---|---|
+| the function is ACTIVE, `verify_jwt: true` | **verified** (`get_edge_function`) |
+| stripping comments does not change behaviour | **verified** — 96 behavioural tests (`handler.test.mjs`, `prompt.node.test.mjs`) pass against a mechanically comment-stripped copy |
+| one real client ask returns a correct grounded answer | **verified** — owner-gate step 8 |
+| deployed bytes == repo bytes | **FALSE, and known to be false** |
+| hand-stripped == mechanically-stripped, byte for byte | **not checked** |
+
+**The fix is `.github/workflows/functions-deploy.yml`**, added in the same change:
+it runs `supabase functions deploy help-ask` from the checkout, so the uploaded
+files are the repo's files and "deployed == repo" holds by construction instead
+of by anyone's care. It needs one repository secret, `SUPABASE_ACCESS_TOKEN`.
+Until that secret exists and one push to `main` has run it, the live function is
+still the stripped copy.
+⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
+push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
+
+**The generalisable rule:** when a deploy path requires a human or a model to
+retype the artifact, the artifact will eventually differ from its source — and
+the difference will be invisible, because what is deployed is not what is read.
+Prefer a path that uploads the file. If none exists, that is a gap in the
+tooling, not a thing to be careful about.
+
+### ⚠️ OPEN — `policies.status` and the UI's expiry badge disagree (found 2026-10-13)
+
+Surfaced by the Help desk's first real answer, which is the useful part: two
+readers of the same table gave a client two different answers in one session.
+
+Measured on the live project:
+
+| policy | `status` | `renewal_date` | the Policies screen says |
+|---|---|---|---|
+| Windstorm | `active` | 2026-06-01 (past) | **Expired Jun 1** |
+| Flood (NFIP) | `active` | 2026-07-06 (past) | **Expired Jul 6** |
+| BOP | `active` | 2026-09-20 (past) | **Expired Sep 20** |
+
+All seven rows carry `status = 'active'`. The Keep's screens compute lapsed/
+expiring from `renewal_date` and never read `status`; `help-ask` sends both and
+the prompt requires an affirmative `status` before calling a policy active. So
+the home page says "3 Lapsed, action needed" while the desk says "all seven are
+marked active", from one database.
+
+**The desk is not the defect.** The prompt's `status`-first rule was added
+deliberately on 2026-10-09 so that a future renewal date could not be read as
+proof of cover, and it worked: the answer stated what `status` says and then
+flagged that three renewal dates have passed and *"your records don't show
+whether those policies were renewed or whether the dates just haven't been
+updated."*
+
+**This is the "one canonical label, one shared module" rule violated one layer
+below where that rule is usually enforced** — not two views disagreeing about a
+label, but two readers disagreeing about a FACT. The fix is a product decision
+that has not been made: either `status` is the system of record and the badge
+must derive from it, or the badge's derivation is authoritative and `status` is
+decoration that should be dropped. Seeding more careful demo data would hide the
+question rather than answer it.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
