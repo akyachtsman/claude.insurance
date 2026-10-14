@@ -229,7 +229,7 @@ export function renderKeepInsurance() {
     { label: "Entity", get: (r) => r.entity.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/entity/${r.entity.id}` }, text: r.entity.name }) },
     { label: "Asset", get: (r) => r.asset.name, cell: (r) => el("a", { class: "k-ilink", attrs: { href: `#/keep/asset/${r.asset.id}` }, text: r.asset.name }) },
     { label: "Carrier", get: (r) => r.policy.carrier || "", cell: (r) => el("span", { text: r.policy.carrier || "—" }) },
-    { label: "Renewal", get: (r) => r.policy.renewalInDays, cell: (r) => expiryBadge(r.policy.renewalInDays) },
+    { label: "Renewal", get: (r) => r.policy.renewalInDays, cell: (r) => expiryBadge(r.policy) },
     { label: "Premium", get: (r) => annualPremium(r.policy) || 0, cell: (r) => el("span", { text: formatPremium(r.policy) }) },
     { label: "Documents", cell: (r) => docCell(r.policy, r.asset, r.entity) },
   ];
@@ -238,7 +238,7 @@ export function renderKeepInsurance() {
   // logic/policies.js so the unknown-date case is unit-tested: an undated
   // policy counts as neither active nor needing attention, and is surfaced
   // under its own label rather than guessed into one of them.
-  const { active, attention, undated } = renewalCounts(rows.map((r) => r.policy.renewalInDays));
+  const { active, attention, undated } = renewalCounts(rows.map((r) => r.policy));
   const premiums = rows.map((r) => annualPremium(r.policy)).filter((n) => n != null);
   const premiumTotal = premiums.reduce((s, n) => s + n, 0);
   const insuredEntities = new Set(rows.map((r) => r.entity.id)).size;

@@ -8,7 +8,7 @@ import { go } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
 import { ASSET_META } from "../logic/asset-meta.js";
-import { policyKind, reminderInfo, formatPremium } from "../logic/policies.js";
+import { policyKind, reminderInfo, formatPremium, statusText } from "../logic/policies.js";
 import { validateRequest, statusDisplay, defaultSubject, stageInfo, nextStage } from "../logic/requests.js";
 import { findPolicy, getUser, getPrefs, addEnhancementRequest, loadEnhancementRequests, notifyEnhancement, approveEnhancement, advanceRequest } from "../../supabase.js";
 import { sep, page, backLink, dateFromDays, expiryBadge, docItem, activeSchedule, requestStepper } from "./shell.js";
@@ -22,9 +22,15 @@ export function renderKeepPolicy(params, id) {
   // miss threw a ReferenceError and degraded to the generic error page.
   if (!found) return go("#/keep/insurance");
   const { entity, asset, policy } = found;
-  const kind = policyKind(policy.renewalInDays);
-  // kind === null means no renewal date on file — report that, never "Active".
-  const statusLabel = kind == null ? "Renewal date not on file"
+  const kind = policyKind(policy);
+  // Every branch that is not "ok"/"warn" reports absent or non-affirmative data
+  // as such, and never "Active". `ended` shows the recorded status verbatim —
+  // this app does not own that vocabulary. (Before 2026-10-14 `policyKind` saw
+  // only the renewal date, so a cancelled policy read "Active" here.)
+  const statusLabel = kind === "nostatus" ? "Status not on file"
+    : kind === "ended" ? statusText(policy.status)
+    : kind === "pending" ? "Cover not started"
+    : kind == null ? "Renewal date not on file"
     : kind === "exp" ? (policy.billingStatus === "Lapsed" ? "Lapsed" : "Expired")
     : (kind === "warn" ? "Expiring soon" : "Active");
   const rinfo = reminderInfo(policy.renewalInDays, activeSchedule());
@@ -63,7 +69,7 @@ export function renderKeepPolicy(params, id) {
         // stringifies null — this read "NAIC null".
         el("div", { class: "sub", text: [policy.carrier, policy.naic ? `NAIC ${policy.naic}` : null].filter(Boolean).join(" · ") || "—" }),
       ]),
-      expiryBadge(policy.renewalInDays),
+      expiryBadge(policy),
     ]),
     el("p", { class: "k-maint" }, [icon("lock", { size: 16 }), el("span", { text: `Maintained by your broker (${policy.agent}) · encrypted & private` })]),
     el("div", { class: "k-pactions" }, [

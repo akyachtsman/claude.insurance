@@ -2700,7 +2700,7 @@ const keepRows = (u) => ({
   profiles: [{ id: u.uid, full_name: u.name, role: u.role, reminder_email: true, reminder_schedule: [60, 30, 14, 7, 1] }],
   entities: [{ id: 'e1', owner: u.uid, kind: 'personal', name: 'Me', label: 'UBO', created_at: '2026-01-01T00:00:00Z' }],
   assets: [{ id: 'a1', entity_id: 'e1', kind: 'home', name: 'Harbour House', value: 900000, created_at: '2026-01-01T00:00:00Z' }],
-  policies: [{ id: 'p1', asset_id: 'a1', line: 'Home', carrier: 'Acme', policy_number: 'HO-1', renewal_date: '2027-03-12' }],
+  policies: [{ id: 'p1', asset_id: 'a1', line: 'Home', carrier: 'Acme', policy_number: 'HO-1', status: 'active', renewal_date: '2027-03-12' }],
   entity_relationships: [],
 });
 

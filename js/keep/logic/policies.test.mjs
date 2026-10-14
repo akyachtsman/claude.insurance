@@ -2,15 +2,76 @@
 // Run: node --test js/keep/logic/policies.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { policyKind, reminderInfo, renewalBand, renewalCounts, policyType, annualPremium, policyPresentation, formatPremium } from "./policies.js";
+import { policyKind, reminderInfo, renewalBand, renewalCounts, policyType, annualPremium, policyPresentation, formatPremium, statusIsAffirmative, statusText } from "./policies.js";
+
+// A policy that is in force apart from whatever the test overrides. policyKind
+// takes the POLICY now, not a number, so every case has to name the status it
+// means — which is the point: a bare renewalInDays can no longer be mistaken
+// for a complete answer to "is this in force?".
+const pol = (over) => ({ status: "active", effectiveInDays: -100, renewalInDays: 200, ...over });
 import { findPolicy } from "../fixtures/sample.mjs";
 
 test("policyKind classifies active / expiring / expired", () => {
-  assert.equal(policyKind(263), "ok");
-  assert.equal(policyKind(30), "warn");
-  assert.equal(policyKind(12), "warn");
-  assert.equal(policyKind(0), "exp");  // due today counts as expired
-  assert.equal(policyKind(-1), "exp");
+  assert.equal(policyKind(pol({ renewalInDays: 263 })), "ok");
+  assert.equal(policyKind(pol({ renewalInDays: 30 })), "warn");
+  assert.equal(policyKind(pol({ renewalInDays: 12 })), "warn");
+  assert.equal(policyKind(pol({ renewalInDays: 0 })), "exp");  // due today counts as expired
+  assert.equal(policyKind(pol({ renewalInDays: -1 })), "exp");
+});
+
+// ── Regression: a CANCELLED policy read "Active" (found 2026-10-14) ─────────
+// `policies.status` was selected by the adapter, carried on every policy object,
+// and read by NO view — so the badge could only see the renewal date. A policy
+// cancelled last week with a renewal date next year rendered
+// "Active · renews <date>", which is the worst thing this app can say about
+// someone's cover. The rule below is help-ask's prompt rule, not a new one: the
+// desk had been getting this right since 2026-10-09 while the UI did not.
+test("policyKind: a non-affirmative status beats a future renewal date", () => {
+  assert.equal(policyKind(pol({ status: "cancelled", renewalInDays: 365 })), "ended");
+  assert.equal(policyKind(pol({ status: "lapsed", renewalInDays: 365 })), "ended");
+  // ...and beats a MISSING renewal date, so the cancellation is reported rather
+  // than the absent date. That is why the status test comes first in the body.
+  assert.equal(policyKind(pol({ status: "void", renewalInDays: null })), "ended");
+});
+
+test("policyKind: absent status is reported, never guessed from the dates", () => {
+  // The column is nullable with no default and no CHECK (measured 2026-10-14),
+  // so this is a real row, not a defensive branch. Falling through to the dates
+  // here is exactly the defect: a cancelled policy whose status nobody recorded
+  // would read as active.
+  assert.equal(policyKind(pol({ status: null, renewalInDays: 365 })), "nostatus");
+  assert.equal(policyKind(pol({ status: undefined })), "nostatus");
+  assert.equal(policyKind(pol({ status: "   " })), "nostatus");
+  assert.equal(policyKind({}), "nostatus");
+  assert.equal(policyKind(null), "nostatus");   // no policy at all is not "active"
+});
+
+test("policyKind: cover that has not started is not in force", () => {
+  assert.equal(policyKind(pol({ effectiveInDays: 10 })), "pending");
+  assert.equal(policyKind(pol({ effectiveInDays: 0 })), "ok");    // starts today = started
+  assert.equal(policyKind(pol({ effectiveInDays: null })), "ok"); // unrecorded start is not "pending"
+});
+
+test("statusIsAffirmative forgives case and padding, nothing else", () => {
+  assert.equal(statusIsAffirmative("active"), true);
+  assert.equal(statusIsAffirmative("  ACTIVE "), true);
+  assert.equal(statusIsAffirmative("Active"), true);
+  // Not an allow-list of guesses: these are plausible values this project has
+  // never seen, and treating one as in force would be inventing a vocabulary.
+  assert.equal(statusIsAffirmative("in force"), false);
+  assert.equal(statusIsAffirmative("bound"), false);
+  assert.equal(statusIsAffirmative("cancelled"), false);
+  assert.equal(statusIsAffirmative(null), false);
+  assert.equal(statusIsAffirmative(""), false);
+});
+
+test("statusText shows the record's own word, only capitalised", () => {
+  assert.equal(statusText("cancelled"), "Cancelled");
+  assert.equal(statusText("  non-renewed "), "Non-renewed");
+  // NOT rounded to a friendlier word: the broker owns this vocabulary and there
+  // is no CHECK constraint on the column.
+  assert.equal(statusText("pending-cancel"), "Pending-cancel");
+  assert.equal(statusText(null), "");
 });
 
 test("renewalBand escalates as the renewal nears, null beyond 60 days", () => {
@@ -110,9 +171,14 @@ test("sample policies are reachable and carry standard fields", () => {
   assert.equal(policy.carrier, "Gulfstream P&C");
   assert.ok(policy.coverages.length >= 6, "has Coverage A–F");
   assert.ok(policy.coverages.some((c) => c.recommended), "flags an underinsured limit");
-  assert.equal(policyKind(policy.renewalInDays), "ok");
-  assert.equal(policyKind(findPolicy("flood-marina").policy.renewalInDays), "warn");
-  assert.equal(policyKind(findPolicy("wind-marina").policy.renewalInDays), "exp");
+  // The fixture carries `status` because the live adapter does (js/supabase.js
+  // emits it on every policy). It did not until 2026-10-14, which made the
+  // fixture model a shape the app never produces — so these three would have
+  // read "nostatus" against perfectly good data.
+  assert.equal(policy.status, "active", "fixture must model the adapter's shape");
+  assert.equal(policyKind(policy), "ok");
+  assert.equal(policyKind(findPolicy("flood-marina").policy), "warn");
+  assert.equal(policyKind(findPolicy("wind-marina").policy), "exp");
 });
 
 // ── Regression: unknown renewal date (audit 2026-10-05) ─────────────────────
@@ -120,10 +186,10 @@ test("sample policies are reachable and carry standard fields", () => {
 // are the cases a green 112-test suite missed: renewalBand(null) WAS tested,
 // and it was the only one of the three with a guard.
 test("policyKind reports an unknown renewal date as unknown, not expired", () => {
-  assert.equal(policyKind(null), null);        // `null <= 0` is true — must not read "exp"
-  assert.equal(policyKind(undefined), null);   // the two unknowns must agree
-  assert.equal(policyKind(0), "exp");          // due today is still expired
-  assert.equal(policyKind(1), "warn");
+  assert.equal(policyKind(pol({ renewalInDays: null })), null);      // `null <= 0` is true — must not read "exp"
+  assert.equal(policyKind(pol({ renewalInDays: undefined })), null); // the two unknowns must agree
+  assert.equal(policyKind(pol({ renewalInDays: 0 })), "exp");        // due today is still expired
+  assert.equal(policyKind(pol({ renewalInDays: 1 })), "warn");
 });
 
 test("reminderInfo reports nothing sent when the renewal date is unknown", () => {
@@ -169,19 +235,41 @@ test("renewalCounts puts an undated policy in neither active nor attention", () 
 });
 
 test("renewalCounts classifies each known state once", () => {
-  //            lapsed  due today  expiring soon  active   undated
+  //                 lapsed  due today  expiring soon  active   undated
   const days = [-40,    0,         12,            400,     null, undefined];
-  const c = renewalCounts(days);
+  const c = renewalCounts(days.map((d) => pol({ renewalInDays: d })));
   assert.equal(c.undated, 2, "null and undefined are both 'no date on file'");
   assert.equal(c.active, 2, "expiring soon (12d) is still in force, alongside 400d");
   assert.equal(c.attention, 3, "lapsed + due today + expiring soon");
+});
+
+test("renewalCounts: not-provably-in-force states land in `undated`, never `active`", () => {
+  const c = renewalCounts([
+    pol({ renewalInDays: 400 }),                         // ok
+    pol({ status: "cancelled", renewalInDays: 400 }),    // ended
+    pol({ status: null, renewalInDays: 400 }),           // nostatus
+    pol({ effectiveInDays: 30, renewalInDays: 400 }),    // pending
+    pol({ renewalInDays: null }),                        // no date
+  ]);
+  assert.equal(c.active, 1, "only the one provably-in-force policy counts as active");
+  assert.equal(c.undated, 4, "cancelled / no-status / not-started / undated are all 'unclear'");
+  assert.equal(c.attention, 0, "none of them is a renewal deadline");
+});
+
+test("renewalCounts given bare numbers fails LOUDLY, not silently", () => {
+  // The signature changed from a list of days to a list of policies. A caller
+  // that was not updated now reports every row as `undated` — visibly wrong on
+  // screen — rather than quietly producing a plausible count from `.status`
+  // being undefined on a Number. Pinned so the failure mode stays the loud one.
+  const c = renewalCounts([400, 12, -40]);
+  assert.deepEqual(c, { active: 0, attention: 0, undated: 3 });
 });
 
 test("renewalCounts never counts more rows than it was given", () => {
   // active + attention double-counts "warn" by design (expiring soon is both
   // in force and urgent), but neither bucket alone may exceed the dated rows.
   const days = [-5, 0, 3, 29, 30, 31, 900, null];
-  const c = renewalCounts(days);
+  const c = renewalCounts(days.map((d) => pol({ renewalInDays: d })));
   const dated = days.length - c.undated;
   assert.ok(c.active <= dated, `active ${c.active} > dated ${dated}`);
   assert.ok(c.attention <= dated, `attention ${c.attention} > dated ${dated}`);

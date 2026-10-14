@@ -10,7 +10,7 @@ import { go, previousRoute } from "../../main.js";
 import { icon } from "../../icons.js";
 import { s } from "../../svg.js";
 import { ASSET_META } from "../logic/asset-meta.js";
-import { policyKind, policyType, REMINDER_SCHEDULE } from "../logic/policies.js";
+import { policyKind, policyType, statusText, REMINDER_SCHEDULE } from "../logic/policies.js";
 import { KEEP_ACTIONS, matchActions, searchRecords } from "../logic/search.js";
 import { buildPdf, docLines, docName } from "../logic/docfile.js";
 import { REQUEST_STAGES, stageInfo } from "../logic/requests.js";
@@ -355,7 +355,7 @@ function buildNotifications() {
   for (const ent of getEntities())
     for (const a of ent.assets)
       for (const p of a.policies || []) {
-        const k = policyKind(p.renewalInDays);
+        const k = policyKind(p);
         if (k === "warn") out.push({ kind: "warn", text: `${p.line} expires in ${p.renewalInDays} days`, sub: `${a.name} · renew soon`, href: `#/keep/policy/${p.id}` });
         else if (k === "exp") out.push({ kind: "exp", text: `${p.line} has lapsed`, sub: `${a.name} · action needed`, href: `#/keep/policy/${p.id}` });
       }
@@ -659,8 +659,20 @@ function dateShort(days) {
   const d = new Date(); d.setDate(d.getDate() + Number(days));
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
-function expiryBadge(renewalInDays) {
-  const kind = policyKind(renewalInDays);
+// ⚠️ TAKES THE POLICY, NOT A NUMBER (2026-10-14) — see policyKind. The badge is
+// the Keep's answer to "is this in force?", and until this change it could only
+// see the renewal date, so a CANCELLED policy read "Active · renews <date>".
+function expiryBadge(policy) {
+  const kind = policyKind(policy);
+  const renewalInDays = policy ? policy.renewalInDays : null;
+  // Status first, per help-ask's prompt rule — before the renewal-date checks,
+  // or a cancelled policy with no date on file reports the missing date instead
+  // of the cancellation, which is the less important of the two facts.
+  if (kind === "nostatus") return el("span", { class: "k-exp" }, [el("span", { text: "Status not on file" })]);
+  // The status VERBATIM. This app does not own that vocabulary, so it reports
+  // what the record says rather than rounding it to a word of its own.
+  if (kind === "ended") return el("span", { class: "k-exp k-exp--exp" }, [icon("x", { size: 14 }), el("span", { text: statusText(policy.status) })]);
+  if (kind === "pending") return el("span", { class: "k-exp" }, [el("span", { text: `Cover starts ${dateFromDays(policy.effectiveInDays)}` })]);
   // No renewal date on file. Must come before the Active fallthrough: dateShort
   // (null) would render "Expired <today>" and the plain fallthrough claims the
   // policy renews on a date nobody recorded.
@@ -672,8 +684,10 @@ function expiryBadge(renewalInDays) {
 }
 
 function policySummaryCard(policy) {
-  const kind = policyKind(policy.renewalInDays);
-  const cls = kind === "exp" ? " lapsed" : (kind === "warn" ? " exp" : "");
+  const kind = policyKind(policy);
+  // "ended" shares the lapsed treatment: both mean the cover is not in force,
+  // and the badge beside it already says which of the two it is.
+  const cls = (kind === "exp" || kind === "ended") ? " lapsed" : (kind === "warn" ? " exp" : "");
   const chips = policy.coverages.slice(0, 3).map((c) => el("span", { class: "pill", text: `${c.label} ${c.limit}` }));
   return el("a", { class: `k-pcard${cls}`, attrs: { href: `#/keep/policy/${policy.id}` } }, [
     el("div", { class: "k-pcard__head" }, [
@@ -682,7 +696,7 @@ function policySummaryCard(policy) {
         el("div", { class: "k-pcard__line", text: policy.line }),
         el("div", { class: "k-pcard__sub", text: [policy.carrier, policy.number].filter(Boolean).join(" · ") || "—" }),
       ]),
-      expiryBadge(policy.renewalInDays),
+      expiryBadge(policy),
     ]),
     el("div", { class: "k-pcard__foot" }, [
       el("div", { class: "k-pcard__chips" }, chips),

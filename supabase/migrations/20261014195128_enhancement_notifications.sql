@@ -1,13 +1,67 @@
 -- enhancement_notifications — the notification dedup claim, moved OFF the client
 -- row and into a table the caller cannot touch.
 --
--- ⚠️ WRITTEN, NOT APPLIED. Applying it is an owner decision (it creates a table
--- and grants on it). The code in supabase/functions/notify-enhancement/index.ts
--- calls it, so until this is applied that function FAILS CLOSED: the claim
--- errors, the branch returns `claim_failed`, and nothing is sent. No regression,
--- because the deployed function 404s on every call today. `privilege.test.mjs`
--- enforces the coupling: this file must stay listed in proposed/README.md as
--- blocking the deploy for as long as it is unapplied.
+-- ✅ APPLIED 2026-10-14 on the owner's explicit approval, as version
+-- 20261014195128 (matches `list_migrations`). It was `supabase/proposed/
+-- 20261013_enhancement_notifications.sql` until then.
+--
+-- ⚠️ APPLIED VERBATIM EXCEPT FOR THIS HEADER AND THE INLINE COMMENTS, which were
+-- shortened for the apply call — the Supabase MCP takes SQL inline, so a 239-line
+-- file is retyped into a tool call and every comment line is a chance to corrupt
+-- the statement beside it (the same hazard that produced the comment-stripped
+-- help-ask deploy; CLAUDE.md -> DEPLOY PROVENANCE). **Every executable statement
+-- is byte-identical to this file**, and that is not taken on trust: the end state
+-- was then read back from the catalog, which is what the deploy header calls the
+-- authoritative check. Measured after apply:
+--
+--   privileges on the table : service_role = SELECT, INSERT (plus the inert
+--                             REFERENCES/TRIGGER/TRUNCATE defaults).
+--                             anon and authenticated hold NOTHING — absent from
+--                             information_schema.table_privileges entirely.
+--   owner                   : postgres (not a role any client can reach)
+--   relrowsecurity          : true      relforcerowsecurity: false
+--   policies                : 0
+--   claim_notification      : prosecdef=true, proconfig=search_path="",
+--                             proacl = postgres=X/postgres service_role=X/postgres
+--                             — NOT null, so PUBLIC does not hold EXECUTE.
+--   stamp_requested_notified: proacl = postgres=X/postgres   <- round 6 closed
+--   stamp_approved_notified : proacl = postgres=X/postgres   <- round 6 closed
+--   functions naming the table: exactly one (claim_notification)
+--
+-- POST-APPLY PROBES, RUN AS A REAL `authenticated` SESSION (set local role +
+-- request.jwt.claims, uid 11111111-… = the demo CLIENT — its identity checked
+-- against profiles first, because this repo has already drawn a wrong conclusion
+-- from a probe whose uid turned out to be the broker's):
+--
+--   1.  select from enhancement_notifications        -> 42501 ✅
+--   1b. insert into enhancement_notifications        -> 42501 ✅
+--   2.  select stamp_requested_notified(<own row>)   -> 42501 ✅
+--   2b. select claim_notification(all-zeros, 'requested') -> 42501 ✅
+--
+-- POSITIVE CONTROL as service_role, inside `begin; … rollback;` — the real RPC,
+-- not a bare insert, so the status predicate is exercised too:
+--
+--   claim_notification(<requested row>, 'requested')  -> 2026-10-14 19:52:53Z
+--   the same call again                               -> NULL   (dedup)
+--   claim_notification(<requested row>, 'approved')   -> NULL   (status predicate)
+--   claim_notification(<nonexistent id>, 'requested') -> NULL
+--
+-- Rolled back; `select count(*) from enhancement_notifications` is 0 afterwards.
+--
+-- Was: ⚠️ WRITTEN, NOT APPLIED. Applying it is an owner decision (it creates a
+-- table and grants on it). The code in supabase/functions/notify-enhancement/
+-- index.ts calls it, so until this is applied that function FAILS CLOSED: the
+-- claim errors, the branch returns `claim_failed`, and nothing is sent. No
+-- regression, because the deployed function 404s on every call today.
+-- `privilege.test.mjs` enforces the coupling: this file must stay listed in
+-- proposed/README.md as blocking the deploy for as long as it is unapplied.
+--
+-- ⚠️ THAT COUPLING IS NOW SATISFIED BY THE MOVE, NOT BY THE README. The test
+-- allows an RPC defined only in `proposed/` provided that file is declared
+-- deploy-blocking; this file is in `migrations/`, so it takes the applied branch.
+-- Note what that branch can and cannot claim, in the test's own words: it proves
+-- SOURCE consistency, never that a remote apply happened. The catalog readings
+-- above are the thing that proves this one did.
 --
 -- ── WHY THIS EXISTS: FOUR ROUNDS ON ONE MECHANISM ───────────────────────────
 -- The notification claim lived in two columns on `enhancement_requests`
@@ -184,7 +238,11 @@ revoke execute on function public.stamp_approved_notified(uuid)  from authentica
 -- not needed to close the finding. Whether to drop them is a separate owner
 -- decision, recorded in CLAUDE.md rather than smuggled into this file.
 
--- ── POST-APPLY PROBE — RUN THESE AFTER APPLYING ─────────────────────────────
+-- ── POST-APPLY PROBE — ✅ ALL RUN 2026-10-14, RESULTS IN THE HEADER ─────────
+-- Kept as the procedure rather than deleted: they are the check to re-run if
+-- anything about this table's grants is ever changed. Do not re-run them
+-- casually — probe 3 WRITES, and a row inserted from a session cannot be
+-- removed from one (the MCP hangs on DELETE), so wrap it as the note below says.
 -- ⚠️ As a REAL CLIENT SESSION, not as postgres, and not by calling the thing
 -- under test the way this repo's last probe did. (The probe in
 -- migrations/20261013005250 called the stamp function as the owner and was read

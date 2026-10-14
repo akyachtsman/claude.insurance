@@ -6,17 +6,82 @@
 // profiles.reminder_schedule column default in supabase/migrations — keep in sync.
 export const REMINDER_SCHEDULE = [60, 30, 14, 7, 1];
 
-// Badge state for a policy based on days until renewal.
-// Returns null when the renewal date is UNKNOWN. That guard is load-bearing:
-// policies.renewal_date is nullable, so renewalInDays arrives as null for a
-// policy with no date on file, and `null <= 0` is TRUE — without this the
-// client was told a perfectly live policy had lapsed. `renewalBand` already
-// takes the same early return; these two must agree on what "unknown" means.
-export function policyKind(renewalInDays) {
-  if (renewalInDays == null) return null; // unknown — not a state, absent data
-  if (renewalInDays <= 0) return "exp";   // due today / expired / lapsed
-  if (renewalInDays <= 30) return "warn"; // expiring soon
-  return "ok";                            // active
+// The ONLY value of `policies.status` that means "in force". Compared after
+// trimming and lower-casing, because case and padding cannot be ambiguous.
+// Deliberately a one-element set rather than a guess at the vocabulary: `active`
+// is the only value that exists in the project today (measured 2026-10-14: 7 of
+// 7 rows) and the only one `help-ask`'s prompt names. A value this list does not
+// know is reported verbatim rather than rounded to a state — the same choice the
+// Help-desk model tier makes for an unrecognised model id, and for the same
+// reason: a status nobody recognises is exactly what somebody needs to see.
+const IN_FORCE_STATUS = new Set(["active"]);
+
+export function statusIsAffirmative(status) {
+  return typeof status === "string" && IN_FORCE_STATUS.has(status.trim().toLowerCase());
+}
+
+// A non-affirmative status, shown to the client VERBATIM apart from an initial
+// capital. Deliberately not mapped to a friendlier word: this app does not own
+// the vocabulary of `policies.status` — the broker writes it, there is no CHECK
+// constraint on the column (measured 2026-10-14), and rounding "non-renewed" to
+// "Cancelled" would state something the record does not say.
+export function statusText(status) {
+  const t = String(status == null ? "" : status).trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+}
+
+// Badge state for a policy.
+//
+// ⚠️ IT TAKES THE POLICY, NOT A NUMBER, SINCE 2026-10-14 — AND THAT IS THE FIX.
+// It used to be `policyKind(renewalInDays)`: a date and nothing else. So no Keep
+// screen could see a CANCELLED policy. `policies.status` was selected by the
+// adapter and carried on every policy object, and **read by nothing** — a grep
+// for `policy.status` across `js/keep/` returned zero consumers. A cancelled
+// policy whose renewal date had not yet passed therefore rendered
+// "Active · renews <date>", which is the worst thing this app can tell a client
+// about their cover.
+//
+// THE RULE IS NOT INVENTED HERE. It is `help-ask`'s prompt rule, added
+// 2026-10-09 for exactly this defect on the other reader of this table:
+//
+//   "Say a policy is active ONLY IF it has a `status` line that says so AND its
+//    `cover starts` date is not in the future. If it has NO `status` line, say
+//    the records do not say whether it is active ... a renewal date in the
+//    future does NOT mean a policy is active — it may be cancelled, or not yet
+//    started."
+//
+// ⚠️ So the two readers were never contradicting each other, and reading them
+// that way is what delayed this. The desk reported `status`; the badge reported
+// the date; each presented its own half as the whole answer. "One canonical
+// label, one shared module" is usually about a LABEL — this is the same rule one
+// layer down, about a FACT, and the module is this function.
+//
+// Precedence is the prompt's: status, then cover start, then the renewal date.
+// Status must come first, or a cancelled policy with no renewal date on file
+// would report "Renewal date not on file" instead of "Cancelled".
+//
+// Kinds: "nostatus" · "ended" · "pending" · null (no renewal date) · "exp" ·
+// "warn" · "ok". Only "ok" and "warn" mean in force.
+export function policyKind(policy) {
+  const p = policy || {};
+  // Absent status is NOT a fall-through to the dates. The prompt's comment says
+  // why: `status` is nullable, so "no status, cover started in the past" is a
+  // real row, and a cancelled policy with no status would read as active.
+  if (p.status == null || String(p.status).trim() === "") return "nostatus";
+  if (!statusIsAffirmative(p.status)) return "ended";
+  // Cover has not begun. `effectiveInDays` is nullable too; absent means the
+  // start is unrecorded, which is not evidence that cover is pending.
+  if (p.effectiveInDays != null && p.effectiveInDays > 0) return "pending";
+
+  // Unknown renewal date. Load-bearing: policies.renewal_date is nullable, so
+  // renewalInDays arrives as null, and `null <= 0` is TRUE — without this the
+  // client was told a perfectly live policy had lapsed. `renewalBand` takes the
+  // same early return; these two must agree on what "unknown" means.
+  const d = p.renewalInDays;
+  if (d == null) return null;  // unknown — not a state, absent data
+  if (d <= 0) return "exp";    // due today / expired / lapsed
+  if (d <= 30) return "warn";  // expiring soon
+  return "ok";                 // active
 }
 
 // Urgency band for an upcoming renewal, escalating as the date nears. Drives the
@@ -151,11 +216,21 @@ export function reminderInfo(renewalInDays, schedule = REMINDER_SCHEDULE) {
 // `undated` is NOT folded into either count. An undated policy is neither
 // provably in force nor provably urgent, so it is surfaced on its own and the
 // view labels it — absent data reported as absent, not guessed either way.
-export function renewalCounts(daysList) {
+// ⚠️ TAKES POLICIES, NOT A LIST OF DAYS, since policyKind does. Passing
+// `rows.map((r) => r.policy.renewalInDays)` here now yields `undated` for every
+// row (a bare number has no `.status`), which is loud rather than silent — the
+// deliberate direction for a signature change nothing else can catch.
+//
+// `undated` keeps its name and now covers every policy that is not PROVABLY in
+// force or in trouble: no renewal date, no status, a status we do not recognise,
+// or cover that has not started. All four are "absent or unclear data reported
+// as such, never guessed into one of the other two counts", which is the rule
+// this function was extracted to make testable in the first place.
+export function renewalCounts(policies) {
   const out = { active: 0, attention: 0, undated: 0 };
-  for (const d of daysList || []) {
-    const k = policyKind(d);
-    if (k === null) out.undated += 1;                       // no renewal date on file
+  for (const p of policies || []) {
+    const k = policyKind(p);
+    if (k === null || k === "nostatus" || k === "ended" || k === "pending") out.undated += 1;
     if (k === "ok" || k === "warn") out.active += 1;        // "warn" = expiring soon, still in force
     if (k === "exp" || k === "warn") out.attention += 1;    // lapsed, or inside 30 days
   }

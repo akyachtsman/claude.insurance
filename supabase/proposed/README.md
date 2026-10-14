@@ -1,8 +1,26 @@
 # supabase/proposed/ — written, NOT applied
 
-## ⛔ 20261013_enhancement_notifications.sql — **BLOCKS THE notify-enhancement DEPLOY**
+## ~~20261013_enhancement_notifications.sql~~ — APPLIED 2026-10-14
 
-**Apply this before deploying `notify-enhancement`.** The function writes
+**Now `migrations/20261014195128_enhancement_notifications.sql`.** Applied on the
+owner's explicit approval, with the catalog read back afterwards and all four
+client probes plus the service-role positive control run and recorded in the
+file's header. **It no longer blocks the `notify-enhancement` deploy.**
+
+⚠️ **Applied with the comments shortened, the statements verbatim** — the Supabase
+MCP takes SQL inline, so applying a 239-line file means retyping it into a tool
+call. That is the same hazard that produced the comment-stripped `help-ask`
+deploy (CLAUDE.md → *DEPLOY PROVENANCE*), and the answer here is the same one
+that section reaches: do not trust the transcription, **measure the end state**.
+The header records what the catalog returned — grants, owner, RLS, policy count,
+and `proacl` on all three functions — which is the check no source scan can
+replace.
+
+⚠️ **One thing is now unblocked and still not done:** `notify-enhancement` itself
+is **not deployed**. The claim table existing is what made deploying it safe; it
+did not deploy it. `functions-deploy.yml` deliberately deploys `help-ask` ONLY.
+
+Was: ⛔ **BLOCKS THE notify-enhancement DEPLOY.** The function writes
 `public.enhancement_notifications` on every invocation, so until this is applied
 every claim returns 42501, the handler answers `claim_failed`, and **nothing is
 sent**. Fail-closed — a dead endpoint, not a wrong email — and no regression,
@@ -22,12 +40,13 @@ It also **revokes EXECUTE on both stamp functions from `authenticated`**, which
 closes round 6's direct-RPC bypass outright, and leaves the two stamp columns in
 place but vestigial — nothing writes them afterwards.
 
-⚠️ **Applying it is an owner decision** (it creates a table and grants on it), and
-it is deliberately NOT applied from a session. The post-apply probes are in the
-file's footer; run the write ones inside `begin; … rollback;`, because the
-Supabase MCP hangs 60s on a DELETE and applies nothing — an insert-then-delete
-probe leaves a row nobody can remove from here, which already cost the owner two
-manual statements on 2026-10-13.
+Applying it was an owner decision (it creates a table and grants on it); that
+approval was given on 2026-10-14 and a session applied it. The post-apply probes
+are in the file's footer and have all been run — the write one inside
+`begin; … rollback;`, because the Supabase MCP hangs 60s on a DELETE and applies
+nothing, so an insert-then-delete probe leaves a row nobody can remove from here.
+That already cost the owner two manual statements on 2026-10-13; it cost nothing
+this time, which is the whole point of the rollback.
 
 ## ~~20261013_notified_stamps_write_once.sql~~ — APPLIED 2026-10-13
 
