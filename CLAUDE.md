@@ -2709,6 +2709,55 @@ still the stripped copy.
 ⚠️ It deploys **help-ask only**. A bare `supabase functions deploy` would also
 push `notify-enhancement`, whose claim table is still in `supabase/proposed/`.
 
+⚠️ **AND IT SHIPPED WITH THREE DEFECTS, ALL FOUND BY A REVIEW THAT LANDED AFTER
+THE MERGE** (Codex on #258, completed 00:03:24Z against a PR merged at
+00:00:33Z — a 3-minute window that no merge gate covers). All three were real
+and all three are fixed on the next branch; recorded because the second is a
+standard this file *already holds* and the third is an overclaiming comment,
+which is this repo's most repeated defect:
+
+| # | what shipped | why it was wrong |
+|---|---|---|
+| 1 | path filter omitted `supabase/config.toml` | the CLI reads it for `verify_jwt`, import maps and entrypoints, so a config-only change would merge and leave production on the old configuration. Invisible *because* this repo deliberately carries no `[functions.help-ask]` block — there is nothing there to change yet |
+| 2 | `concurrency` group and nothing else | **a group serializes, it does not ORDER.** GitHub gives no FIFO guarantee for queued runs, so with two pushes close together an older run can execute second and upload older code. This file already records that exact lesson for `pages-retry.yml`, and the new workflow did not carry it over |
+| 3 | one unauthenticated POST, asserting a 401 | it proved **neither** half of what its comment claimed |
+
+**Finding 3 is the instructive one.** The comment said a 401 proves "the route
+exists and is JWT-gated". Measured against six local fakes, the old check:
+
+| scenario | old | new |
+|---|---|---|
+| healthy and gated | pass | pass |
+| **worker fails to boot** (gateway 401 on the POST, 503 on the preflight) | **PASSED** | fail |
+| **`verify_jwt` OFF** (handler.ts answers the same 401 itself) | **PASSED** | fail |
+| not deployed (404) | fail | fail |
+| gateway refuses the preflight | passed | fail |
+| preflight body not `ok` | passed | fail |
+
+So an import error in `prompt.ts` — the module that defines what client data
+crosses the Anthropic boundary — shipped green. That is the exact catastrophe the
+workflow exists to prevent.
+
+**The fix is two probes, one that must REACH the function and one that must
+not.** `OPTIONS` is answered by `handler.ts` with the literal body `ok`, and the
+gateway forwards a preflight, so that body proves the worker booted and resolved
+all three modules; an unauthenticated `POST` must come back 401 **whose body is
+not** `{"error":"unauthorized"}`, because that shape is the handler's own and
+finding it there means `verify_jwt` is off. Neither probe sends a question, so
+neither is billable.
+⚠️ **No response HEADER is asserted, deliberately.** An `x-deno-execution-id`
+check would be the obvious way to tell gateway from worker, and it would be
+guessing at a name no session here can verify — HTTPS egress to the project is
+blocked. The body shapes are read off source.
+
+**Freshness, for finding 2, compares SHAs rather than run ids** — the question is
+"is the code I checked out still what `main` says", which is answered directly
+whichever order the runs started. Skipping loses nothing here, and that is the
+asymmetry with `pages-retry.yml`: this workflow fires on every qualifying push,
+so a superseded run always has a newer run behind it. The retry workflow has no
+successor, which is why it PROCEEDS where this one SKIPS. `workflow_dispatch` is
+exempt, being the manual escape hatch.
+
 ⚠️ **AND THERE IS NOW A CHANGE WAITING ON IT.** `handler.ts` reads the broker's
 stored model tier from `help_settings` (2026-10-14). The LIVE function predates
 that, so it reads only `HELP_MODEL` — the Security page's switch stores a tier
