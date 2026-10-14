@@ -853,13 +853,30 @@ test("the deploy header names every RPC the code calls", () => {
   // approved path, so 20261005120100 is still required. A hard-coded table list
   // could not see that; this does.
   //
-  // ⚠️ THE CLAIM TABLE'S OWN MIGRATION IS DELIBERATELY NOT IN THIS SET WHILE IT
-  // IS UNAPPLIED — it lives in proposed/ and has no applied version to name. The
-  // gate above requires it to be declared deploy-blocking in proposed/README.md
-  // instead. When it is applied and moves to migrations/, it revokes on a
-  // touched table (`revoke all ... from anon, authenticated`), so this
-  // derivation picks it up automatically and set equality then REQUIRES it on
-  // the line. Nothing has to remember to add it.
+  // ⚠️ THIS PARAGRAPH USED TO PROMISE SOMETHING THE CODE DID NOT DO, AND THE
+  // PROMISE IS WHY IT WENT UNNOTICED. It read: the claim migration "is
+  // deliberately not in this set while it is unapplied ... when it is applied
+  // and moves to migrations/, it revokes on a touched table, so this derivation
+  // picks it up automatically and set equality then REQUIRES it on the line.
+  // Nothing has to remember to add it."
+  //
+  // **It never would have.** The set was `clientTables()`, which is (a) built
+  // only from `.from(...)` accesses and (b) explicitly filtered with
+  // `a.target !== CLAIM_TABLE`. This handler reaches the claim table through
+  // `.rpc("claim_notification")` and never names it in a `.from(...)`, so it
+  // failed BOTH tests. Measured 2026-10-14: the migration was applied and moved
+  // into `migrations/`, and this suite stayed green at 23/23 with the
+  // CONFIRM APPLIED line untouched — i.e. the single most important migration
+  // for this handler, the one that creates the table and the RPC and closes
+  // round 6's bypass, was silently not required.
+  //
+  // `clientTables()`'s exclusion is correct FOR ITS OWN INVARIANT (which client
+  // may reach which table — see the gate near the end of this file, which
+  // excludes the claim table for a stated and different reason). Reusing it here
+  // is the scoping error this repo has now recorded five times: an assertion
+  // over a set that is not the set the property belongs to. The union below is
+  // the right set for THIS question — every table the handler depends on, by any
+  // route.
   //
   // Equality, not containment — so a version left behind after its migration is
   // renamed or dropped fails too, the same inversion lesson as BACK_ELIGIBLE.
@@ -872,7 +889,13 @@ test("the deploy header names every RPC the code calls", () => {
     .filter((f) => f.endsWith(".sql"))
     .map((f) => ({ file: f, version: f.split("_")[0], sql: readFileSync(join(migDir, f), "utf8") }));
 
-  const trusted = new Set(clientTables());
+  // Every table this handler depends on, BY ANY ROUTE: the ones it names in
+  // `.from(...)`, plus the claim table, which it reaches only through
+  // `.rpc("claim_notification")`. ⚠️ A future RPC over a FURTHER table has to be
+  // added here by hand — there is no `.from(...)` to find it by. That limit is
+  // stated rather than papered over, because the sentence this replaces claimed
+  // an automation that did not exist.
+  const trusted = new Set([...clientTables(), CLAIM_TABLE]);
   const required = new Set();
   const revokers = migs.filter((m) => {
     const sql = m.sql.replace(/^\s*--.*$/gm, "");

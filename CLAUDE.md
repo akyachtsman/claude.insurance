@@ -1989,18 +1989,39 @@ bypasses above, because the client has no write path at all.
 *Cost:* a new table and migration, and the stamps on `enhancement_requests`
 become what they always honestly were — operational markers, not a gate.
 
-**(B) WAS CHOSEN AND IS BUILT** (owner delegated the call, 2026-10-13). The claim
-is now a row in `public.enhancement_notifications`, keyed `(request_id, event)`:
+**(B) WAS CHOSEN AND IS BUILT** (owner delegated the call, 2026-10-13) **AND
+APPLIED 2026-10-14** as `migrations/20261014195128_enhancement_notifications.sql`.
+The claim is now a row in `public.enhancement_notifications`, keyed
+`(request_id, event)`:
 `authenticated` and `anon` hold **nothing** on it, there are no policies, and
 only `service_role` has an explicit `select, insert`. The client has no write
 path, so none of the four bypasses has an analogue. The migration also **revokes
 EXECUTE on both stamp functions from `authenticated`**, closing round 6 outright,
 and leaves the two stamp columns in place but **vestigial** — nothing writes them.
-⚠️ **The migration is WRITTEN, NOT APPLIED** (`supabase/proposed/20261013_enhancement_notifications.sql`):
-it creates a table and grants, which is an owner decision. Until it is applied the
-function fails closed — `claim_failed`, nothing sent — which is no regression on
-an endpoint that 404s today. `proposed/README.md` declares it deploy-blocking and
-`privilege.test.mjs` enforces that declaration.
+✅ **APPLIED 2026-10-14** on the owner's explicit approval, as version
+`20261014195128` (matches `list_migrations`), and moved into `migrations/`.
+**Measured from the catalog afterwards rather than trusted** — the Supabase MCP
+takes SQL inline, so applying a 239-line file means retyping it into a tool call,
+which is the same hazard that produced the comment-stripped `help-ask` deploy:
+`service_role` holds SELECT+INSERT and `anon`/`authenticated` hold **nothing**
+(absent from `information_schema.table_privileges` entirely); owner `postgres`;
+RLS on with **0 policies**; `claim_notification` is SECURITY DEFINER with
+`search_path` pinned and `proacl = postgres=X service_role=X` (not null, so
+PUBLIC does not hold EXECUTE); **EXECUTE on both stamp functions is gone from
+`authenticated`**, closing round 6 outright; and exactly one function names the
+table. All four client probes (table SELECT, table INSERT, the retired stamp RPC,
+the new claim RPC) return **42501** as a real `authenticated` session; the
+`service_role` positive control claims once, returns NULL on a repeat, NULL on a
+status mismatch and NULL on an unknown id, run inside `begin; … rollback;` with
+the table empty afterwards.
+⚠️ **This unblocked the `notify-enhancement` deploy; it did not deploy it.**
+`functions-deploy.yml` deliberately deploys `help-ask` only, so that endpoint
+still 404s and no enhancement-request email has yet been sent.
+Was: WRITTEN, NOT APPLIED — it creates a table and grants, which is an owner
+decision; until applied the function failed closed (`claim_failed`, nothing
+sent), no regression on an endpoint that 404s. `proposed/README.md` declared it
+deploy-blocking and `privilege.test.mjs` enforced that declaration — a coupling
+now satisfied by the file's location instead.
 
 ⚠️ **(A) WAS NOT MERELY THE LESSER OPTION — IT DOES NOT WORK, and the write-up
 above said otherwise for a day.** Both stamp functions authorize on
@@ -2531,9 +2552,14 @@ disclaimer, must name every known gap, and must not state an `EXPECT` that the
 migrations contradict.
 
 ⚠️ **What is NOT closed, and must not be read as closed:** the owner gate below.
-`supabase/proposed/20261013_enhancement_notifications.sql` is still **written and
-not applied**, and `notify-enhancement` is still **not deployed**. A clean review
-is a statement about the diff, not about production.
+A clean review is a statement about the diff, not about production.
+Half of that gate has since cleared: the claim migration was **applied
+2026-10-14** as `migrations/20261014195128_enhancement_notifications.sql`, with
+the catalog read back and every probe run. **`notify-enhancement` is still NOT
+DEPLOYED** — `functions-deploy.yml` deliberately deploys `help-ask` only, so the
+endpoint 404s and no enhancement-request email has ever been sent. Applying the
+table made deploying it safe; it did not deploy it, and those are easy to
+conflate because one was the stated blocker for the other.
 
 ### ⚠️ ROUND 27 — A WRONG `EXPECT` IS WORSE THAN A MISSING ONE
 
@@ -2568,6 +2594,50 @@ one correctly stays clean.
 function, the migration and the suite's behaviour have been unchanged since
 `da86e83`; what kept being wrong was what the documentation asserted about them.
 That is worth knowing the next time a section of this file reads as confident.
+
+### ⚠️ A GATE ANCHORED ON `.from(...)` CANNOT SEE A TABLE REACHED BY `.rpc(...)` (2026-10-14)
+
+Found by applying the claim migration and watching **nothing happen**. The
+deploy header's machine-checked `CONFIRM APPLIED:` line is derived by
+`privilege.test.mjs` — *"every APPLIED migration that REVOKES on a table this
+handler names in `.from(...)`"* — and compared by **set equality**, which is the
+right shape. It was blind to the one migration that matters most here.
+
+`notify-enhancement` names exactly two tables in `.from(...)`:
+`enhancement_requests` and `profiles`. It reaches `enhancement_notifications`
+**only** through `.rpc("claim_notification")`. And the helper the derivation
+used, `clientTables()`, *additionally* filtered the claim table out by name —
+correctly, for **its own** invariant (which client may reach which table), and
+wrongly when reused for this one. So the migration that creates the table,
+defines the RPC and closes round 6's bypass failed **both** tests and was never
+required.
+
+⚠️ **AND THE COMMENT PROMISED OTHERWISE, IN TERMS:** *"when it is applied and
+moves to migrations/, it revokes on a touched table … so this derivation picks it
+up automatically and set equality then REQUIRES it on the line. Nothing has to
+remember to add it."* Measured: the migration was applied, moved into
+`migrations/`, and **the suite stayed green at 23/23 with the line untouched.**
+That green run is the measurement — the promise was never tested because the
+situation it described had never occurred.
+
+**Two lessons, and the second is the general one.**
+1. The scoping error: *an assertion over a set that is not the set the property
+   belongs to.* This repo has now recorded it five times (the concatenated
+   migrations scan, the `.k-h1` assertion, the round-25 disclaimer, the round-26
+   gap list, and this). Reusing a helper because it returns roughly the right
+   thing is how it keeps happening — `clientTables()` has a correct exclusion for
+   a different question.
+2. ⚠️ **A GATE'S ANCHOR IS A CLAIM ABOUT HOW THE CODE REACHES ITS DATA, and that
+   claim expires.** `.from(...)` was a complete anchor when written; the round-22
+   redesign moved the claim through an RPC and silently invalidated it. Nothing
+   failed, because the gate's blindness and the thing it was blind to arrived in
+   the same change.
+
+**Fixed** by taking the union — `.from(...)` tables **plus** the claim table —
+and `20261014195128` is now on the line. ⚠️ **The limit is stated rather than
+papered over:** a future RPC over a *further* table must be added by hand, since
+there is no `.from(...)` to find it by. Mutation-tested 4/4 (drop the version,
+revert the set, delete the migration's table revoke, add a spurious version).
 
 ### ⚠️ A COLUMN IS ONLY AS PROTECTED AS ITS WEAKEST WRITE PATH (2026-10-13)
 
@@ -3363,7 +3433,7 @@ the difference will be invisible, because what is deployed is not what is read.
 Prefer a path that uploads the file. If none exists, that is a gap in the
 tooling, not a thing to be careful about.
 
-### ⚠️ OPEN — `policies.status` and the UI's expiry badge disagree (found 2026-10-13)
+### ✅ RESOLVED 2026-10-14 — `policies.status` was read by NOTHING in the UI
 
 Surfaced by the Help desk's first real answer, which is the useful part: two
 readers of the same table gave a client two different answers in one session.
@@ -3391,11 +3461,76 @@ updated."*
 
 **This is the "one canonical label, one shared module" rule violated one layer
 below where that rule is usually enforced** — not two views disagreeing about a
-label, but two readers disagreeing about a FACT. The fix is a product decision
-that has not been made: either `status` is the system of record and the badge
-must derive from it, or the badge's derivation is authoritative and `status` is
-decoration that should be dropped. Seeding more careful demo data would hide the
-question rather than answer it.
+label, but two readers disagreeing about a FACT.
+
+⚠️ **AND BOTH OF THE OPTIONS THIS SECTION ORIGINALLY OFFERED WERE WRONG.** It
+said the fix was a product decision between "`status` is the system of record, so
+the badge must derive from it" and "the badge's derivation is authoritative and
+`status` is decoration that should be dropped". Two measurements, neither taken
+when that sentence was written, kill both:
+
+| measurement | kills |
+|---|---|
+| `select status, count(*) from policies group by status` → **one row: `active`, 7 of 7** | option A. A column with one value that was never updated when three policies passed their renewal date is not a system of record. Deriving the badge from it would have **suppressed** the true "3 Lapsed, action needed" signal |
+| `grep -rn "policy.status" js/keep/` → **zero consumers** | option B. `status` is not decoration being over-trusted; it is **loaded by the adapter, carried on every policy object, and read by nothing**. And dropping it from the prompt would reinstate the exact defect `status` was added to the digest to fix on 2026-10-09 |
+
+**The real defect is that the two were never contradicting each other.** The desk
+reported `status`; the badge reported `renewal_date`; each presented its own half
+as the whole answer. They answer different questions and a policy is in force
+only when **both** say so — which is precisely what `help-ask`'s prompt has said
+since 2026-10-09 (*"active ONLY IF status says so AND cover has started; a
+renewal date in the future does NOT mean a policy is active"*). The desk was
+right and the UI was structurally unable to be: `policyKind(renewalInDays)` took
+a date and nothing else, so **no Keep screen could see a cancelled policy**, and
+one whose renewal date had not yet passed rendered **"Active · renews <date>"**.
+
+**Fixed by giving the UI the inputs the desk already had.** `policyKind` now
+takes the POLICY (`js/keep/logic/policies.js`), applies the prompt's precedence —
+status, then cover start, then renewal date — and gains three kinds: `nostatus`,
+`ended`, `pending`. `renewalCounts` takes policies and puts all three in
+`undated`, so unclear data is never counted as in force. All three columns are
+nullable with no default and no CHECK (measured), so every branch is reachable.
+
+⚠️ **NO BEHAVIOUR CHANGES ON CURRENT DATA, and that is the point.** All 7 live
+policies are `active`, so every badge renders exactly as before and the home page
+still says "3 Lapsed, action needed" — which is **true and actionable**. Seeding
+more careful demo data would have hidden the question; so would making the badge
+agree with a column nobody maintains.
+
+⚠️ **WHAT IS STILL OPEN IS THE DATA QUESTION, and it is the broker's:** three
+policies carry `status = 'active'` with a renewal date months past. Were they
+renewed and the row not updated, or did cover end? The code now reports both
+facts honestly instead of picking one; it cannot answer that.
+
+⚠️ **THE UNIT TESTS COULD NOT CATCH THIS FIX, AND ONLY MUTATION TESTING SAID
+SO.** With 392 unit tests green, **four view mutations SURVIVED**: deleting
+`expiryBadge`'s `ended` branch, deleting the policy detail's `ended` label, and
+reverting **either** call site from `expiryBadge(policy)` to
+`expiryBadge(policy.renewalInDays)` — the last two restore the original bug in
+one character. **S28** closes that (see the scenario table). Writing it then
+turned up a fifth reader nobody had listed: `policySummaryCard` on the **asset**
+page, found because its mutation survived a version of S28 that already asserted
+three readers. There are **four** `expiryBadge` call sites in two files, and
+assuming one covers another is how this stayed open.
+
+⚠️ **Two fixture defects fell out of it**, both the same class — a fixture
+modelling a shape the app never produces:
+- **neither fixture carried `status` at all** (`js/keep/fixtures/sample.mjs` and
+  the Playwright harness), though the live adapter emits it on every policy. They
+  now do, pinned by an assertion in `policies.test.mjs`.
+- the harness fixture said **`policy_number`**; the column and the adapter are
+  **`number`**, so its `.k-imuted` line has always rendered blank and nothing
+  asserted on it. That is the *same wrong name* that shipped in `help-ask`'s
+  select and made every client's records read as "nothing on file". **Take
+  fixture field names from the TABLE, not from the nested shape the views
+  consume** — the default fixture still carries the wrong one, deliberately
+  unchanged here so the contrast is visible beside S28's.
+
+⚠️ **And a third heading convention surfaced:** list pages use `.k-h1`, policy
+detail uses `.k-phead__t h1`, asset detail uses `.k-ahero h1`. CLAUDE.md already
+records that a `.k-h1` assertion after a navigation matches the page being LEFT;
+on these two it matches **nothing**, which is the louder failure and is how both
+were found.
 
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
@@ -3873,6 +4008,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S25 | Help desk — a render parked on the CORPUS when the session ends (offline harness, **runs locally**) | Hold `content/help-guide.json`, start the first Help visit, then sign out **in the same page** through the app's own exported `signOut()` — the hash never changes, so neither the render generation nor the hash check can see it. Release: the login card must survive, no `.k-help__input` or `.k-help__ai` may mount, and **no `route error:` may be logged** — that last one is the only assertion that fails when the epoch check is deleted, because the DOM is otherwise saved by an accident (the stale build throws into `route()`'s generation-guarded catch). | An authenticated Help form mounts over the login card, or the stale render runs and throws instead of being refused |
 | S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
 | S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
+| S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | Three seeded policies — in force, **cancelled with a FUTURE renewal date**, and status never recorded. On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`) and the **asset** page's `.k-pcard` — four readers of one fact, in two files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
