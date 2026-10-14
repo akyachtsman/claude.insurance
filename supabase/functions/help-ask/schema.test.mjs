@@ -174,15 +174,19 @@ test("every column help-ask SELECTs exists in that table", () => {
 // sat selected-and-dropped for four review rounds while the docs claimed it was
 // sent. Keep the two lists in step or change the constraint deliberately.
 const DOCUMENTED = {
-  // ⚠️ NEITHER profiles COLUMN CROSSES THE PROVIDER BOUNDARY, and this table is
-  // not a model of what does — it is a model of what is SELECTED, which is the
-  // half that catches a column fetched and then dropped (the `policy_number`
-  // lesson above). `id` is the invite gate; `role` decides whether the response
-  // names the model that answered, and is the caller's OWN role because RLS on
-  // `profiles` is `id = auth.uid()`. What reaches the prompt is pinned
-  // separately, by handler.test.mjs's sentinel sweep — so adding a column here
-  // cannot quietly widen the digest.
-  profiles: ["id", "role"],
+  // ⚠️ `id` AND NOTHING ELSE, and this table is not a model of what crosses the
+  // provider boundary — it models what is SELECTED, which is the half that
+  // catches a column fetched and then dropped (the `policy_number` lesson
+  // above). `id` is the invite gate.
+  // `role` was here from 2026-10-14 and is GONE: it existed to decide whether
+  // the response named the model that answered, that gate was removed when the
+  // owner made the tier visible to every caller, and the column went with it.
+  // A column whose last consumer disappears should leave the select — one still
+  // read "in case" is one the next person has to reason about. The narrowing is
+  // pinned on the other side too, by handler.test.mjs's select scan, so the two
+  // cannot drift. What reaches the prompt is pinned separately by that file's
+  // sentinel sweep, so a column added here cannot quietly widen the digest.
+  profiles: ["id"],
   entities: ["id", "name", "kind"],
   assets: ["id", "name", "type", "value", "entity_id"],
   // `status` and `effective_date` added 2026-10-09: the prompt invited the model
