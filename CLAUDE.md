@@ -2786,6 +2786,75 @@ gate to prove the token *works* is not free either (it costs an API call per run
 and an auth probe is a credential the gate would then need), so the honest fix is
 the credential, not a cleverer gate.
 
+✅ **AND IT IS NO LONGER A PREDICTION — MEASURED ON THE VERY NEXT MERGE, 2026-10-14.**
+Run `38508387852` on `8e03068`, which is the merge of the commit that wrote the
+paragraph above. The step ladder is exactly the shape predicted, which is what
+makes it worth recording rather than just red:
+
+| step | result |
+|---|---|
+| 3. Is a newer deploy run already queued? | success |
+| 4. **Require SUPABASE_ACCESS_TOKEN** | **success** — the revoked token passes the non-empty gate, as predicted |
+| 5. setup-cli | success |
+| 6. **Deploy help-ask** | **failure**, exit 1 |
+| 7. Smoke — the worker boots, and the gateway gates it | skipped, correctly (gated on the deploy) |
+
+**This CORROBORATES the prediction; it does not measure the cause.** Run
+`38498409976` on `86aae05` was **green** at 01:56:37Z, and the only change to
+this workflow between the two is **19 added and 6 removed COMMENT lines** — so a
+change in the workflow's own logic is ruled OUT, and the observed failure is
+*consistent with* the known revocation. That is all it is.
+
+⚠️ **AN EARLIER VERSION OF THIS PARAGRAPH CALLED THE ATTRIBUTION "CONTROLLED",
+AND THAT WAS THE OVERCLAIM — in the section written to replace a prediction with
+a measurement, which is this file's most-repeated defect arriving one layer out
+again.** Codex, #261 round 2, answering a question put to it directly. The diff
+controls the workflow logic and **nothing else that feeds the deploy step**: the
+runner image, network egress, and Supabase's own service state are all
+uncontrolled, and an `exit 1` with no error text does not distinguish between
+them. One alternative explanation eliminated is not a cause established.
+
+✅ **WHAT WOULD SETTLE IT, and it is already on the owner list:** the CLI's error
+text — unobtainable from a session, the logs endpoint redirects to blob storage
+this `gh` will not contact and says in terms that no flag changes that — **or,
+better, the restore itself.** Replacing the token with nothing else changed and
+watching this step go green is a cleaner proof than the log would be, because it
+tests the hypothesis rather than reading an error message. So the restore step
+below doubles as the measurement; until it runs, read this section as
+"predicted, then observed to fail at the predicted step", not as "proven to be
+the token".
+
+⚠️ **BOTH ENDPOINTS ARE PINNED TO COMMITS, and the first version of this used
+`origin/main`** — Codex, #261. `git diff 86aae05 origin/main -- …` reproduced
+19/6 on the day it was written and stops doing so the moment `main` takes another
+workflow edit; it would then show **executable** changes and suggest the code
+differed between the green run and the red one, which is the attribution this
+paragraph exists to establish. A moving endpoint in a historical measurement
+drifts in the unsafe direction. The command is:
+
+```
+git diff --stat 86aae05 8e03068 -- .github/workflows/functions-deploy.yml
+```
+
+Those are the two runs' own `head_sha`s — `38498409976` ran on `86aae05`
+(success) and `38508387852` on `8e03068` (failure), both read back from the runs
+API rather than assumed — so the diff is between exactly the two files that
+executed, for good. ⚠️ The raw job log is
+not readable from a session — the logs endpoint redirects to blob storage this
+`gh` will not contact, and it says in terms that no flag changes that — so what
+there is to go on is the step ladder plus that diff, which together narrow the
+cause without isolating it. See the qualification above.
+
+⚠️ **AND IT FIRED ON A COMMENT-ONLY EDIT, which the path filter's own comment
+says it is trying to avoid** (*"A README or CLAUDE.md edit must not redeploy a
+live endpoint"*). The merge touched only `CLAUDE.md` and this workflow's header
+comments — but the workflow is in its **own** path filter, and a path filter
+cannot tell a comment from logic. Deliberately not changed: firing is the SAFE
+direction (with a working token it would have redeployed identical bytes and kept
+"deployed == repo" true), and the alternative — dropping the workflow from its
+own filter — means a real change to the deploy logic does not re-run the deploy.
+Expect a deploy run on any edit to this file, comments included.
+
 ✅ **TO RESTORE — one owner action, two minutes:** a new Supabase access token
 (Expiry **Never**, Resource access **Project → `insurance`**, permissions
 **Edge Functions: Read-write** and nothing else — notably NOT Edge Function
