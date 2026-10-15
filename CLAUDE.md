@@ -4229,8 +4229,12 @@ out of the brand. No overflow assertion could have caught any of it.
 "closing the last 28px means shrinking the 44px touch targets" — wrong, because
 the bar was never 28px short: it was crushing the logo. Giving the icon
 `flex: none` and letting the wordmark go instead freed far more than the icon
-needed. Measured: **zero overflow from 320 to 1440**, logo at 26px, no control
-under 44px. The conclusion was reasonable and the premise was never checked.
+needed.
+⚠️ **BUT THE SENTENCE THAT FOLLOWED — "zero overflow from 320 to 1440" — WAS
+FALSE, and the next section is how.** It was measured at 320, 360, 390, 414,
+480, 600, 700, 740, 759-761, 810, 900, 1000-1045, 1100, 1280, 1440 — and the
+defect lived at **481-500**, between two clean samples. Logo at 26px and no
+control under 44px both hold.
 
 **The fix is a stated sacrifice order, not three fixes:** the decorative
 `.k-tag` goes first, then the brand WORDMARK (hidden below 380px — an
@@ -4275,6 +4279,96 @@ additionally asserts that **nothing is crushed** (the logo keeps its natural
 width, no 44px control shrinks), and a 740×320 block asserts the panel is
 viewport-bounded, scrolls, **stays open when scrolled**, strands nothing, and
 still closes on a page scroll.
+
+### ⚠️ `scrollWidth` ON A FLEX CONTAINER IS WHAT IT SETTLED FOR, NOT WHAT IT WANTED (2026-10-15)
+
+Three Codex P2s on #275. All three reproduced, and the first **falsifies that
+PR's headline claim** while the second invalidates a breakpoint two PRs had
+been built on.
+
+**1. "Zero overflow from 320 to 1440" was false.** #275 sampled 480 and 600 and
+the whole defect lived between them. At 481 the three compact-bar rules all
+switched off at once — search 44→160, gutters and gaps widened — while the bar
+still had no room:
+
+| width | wordmark | page overflow |
+|---|---|---|
+| 480 | full | 0 |
+| **481** | **truncated to 43px of 104** | **21px** |
+| 490 | truncated to 52px | 12px |
+| 500 | truncated to 62px | 2px |
+| 520, 540 | truncated | 0 |
+| 560 | full | 0 |
+
+So the ellipsis #275 added rendered the brand as **"Ha…"** across 481-540 — the
+exact outcome its own comment calls worse than hiding the wordmark. The compact
+rules now switch at the measured **560**.
+
+**2. AND THE 1044 BREAKPOINT WAS WRONG BECAUSE OF *HOW* IT WAS MEASURED.** It
+came from `.k-bar__in.scrollWidth`, which reports the **laid-out** width rather
+than the intrinsic need whenever a child can shrink. `.k-tag` is itself a
+shrinking flex item — **55px at 1045 against a natural 83px** — so the original
+reading was of an already-compressed bar. Re-measured with the shrink
+neutralised (`flex: none; overflow: visible`, then read): the wide layout needs
+**1130**, and 1045-1120 truncated the wordmark to as little as **54px of 104**
+with every overflow assertion green. Breakpoint moves 1044 → **1129**.
+
+⚠️ **The generalisable rule: to measure an intrinsic width, neutralise the
+shrink first.** `scrollWidth` on a flex container whose children shrink tells
+you what it settled for. Two PRs rested on that number.
+
+A third band, **381-384**, was the same discontinuity at the other boundary;
+the wordmark hide moves 380 → **385**.
+
+**3. The sacrifice order was applied to the whole portal.** `.k-tag` is also
+rendered by the LOGIN CARD's `.k-abrand` (`js/keep/views/keep.js:48`), which is
+in no constrained container at all — the unscoped selector removed the product
+badge from the authentication screen at every width 320-1044. Now
+`.k-bar .k-tag`. **A sacrifice order is about one container; a bare class
+selector applies it everywhere that class appears.**
+
+**4. The panel's bound was an assumed top.** `calc(100vh - 124px)` subtracts a
+ribbon plus a single-line bar, and the real top moves with ribbon height, text
+size and zoom. Measured at 740×300 with the chrome at 2x: **39px past the
+viewport**, "Documents" stranded after scrolling. `popover()` now sets an exact
+`max-height` from the panel's measured top on each open; CSS cannot read an
+element's own offset, so the declaration stays as the pre-first-open fallback
+and says so.
+
+⚠️ **THE DENSE SWEEP IS THE METHOD CHANGE, and it is the part to keep.** 120
+widths — every 8px from 320 to 1120 plus **1px either side of every
+media-query boundary** — asserting overflow, logo width, wordmark truncation
+and the nav inversion together. A discontinuity is invisible to sampling by
+construction: both endpoints were clean every time. S29's band went from 12
+widths to 19, both sides of each boundary.
+
+⚠️ **AND THE ELLIPSIS IS WHY EVERY OVERFLOW ASSERTION STAYED GREEN.** A
+shrinkable wordmark converts an overflow into a truncation, which
+`scrollWidth <= clientWidth` reports as a pass. The check for it is now in S29
+beside the crush check: a visible `.k-brand__name` whose `scrollWidth` exceeds
+its `clientWidth` fails.
+
+**Mutation-tested 5/6, control clean** — the 481 overflow, the 1045
+truncation, the 381 truncation, the login-card badge, and the fixed-subtraction
+bound are each proven load-bearing; the `maxHeight` reset on close **survived**
+and is labelled belt in the code.
+
+⚠️ **THE FIRST MUTATION RUN WAS WORTHLESS AND THE CONTROL IS WHAT SAID SO.** It
+graded 6 of 7 — and the **control**, a comment-only edit, "failed" with a
+`page.evaluate` timeout. That is a harness verdict, not a finding. S29 had grown
+to **17-22s on webkit against `playwright.config.js`'s 30s PER-TEST timeout**,
+failing 2 of 4 on one run and 0 of 4 on the next. Every grade in that run was
+suspect the moment the control failed. Fixed by redesign, not by raising the
+bound (this file already records that a 30s wait cannot fit inside a 30s test):
+S30 took the two non-band claims, the menu interaction dropped to one width per
+layout regime, and the band **resizes instead of re-navigating** — media queries
+re-evaluate on resize, 19 `goto`s were the bulk of the time, and a resize is
+closer to what a person rotating a phone does. **21.9s → 5.7s** on the slowest
+project.
+⚠️ One real gap only that re-run could expose: reverting the wordmark hide
+SURVIVED, because the band sampled 385/386 while the truncating widths are
+381-384 — at 385 the shortfall is 1px and the `+1` tolerance absorbs it. The
+band now carries **382**, the width the dense sweep flagged.
 
 ### ⛔ NOT BUILT, deliberately — a sprite-reference guard, and why the cheap one is the wrong shape
 
@@ -4398,7 +4492,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), app bar nav: `.k-nav` (the wide strip, visible **only above 1044px**), `.k-pop--nav` (the compact control that replaces it at or below 1044px; trigger `.k-pop--nav button`, panel `.k-pop--nav .k-menu`, open state `.k-pop--nav.is-open`). ⚠️ **The two are exact inverses**, so a Keep nav assertion written against `.k-nav` matches nothing on the `tablet` (810px), `mobile-chrome` (393px) and `iphone` (390px) projects — only `desktop` is above the breakpoint. That is three of four projects silently matching nothing, the `.card` failure this table already records, model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), app bar nav: `.k-nav` (the wide strip, visible **only above 1129px** — the figure was 1044 until 2026-10-15, when `scrollWidth` was found to under-report the bar's intrinsic need), `.k-pop--nav` (the compact control that replaces it at or below 1129px; trigger `.k-pop--nav button`, panel `.k-pop--nav .k-menu`, open state `.k-pop--nav.is-open`). ⚠️ **The two are exact inverses**, so a Keep nav assertion written against `.k-nav` matches nothing on the `tablet` (810px), `mobile-chrome` (393px) and `iphone` (390px) projects — only `desktop` is above the breakpoint. That is three of four projects silently matching nothing, the `.card` failure this table already records, model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
 
 ⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
 2026-10-05** (headless chromium, local static server) — not read off the source.
@@ -4449,7 +4543,8 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
 | S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
 | S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
-| S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044** that inverts, with `scrollWidth <= clientWidth` at each, the menu opening, its panel fully on-screen, and its rendered hrefs **EQUAL AS A SET** to the wide strip's — equality not containment, so a stale menu entry fails too (the `BACK_ELIGIBLE` inversion). 1044/1045 are asserted as a **pair**, because one breakpoint drives both controls and an off-by-one showing neither is what a single sample cannot see. Escape closes it, `aria-expanded` tracks, a menu link actually navigates, and **no app-bar `<use href>` resolves to nothing** — `icon()` renders an empty svg for an unknown name, silently, and two of the first five names here were wrong. ⚠️ **320px is deliberately excluded and the reason is IN the scenario**: the bar needs 348px there (371 before this change), and closing it means shrinking the 44px touch targets. ⚠️ Each iteration asserts a **known-closed** menu first — `page.goto` to the same hash does not reload, so the previous width's open menu made the next click toggle it shut, which reads as an app defect | Any width shows both navs or neither, the Keep scrolls sideways, the compact menu's destinations drift from the strip's, its panel renders off-screen, Escape stops closing it, or an app-bar icon names no sprite symbol |
+| S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **19 widths — 320, 360, 382, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129** — that inverts, with `scrollWidth <= clientWidth`, the logo at its natural width, no 44px control shrunk, and **the wordmark never truncated** at each. ⚠️ Both sides of every media-query boundary are sampled, because #275's defect lived entirely between 480 and 600 and both endpoints were clean. ⚠️ The wordmark check is the one that catches it: a shrinkable wordmark turns an overflow into an ellipsis, which every `scrollWidth` assertion reports as a pass. The band **resizes rather than re-navigating** (media queries re-evaluate on resize; 19 `goto`s cost ~17s against a 30s per-test budget), and the menu INTERACTION — opens, panel on-screen, hrefs **EQUAL AS A SET** to the strip's, Escape closes, `aria-expanded` tracks — runs at one width per layout regime (360, 481, 810, 1129). 1129/1130 are asserted as a **pair**. A menu link navigates, and **no app-bar `<use href>` resolves to nothing**. ⚠️ 382 is in the list deliberately: at 385 the wordmark's shortfall is 1px and the tolerance absorbs it, so the mutation reverting that breakpoint survived a band that sampled 385/386 | Any width shows both navs or neither, the Keep scrolls sideways, the wordmark ellipsises, the logo or a touch target is crushed, the compact menu's destinations drift from the strip's, Escape stops closing it, or an app-bar icon names no sprite symbol |
+| S30 | The brand sacrifice is app-bar only, and menu panels respect their real top (offline harness, **runs locally**) | Signed OUT **in a fresh context** (`localStorage` is shared, so a second page on the seeded context is already signed in and renders the home view — the first version failed with "the login card did not mount", which reads as an app defect), the login card keeps its `.k-abrand .k-tag` badge at 390, 481, 810, 1129 and 1280: the sacrifice order belongs to the app bar, and an unscoped `.k-tag { display: none }` stripped the badge from the authentication screen at every width 320-1044. Then at 740×320 with the chrome enlarged to 2x, the open panel's bottom stays within the viewport and no destination is stranded after scrolling it — `calc(100vh - 124px)` subtracts an ASSUMED top and measured 39px past the viewport. ⚠️ Split out of S29 because that test hit 17-22s against a 30s per-test timeout and a comment-only control mutation "failed" on a timeout | The login card loses its badge at any width, or an enlarged ribbon or text size pushes a menu panel past the viewport and strands its last link |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
