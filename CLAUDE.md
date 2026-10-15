@@ -867,6 +867,92 @@ profile**, never by listing a directory.
   **Before production: split into per-project Supabase accounts/orgs.** Note the deploy token created 2026-10-14 is the counter-example worth copying — scoped to one project and one capability (see *DEPLOY PROVENANCE*).
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
 
+### ✅ CLOSED 2026-10-15 — THE PORTAL COULD NOT HAVE INVITED ITS FIRST CLIENT
+
+Found by reading Supabase's own docs while answering a question about email
+providers, not by any instrument in this repo. **Nothing here would ever have
+gone red for it**, and it sat directly in front of the invite runbook.
+
+**What it was.** Supabase's built-in SMTP sender is for Auth messages only and
+is not a production sender: *"Unless you configure a custom SMTP server for
+your project, Supabase Auth will refuse to deliver messages to addresses that
+are not part of the project's team … All other addresses will fail with the
+error message **Email address not authorized**."* An invite is an Auth email.
+So the Keep — an **invite-only** portal whose runbook says every future client
+is created from the dashboard or the Admin API — could not have onboarded
+anybody outside the Supabase org team. The first real invite would simply have
+been refused.
+
+**Measured, in order, 2026-10-15:**
+
+| time (UTC) | evidence | reading |
+|---|---|---|
+| — | **Enable custom SMTP: OFF**, read off the dashboard for `bdsegmjcgfmgzuxwiplj` | the blocker was live |
+| 05:06:31 | `auth_logs`: `reloading api with new configuration`, and `env GOTRUE_RATE_LIMIT_EMAIL_SENT changed, updating Email limiter **from 2/1h to 30**` | the save landed SERVER-SIDE, not just in the UI — and 2/h → 30/h is the signature of enabling custom SMTP, since 30 is exactly what the docs say Supabase imposes |
+| 05:13:59 | `auth_logs`: `action: user_invited`, `path: /invite`, **status 200**, duration **1.86s** | a real SMTP handshake, auth and hand-off to Gmail. An auth failure returns 500 fast |
+| — | the invite **arrived** | delivery works |
+
+⚠️ **AND IT LANDED IN SPAM, which is the finding worth more than the fix.**
+Gmail gave its own reason: *"This message is similar to messages that were
+identified as spam in the past."* That is a **content-similarity** verdict, not
+an authentication one — the stock Supabase invite template ships byte-identical
+across thousands of projects, many of them phishing, so the shape itself is
+fingerprinted. The template is rewritten and kept at
+`supabase/templates/invite.html`, with what it fixes and what it does not.
+⚠️ Two things it does **not** fix, so a green inbox is not read as solved: the
+From is a personal `@gmail.com`, and the accept link points at a random-looking
+`<ref>.supabase.co` subdomain — a link domain unrelated to the sender is its own
+signal, and Supabase's docs name the remedy (a custom domain for the Auth
+server). The durable answer is a real sending domain with SPF/DKIM/DMARC.
+⚠️ The SPF/DKIM/DMARC results were **not** read from *Show original*, so
+authentication is unlikely-but-unconfirmed as a contributor. Do not write it off.
+
+⚠️ **THE PRECONDITION UNDER THE PUBLISHED STAFF CREDENTIALS HAS NOW EXPIRED,
+exactly as this file predicted it would.** The invite-runbook entry accepts the
+broker and underwriter passwords being published here on a *measured*
+precondition — "`auth.users` holds exactly three rows, all `@example.com` … so
+there is no real client data to expose — and that precondition expires with the
+first invite." Measured after the test: **4 rows, 1 non-demo**. The test account
+is disposable and deleting it restores the state; what does not go away is that
+the rotation item is now the next real client's blocker rather than a someday.
+
+**The shape to carry, because it is the third instance:** custom SMTP is a
+**project configuration setting, not schema.** It is not in `list_migrations`,
+not in `pg_policies`, not in a source scan, not in CI, and no MCP tool this
+repo's sessions hold can read it — the same blind spot as the public-sign-up
+flag and the Auth email templates. All three were invisible, all three
+contradicted something the product or the runbook asserted, and all three could
+only be settled by the owner opening a dashboard page. **When a claim rests on
+project configuration, the repo cannot check it and must say whose job it is.**
+
+| who | what | evidence |
+|---|---|---|
+| **owner**, before any real invite | Authentication → Emails → SMTP Settings on `bdsegmjcgfmgzuxwiplj` | "Enable custom SMTP" ON, and the sender is not a personal mailbox |
+| **session** | ask; never infer it from this file | `auth_logs` can corroborate a SEND (`/invite` 200) but says nothing about the toggle until one is attempted |
+
+### ⚠️ OPEN — the Account page offers renewal reminders that nothing sends
+
+Found the same day, and it is a live product claim with no backend at all.
+`js/supabase.js` reads and writes `profiles.reminder_email` and
+`profiles.reminder_schedule` (default `[60, 30, 14, 7, 1]` days), and the
+Account page lets a client switch reminders on and choose a cadence. It saves,
+and it reads back.
+
+**Nothing consumes either column.** `supabase/functions/` holds exactly two
+entries — `help-ask` and `notify-enhancement` — so there is no `notify-renewal`,
+no scheduled trigger (no workflow here has a `schedule:` trigger at all, and
+`cron-notify.yml` is absent), and no sender. A client can turn renewal
+reminders on, pick 60/30/14/7/1 days, and never receive one.
+
+This is the same shape as the "Invite-only access" card that was true in copy
+and false in configuration until 2026-10-14 — but closer to the core promise,
+since renewals are what the product is *for*: the home page's own "Renewals
+coming up" panel and its lapsed/expiring counters are the headline feature.
+Deliberately **not** fixed here: it is a build (an Edge Function plus a
+schedule plus a sender), not a config, and it needs a product decision about
+what the reminder says and who it comes from — which is the same sending-domain
+question the invite work just raised.
+
 ### Auth-gate readiness: proven, not windowed (wired 2026-10-06)
 
 `test.md` → *Playwright* makes "no auth gate found" a **window** unless the
@@ -2830,8 +2916,20 @@ diff`, this one only fails under thinking about it.
 `connect_rejected` — "the egress proxy denied the CONNECT (organization policy)
 or could not reach the destination". So from a session there is **no way to run a
 real client session over PostgREST or `/auth/v1/token`**, and no way to invoke a
-deployed Edge Function. `akyachtsman.github.io` is reachable, so this is
-host-specific, not general.
+deployed Edge Function. ⚠️ **AND THE HOST LIST WAS WRONG IN BOTH DIRECTIONS — re-measured
+2026-10-15.** This said "`akyachtsman.github.io` is reachable, so this is
+host-specific, not general", and a session then repeated it. Measured:
+`curl https://akyachtsman.github.io/claude.insurance/` returns **000 / FAILED**,
+and so does `supabase.com` — so the DEPLOYED SITE cannot be fetched from here
+either, and a session must not offer to verify the live page by curl.
+What DOES work, measured the same minute: **`raw.githubusercontent.com` (200)**
+and **git transport** (`git ls-remote` against `claude.directives` returned
+`main`). So the rule is not "egress is blocked" and not "only the project is
+blocked" — it is: **raw file reads and git work; general HTTPS does not.**
+⚠️ A correction written too broadly is its own defect: the first version of
+this fix said "egress is blocked", which would have stopped a future session
+reading upstream directives over raw URLs — something `global.md` explicitly
+requires and that provably works.
 
 **The workaround, and what it is actually worth.** The in-database substitute is
 `set local role authenticated` plus `set local "request.jwt.claims"`, and it
@@ -4636,6 +4734,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
 | `awaitAuthReady` consults an already-arrived response | **Absent upstream; a real bug in the upstream kit, found by Codex on #253 and reproduced before fixing.** `page.waitForResponse()` resolves only on a FUTURE response — Playwright does not replay ones already received — and every caller arms it AFTER awaiting `page.goto()`. So a readiness request that completes DURING navigation is missed and the wait times out, failing S2/S3/S4 with *"never resolved"* on a request that did arrive. Measured: `TEST_AUTH_READY_REQUEST=tokens.css` failed S4 at 25000ms; with the fix it passes in 6.8s, and the SELECTOR and default paths are unchanged. The fix is an `auto` fixture recording matching responses from before the body navigates, plus a check ahead of the wait. The SELECTOR path never had this race (`waitForSelector` with `state:'attached'` matches an element already present), which is why only the REQUEST branch is touched. **Report upstream at the next `/refresh-repo`** — the whole kit has it, and a refresh that takes the kit verbatim would delete this. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
+| **Two `test.md` additions NOT yet reported upstream** (2026-10-15) | A proposal was written and handed to the owner for forwarding; `claude.directives` is readable from here (raw 200, `git ls-remote` fine) but **ACT scope is this repo only**, and no peer session was running to receive it (`ListAgents`: none). Two mechanisms are absent upstream and cost four PRs here: (1) **a satisfied constraint does not say what paid for it** — `scrollWidth <= clientWidth` is green when a flex child shrank, ellipsised or collapsed to 0px, so assert the SACRIFICE ORDER beside the constraint; (2) **to measure an intrinsic width, neutralise the absorber first** — `flex: none; overflow: visible`, then read, because `scrollWidth` on a flex container reports what it SETTLED FOR. Upstream already covers the clamp half (*"A cap is proven BINDING, never assumed"*) and the sampling half (*"the resolution of the measurement, not the absence of a window"*), so **do not re-report those**. ⚠️ Carry the framing correction with it: all four findings came from a REVIEWER READING CODE, not from measuring — measurement is what settled them and what killed three confident claims of mine. "Measure, don't argue" credits the wrong instrument. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
 ### ✅ Rulebook synced 2026-10-06 (was six weeks / 43 commits stale)
