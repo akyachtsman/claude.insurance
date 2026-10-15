@@ -4548,3 +4548,134 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S29 — THE KEEP'S PRIMARY NAV SURVIVES EVERY WIDTH, AND THE BAR NEVER SCROLLS
+//
+// Two defects, one fix, and the second was the worse one:
+//   · 761-1044px the app bar overflowed horizontally. Recorded in CLAUDE.md as
+//     OPEN since 2026-10-06, and reachable by the `tablet` project (810px) the
+//     whole time — S4 checks overflow at 390px only, on the PUBLIC site, which
+//     is why it never went red.
+//   · BELOW 760px `.k-nav` was `display: none` with NOTHING in its place. The
+//     account menu is the only other way around and carries Documents alone, so
+//     Entities, Assets and Policies — three of the portal's five screens — were
+//     unreachable on a phone. Nobody had recorded this one.
+//
+// WHY THE SET COMPARISON IS THE POINT. The fix renders both the wide strip and
+// the compact menu from one `KEEP_NAV` list, so there is nothing to keep in
+// sync. This asserts that property where it can be observed — on the RENDERED
+// hrefs — because the single list is only a convention until something fails
+// when a renderer stops consulting it. Equality, not containment: a stale entry
+// in the menu fails too, which is the inversion lesson CLAUDE.md records for
+// `BACK_ELIGIBLE` and `check-keep-back-routes.js`.
+//
+// ⚠️ 320px IS DELIBERATELY NOT IN THE BAND. Measured: the bar needs 348px there,
+// so it still overflows — as it did BEFORE this change, when it needed 371px.
+// Closing the last 28px means shrinking the 44px touch targets the Keep keeps
+// everywhere, which is a worse trade than a sideways scroll on a 2016 phone.
+// Asserting 320 would therefore fail on purpose; omitting it silently would
+// hide that, so it is named here instead.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S29: the Keep nav is reachable at every width and the bar never overflows', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
+
+  const hrefsOf = (loc) => loc.evaluateAll((as) => as.map((a) => a.getAttribute('href')).sort());
+  const overflow = () => page.evaluate(() => {
+    const d = document.documentElement;
+    return Math.max(d.scrollWidth, document.body.scrollWidth) - d.clientWidth;
+  });
+
+  // ── WIDE: the strip is the nav and the compact control is absent.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1'), 'the Entities page did not mount').toHaveText(/Entities/i, { timeout: 15_000 });
+  await expect(page.locator('.k-nav'), 'the wide nav strip is hidden at 1280px').toBeVisible();
+  await expect(page.locator('.k-pop--nav'), 'the compact nav showed at 1280px, where the strip is already there').toBeHidden();
+  const wide = await hrefsOf(page.locator('.k-nav a'));
+  expect(wide.length, 'the wide nav rendered no links at all').toBeGreaterThan(3);
+  expect(await overflow(), 'the Keep overflows horizontally at 1280px').toBeLessThanOrEqual(0);
+
+  // ── THE BAND. Every width the two measured defects lived in, plus the two
+  // sides of the crossover. 1044/1045 are asserted as a PAIR: one breakpoint
+  // drives both controls, so an off-by-one that showed neither (or both) at the
+  // boundary is exactly the mistake a single sample cannot see.
+  for (const width of [360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('./#/keep/list');
+    await expect(page.locator('.k-h1'), `the Entities page did not mount at ${width}px`).toHaveText(/Entities/i, { timeout: 15_000 });
+
+    await expect(page.locator('.k-nav'), `the wide nav strip is still showing at ${width}px`).toBeHidden();
+    await expect(page.locator('.k-pop--nav'), `no nav of any kind at ${width}px — the portal is a dead end`).toBeVisible();
+    expect(await overflow(), `the Keep overflows horizontally at ${width}px`).toBeLessThanOrEqual(0);
+
+    // ⚠️ EACH ITERATION MUST START FROM A KNOWN-CLOSED MENU, and this is not
+    // defensive padding — the first version of this loop failed at the SECOND
+    // width for exactly this reason. `page.goto` to the same URL and hash does
+    // NOT reload the document (CLAUDE.md records the same trap costing a false
+    // positive on the nav stack), so the menu left open by the previous
+    // iteration was still open here and the click TOGGLED IT SHUT. The symptom
+    // was "the compact nav did not open", which reads like an app defect and
+    // was a test defect. Asserting the precondition makes a state leak fail by
+    // name instead of as a confusing failure one width later.
+    await expect(page.locator('.k-pop--nav.is-open'), `the compact nav was already open on arrival at ${width}px`).toHaveCount(0);
+
+    // The menu must actually OPEN and carry the same destinations. Asserted at
+    // every width, not once: the panel is positioned (`left: 0`, min-width
+    // 220px) and a panel that renders off-screen is not a usable nav.
+    await page.locator('.k-pop--nav button').click();
+    await expect(page.locator('.k-pop--nav.is-open'), `the compact nav did not open at ${width}px`).toHaveCount(1);
+    const compact = await hrefsOf(page.locator('.k-pop--nav .k-menu a'));
+    expect(compact, `the compact nav's destinations differ from the wide nav's at ${width}px`).toEqual(wide);
+
+    const box = await page.locator('.k-pop--nav .k-menu').boundingBox();
+    expect(box.x, `the compact nav panel hangs off the left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `the compact nav panel hangs off the right edge at ${width}px`).toBeLessThanOrEqual(width);
+
+    // Leave it as it was found, so the precondition above means something.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.k-pop--nav.is-open'), `Escape did not close the compact nav at ${width}px`).toHaveCount(0);
+  }
+
+  // ── The crossover's upper side, so the pair is complete.
+  await page.setViewportSize({ width: 1045, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  await expect(page.locator('.k-nav'), 'the strip is hidden at 1045px, one pixel above the breakpoint').toBeVisible();
+  await expect(page.locator('.k-pop--nav'), 'both navs showed at 1045px').toBeHidden();
+
+  // ── ESCAPE CLOSES IT. This project's "Collapsible reveals (always)" standard
+  // requires outside-click and Escape, and the control gets both by being built
+  // on the shared `popover()`. Asserted so a future rewrite that hand-rolls the
+  // open/close loses the standard loudly instead of quietly.
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  const trigger = page.locator('.k-pop--nav button');
+  await trigger.click();
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+  await expect(trigger, 'the compact nav does not report its state to assistive tech').toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.k-pop--nav.is-open'), 'Escape did not close the compact nav').toHaveCount(0);
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+  // ── AND IT NAVIGATES. A menu of links that does not move the router is a
+  // dead end with extra steps, which is the defect this scenario exists for.
+  await trigger.click();
+  await page.locator('.k-pop--nav .k-menu a[href="#/keep/insurance"]').click();
+  await expect(page.locator('.k-h1'), 'the compact nav did not navigate to Policies').toHaveText(/Policies/i, { timeout: 15_000 });
+
+  // ── EVERY ICON RESOLVES. `icon()` builds `<use href="#icon-NAME">` and an
+  // unknown name renders an EMPTY svg with no error anywhere — so a mistyped
+  // name is invisible. Two of the first five written here were wrong.
+  const unresolved = await page.evaluate(() => [...document.querySelectorAll('.k-bar use, .k-menu use')]
+    .map((u) => u.getAttribute('href'))
+    .filter((h) => h && !document.querySelector(h)));
+  expect(unresolved, `app-bar icons name no sprite symbol: ${unresolved.join(', ')}`).toHaveLength(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
