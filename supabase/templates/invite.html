@@ -1,0 +1,51 @@
+<!-- Supabase Auth → Emails → Templates → "Invite user"
+     ============================================================
+     ⚠️ THIS FILE IS A COPY. The live template is DASHBOARD STATE: it is not in
+     `supabase/migrations/`, not in `config.toml`, not reachable from any MCP
+     tool this repo's sessions hold, and nothing in CI reads it. Editing this
+     file changes NOTHING until somebody pastes it into the dashboard. It is
+     here so the text is reviewable and recoverable, which it was not before —
+     the same gap as the custom-SMTP setting and the public-sign-up flag, both
+     of which were invisible to every instrument this repo trusts.
+
+     WHY IT WAS REWRITTEN (2026-10-15). The stock Supabase template —
+     "You've been invited to create an account. Follow the link below to
+     accept." over a bare link — went straight to SPAM on the first real test.
+     Gmail named its own reason: "This message is similar to messages that were
+     identified as spam in the past." That is a CONTENT-similarity verdict, not
+     an authentication one: the stock template ships byte-identical across
+     thousands of projects and plenty of those are phishing, so the shape
+     itself is fingerprinted.
+
+     What this version changes, and why each part is there:
+       - a named sender and product in the subject and the body, rather than an
+         anonymous "you've been invited";
+       - a stated REASON the message exists, which transactional mail has and
+         phishing usually does not;
+       - the recipient's own address echoed back ({{ .Email }});
+       - an explicit "ignore this if you weren't expecting it", which also
+         makes the mail honest rather than merely deliverable.
+
+     ⚠️ WHAT IT DOES NOT FIX, stated so nobody reads a green inbox as a solved
+     problem: the From is still a personal @gmail.com address, and the link
+     still points at a random-looking `<ref>.supabase.co` subdomain. A link
+     domain unrelated to the sender domain is its own spam signal. Supabase's
+     own docs name the remedy — a custom domain for the Auth server — and the
+     durable answer is a real sending domain with SPF/DKIM/DMARC. Measured
+     spam-folder delivery is the evidence that a personal Gmail is not a
+     client-facing sender for this product.
+     ============================================================ -->
+<h2>Rosa has invited you to Harborline</h2>
+
+<p>Hello,</p>
+
+<p>Your broker has set up a Harborline account for you — a private portal
+where you can see your policies, their renewal dates, and the assets they
+cover, all in one place.</p>
+
+<p><a href="{{ .ConfirmationURL }}">Set up your account</a></p>
+
+<p>This link is for {{ .Email }} and can only be used once. If you weren't
+expecting this, you can ignore this email and no account will be created.</p>
+
+<p>— Harborline</p>
