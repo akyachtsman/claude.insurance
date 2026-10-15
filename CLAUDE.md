@@ -4370,6 +4370,77 @@ SURVIVED, because the band sampled 385/386 while the truncating widths are
 381-384 — at 385 the shortfall is 1px and the `+1` tolerance absorbs it. The
 band now carries **382**, the width the dense sweep flagged.
 
+### ⚠️ A FLOOR ON A BOUND DEFEATS THE BOUND, AND A MEASURED BOUND GOES STALE (2026-10-15)
+
+Two Codex P2s on #276, both reproduced, and the first is **#275's defect
+reopened by #275's own fix** — the third time on this branch pair that closing
+one direction opened another.
+
+**1. `Math.max(120, room)` assigned height that did not exist.** The bound is
+`innerHeight - top - 12`; the floor wins whenever that is under 120, which is
+exactly the cramped viewport the bound exists for. Measured at 740x300, the
+Keep's compact nav open, chrome scaled:
+
+| chrome | panel top | real room | applied | past viewport | stranded |
+|---|---|---|---|---|---|
+| 32/30 | 163 | 125 | 125px | −12 | — |
+| **40/38** | 183 | **105** | **120px** | **+3** | — |
+| **48/46** | 207 | **81** | **120px** | **+27** | **Documents** |
+
+So the floor cost a stranded destination — the same harm, in the same control,
+that #275 measured at 39px and fixed. `Math.max(0, …)` now caps to the real
+room: a cramped scrollable panel is honest, one whose last link cannot be
+reached is not.
+
+⚠️ **AND S30 PASSED THROUGHOUT, FOUR PIXELS OUTSIDE THE FAILING REGIME.** Its
+one sample is chrome 32/30, where the real room is **125px** against a 120px
+floor. The scenario written to prove the bound could not see a floor that
+defeats it, because it sampled just above the threshold — the same
+"both endpoints clean" sampling defect #275 was itself about, in the test added
+by #275. **A guard's test has to be run in the regime where the guard binds**,
+and for a clamp that means on both sides of the clamp.
+
+**2. The bound was frozen as a pixel value at open time.** It overrides
+`.k-menu`'s responsive CSS fallback, so a menu opened tall and then shortened
+keeps a height the viewport no longer has, and nothing closed or re-measured
+it. Measured: opened at 740x900 the bound is **788px**; shrink to 740x300 and
+the menu stays open at **788px**, **38px past** the viewport, **"Documents"
+unreachable** after scrolling. A `resize` listener now re-measures every open
+panel. **Re-measuring rather than closing is deliberate** — mobile browsers
+fire `resize` when the URL bar shows or hides, and closing a menu mid-use is a
+worse answer than keeping it bounded. A popover whose wrap the breakpoint has
+hidden (the compact nav above 1129px) is closed instead, so it cannot reappear
+already open on the way back down.
+
+⛔ **ONE RESIDUAL, FOUND BY THE SWEEP AND NOT BY EITHER FINDING, DELIBERATELY
+NOT FIXED.** At chrome 56/54 the panel's top measures **303px in a 300px
+viewport** — the app bar itself is below the fold, so `max-height` cannot help
+whatever its value, and "Documents" is stranded again. The fix is to anchor the
+panel to the **viewport** rather than to its trigger, which is a repositioning
+design, not a clamp. S30 **asserts its own armed precondition** (`room > 0`) and
+names this residual in the failure message, so if the regime is ever entered the
+scenario says it is testing the residual instead of silently passing — the same
+shape as S28's precondition and S29's named 320px exclusion.
+
+⚠️ **THE SAME PROBE TRAP THREE TIMES IN ONE SESSION, with it already recorded
+in this file.** `page.goto` to the same URL **and hash** does not reload the
+document, so a menu left open survives into the next step and the next click
+toggles it **shut**. It hit the first measurement probe (rows alternating
+open/closed — the giveaway was the perfect alternation), then the verification
+probe, then S30 itself, where the resize block ends with a menu deliberately
+open *because that is its claim*. Each failure reads as "the compact nav did not
+open", i.e. as an app defect. Every block that follows one which leaves a menu
+open now closes it explicitly and asserts a known-closed starting state.
+
+⚠️ **AND THE FIRST VERSION OF THE RESIZE ASSERTION WENT FLAKY ON WEBKIT, by
+sleeping through two state changes instead of polling them.** A flat 150ms for
+the resize handler and 120ms for the panel's scroll: on `iphone` the re-bound
+had landed (`past` was fine) while the scroll had not, so the last link measured
+below the fold and the failure read **"destinations unreachable after a resize:
+Documents"** — an app defect that was not one. Both are now polled to a settled
+state, bounded, so a genuinely unreachable link still fails. 16/16 on
+`--repeat-each=2` across four projects afterwards.
+
 ### ⛔ NOT BUILT, deliberately — a sprite-reference guard, and why the cheap one is the wrong shape
 
 The `icon()` finding above is a defect CLASS, not a one-off: an unknown name
@@ -4544,7 +4615,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
 | S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
 | S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **19 widths — 320, 360, 382, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129** — that inverts, with `scrollWidth <= clientWidth`, the logo at its natural width, no 44px control shrunk, and **the wordmark never truncated** at each. ⚠️ Both sides of every media-query boundary are sampled, because #275's defect lived entirely between 480 and 600 and both endpoints were clean. ⚠️ The wordmark check is the one that catches it: a shrinkable wordmark turns an overflow into an ellipsis, which every `scrollWidth` assertion reports as a pass. The band **resizes rather than re-navigating** (media queries re-evaluate on resize; 19 `goto`s cost ~17s against a 30s per-test budget), and the menu INTERACTION — opens, panel on-screen, hrefs **EQUAL AS A SET** to the strip's, Escape closes, `aria-expanded` tracks — runs at one width per layout regime (360, 481, 810, 1129). 1129/1130 are asserted as a **pair**. A menu link navigates, and **no app-bar `<use href>` resolves to nothing**. ⚠️ 382 is in the list deliberately: at 385 the wordmark's shortfall is 1px and the tolerance absorbs it, so the mutation reverting that breakpoint survived a band that sampled 385/386 | Any width shows both navs or neither, the Keep scrolls sideways, the wordmark ellipsises, the logo or a touch target is crushed, the compact menu's destinations drift from the strip's, Escape stops closing it, or an app-bar icon names no sprite symbol |
-| S30 | The brand sacrifice is app-bar only, and menu panels respect their real top (offline harness, **runs locally**) | Signed OUT **in a fresh context** (`localStorage` is shared, so a second page on the seeded context is already signed in and renders the home view — the first version failed with "the login card did not mount", which reads as an app defect), the login card keeps its `.k-abrand .k-tag` badge at 390, 481, 810, 1129 and 1280: the sacrifice order belongs to the app bar, and an unscoped `.k-tag { display: none }` stripped the badge from the authentication screen at every width 320-1044. Then at 740×320 with the chrome enlarged to 2x, the open panel's bottom stays within the viewport and no destination is stranded after scrolling it — `calc(100vh - 124px)` subtracts an ASSUMED top and measured 39px past the viewport. ⚠️ Split out of S29 because that test hit 17-22s against a 30s per-test timeout and a comment-only control mutation "failed" on a timeout | The login card loses its badge at any width, or an enlarged ribbon or text size pushes a menu panel past the viewport and strands its last link |
+| S30 | The brand sacrifice is app-bar only, and menu panels respect their real top (offline harness, **runs locally**) | Signed OUT **in a fresh context** (`localStorage` is shared, so a second page on the seeded context is already signed in and renders the home view — the first version failed with "the login card did not mount", which reads as an app defect), the login card keeps its `.k-abrand .k-tag` badge at 390, 481, 810, 1129 and 1280: the sacrifice order belongs to the app bar, and an unscoped `.k-tag { display: none }` stripped the badge from the authentication screen at every width 320-1044. Then at 740×320 with the chrome enlarged to 2x, the open panel's bottom stays within the viewport and no destination is stranded after scrolling it — `calc(100vh - 124px)` subtracts an ASSUMED top and measured 39px past the viewport. ⚠️ Split out of S29 because that test hit 17-22s against a 30s per-test timeout and a comment-only control mutation "failed" on a timeout. Then at chrome **40/38 and 48/46** the applied bound must not exceed the measured room — `Math.max(120, room)` defeated its own bound below 120px, measured 27px past with "Documents" stranded, and **the 32/30 sample above passed throughout because its real room is 125px**, four pixels outside the failing regime. Each scale asserts an **armed precondition** (room is positive, and under 120) so it fails by name rather than quietly ceasing to test the clamp. Then a menu opened at 740x900 and resized to 740x300 must be **re-measured, not left frozen** (788px stale, 38px past, "Documents" stranded) and must **stay open** — a mobile URL-bar show/hide fires `resize`. Then crossing the breakpoint while open **closes** the popover and clears `aria-expanded`. ⚠️ Both of the latter poll for a settled state rather than sleeping: a flat wait made the resize block flaky on webkit, failing as "destinations unreachable" when only the panel's scroll had not landed | The login card loses its badge at any width, an enlarged ribbon or text size pushes a menu panel past the viewport and strands its last link, a bound measured at open time survives a viewport change, or a popover the breakpoint hid is left open |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
