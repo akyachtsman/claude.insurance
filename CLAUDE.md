@@ -5014,11 +5014,72 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
-| ~~`pages-retry.yml` keeps an obsolescence check~~ **RESOLVED — ADOPTED UPSTREAM, AND THE FILE IS NOW VERBATIM (2026-10-15)** | This repo wrote the obsolescence check (#249, 2026-08-26) and carried it as a divergence for seven weeks. Upstream took it at `f680dd3`, so `.github/workflows/pages-retry.yml` is now byte-identical to `templates/workflows/pages-retry.yml` (blob `8b903a7`) and its `refresh_kept` entry is **deleted**. ⚠️ **The REQUIRED watcher entry in `.github/workflow-ref-required.json` stays** — `{"pages-retry.yml": ["pages-build-deployment"]}` — and `workflow-ref-guard` confirms it intact; this repo is branch-source, so dropping it would let a later watch-list edit silently disable the retry while every static check stayed green. **What taking it GAINED:** a non-numeric guard the local copy lacked (`case "$newest" in ''|*[!0-9]*) return 1`) — both versions fail open, so this is cleanliness rather than a behaviour change, but ours printed a shell error to the log where upstream returns. **What taking it COST, stated rather than quietly dropped:** the local copy emitted `::notice::`/`::warning::` annotations on the supersede and the unverifiable-check paths, which surface in the Actions run summary where a bare `echo` does not. That is a real improvement and it is **not kept locally** — keeping it would restart the divergence over log formatting. Forwarded upstream as a Downstream-Finding Loop item instead, so every project gets it rather than this one. The `concurrency` removal was ALSO adopted upstream on this repo's reasoning (only one run may be PENDING in a group, so a newly queued retry cancels the pending one even with `cancel-in-progress: false`; with retries arriving out of deploy order the NEWEST retry is the one that can be dropped while the older two decline on the check, and nothing is retried at all) — upstream's inline comment now carries it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |
 | ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
-| ~~Two `test.md` additions not yet reported upstream~~ **RESOLVED — ADOPTED UPSTREAM, measured 2026-10-15** | No longer a divergence, and the correction matters because this repo claimed otherwise for a few hours. `test.md` at `8c1a398` now carries **all three** mechanisms under *Layered UI: rendered is not reachable*, credited to `claude.insurance` (2026-10-15) with this repo's own figures: *"A satisfied constraint does not say what paid for it"* (the 0px logo and the `Ha…` wordmark), *"To measure an intrinsic need, neutralise the absorber first"* (1045 un-neutralised vs 1130 neutralised, one child squeezed to 55px of 83), and *"Sweep a band at every width"*. ⚠️ **Upstream's versions are STRICTER than the proposal that was drafted here, so read theirs and not the draft:** the neutralise rule also sets `flex-wrap: nowrap; width: max-content` on the CONTAINER — without it freed children wrap to a second line and a container wider than its content reports its own width — and the sweep rule says **every integer width**, media-query boundaries included, where the draft said every 8px. The forwardable message in `.agent-reports/` is therefore obsolete; do not send it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
+
+### ✅ Rulebook synced 2026-10-15 to `bde28c9719f1` — two upstream BUG FIXES, both taken
+
+Third `/refresh-repo` of the day, `f680dd3` → `bde28c9719f1` (10 files). Unlike the
+previous two, this delta is not this repo's own findings coming home: it is **two
+correctness fixes to workflows this repo runs**, and both were `STALE` (byte-identical
+to the template at the stamp), so there was no local edit to weigh.
+
+**1. `pages-retry.yml` — the obsolescence check this repo WROTE was wrong, and the fix
+is upstream's.** The version taken hours earlier asked only *"is the newest run newer
+than mine?"*. Three defects in that, found by Codex on `claude.trading#336` and #458:
+
+| defect | consequence |
+|---|---|
+| a newer run that was **cancelled, timed out or skipped** still counted | no retry ever fires for such a run, so standing down left the site on the build *before* this one |
+| only the **newest** run was read | under a cancelled newest, an older-but-still-newer run may have SUCCEEDED, and re-running this one would overwrite it |
+| `per_page=1`, no pagination | the fix pages with `--paginate` and a server-side `created>=` filter, so it walks only the few newer runs |
+
+The predicate is now "a newer run that is queued, running, succeeded **or** failed",
+summed across pages. ⚠️ **No harm was done here** — this repo's `Pages Deploy Retry`
+has reported `skipped` on every run (its `if:` requires `conclusion == 'failure'`), so
+the broken predicate was never reached. That is luck, not design.
+
+**2. `codex-monitor.yml` — Codex's all-clear stopped matching, and this repo's own
+reviews carry the cause.** Since 2026-10-15 Codex opens every clean verdict with
+`<!-- codex-review-receipt:v1 -->` and a blank line, so the bare prefix match
+(`"Codex Review: Didn't find any major issues"*`) never fires and `codex-flagged` can
+no longer clear itself (upstream #457: *the run on its clean verdict succeeded and
+removed nothing*). The fix strips leading HTML comments and whitespace before matching.
+
+⚠️ **The marker is MEASURED here; the symptom is NOT.** The receipt comment is in this
+repo's review bodies — read directly off #282's at 21:25 today. But the stuck-label
+symptom is unobserved: **#282 carries no label** (a clean review flags nothing, so there
+was nothing to clear), and **#281's `codex-flagged` is correct** — it had a real P2.
+Ten PRs carry the label and all ten are closed, where it blocks nothing. So this is "the
+precondition is present and the fix is taken", not "we were broken". Stating it the
+weaker way on purpose: a success from this workflow is uninformative by upstream's own
+account, so *"our runs went green"* would have been the wrong evidence either way.
+
+**Everything else in the delta has no installed location** — `directives/test.md`
+(read live; see Phase 0 below), `plugins/directives-toolkit/**` (delivered by the
+plugin at next session start), and four of upstream's own repo files.
+
+**Phases.** Phase 0: only `test.md` moved, six lines requiring a Playwright **wrapper**
+config to extend the kit's rather than replace it (`import base from
+'./playwright.config.js'`, spreading `base.use`) — **inert here**, measured: this repo
+has exactly one config, the kit's own, and no `executablePath` anywhere. Phase 1 clean
+(5 references). Phase 1.5: **22 files compared, 18 match, 2 STALE, 2 CUSTOM, 0 DRIFT,
+0 MODE**, no `RE-RECORD` line — so every `refresh_kept` record's `local` blob is still
+the file's. Both CUSTOM records (`qa.yml`, `check-contrast.js`) still bind, their
+templates unchanged at this head, so they are reported rather than re-asked. Hook
+present, executable, registered. Scheduled-task question **skipped** — none of
+`cron-notify.yml`, `notify-task.js`, `notify-email.js` is installed. KD-1 **CLEAR**.
+Referenced-script derivation: 15 callers → 10 scripts, **all installed**.
+`refresh-vars.sh`: no new variables or secrets, and `qa-live.yml`/`qa-response.yml`
+were untouched, so no `APP_URL` confirmation is owed. **No settings writes.**
+Stamp advanced to `bde28c9719f1`.
+
+⚠️ **The forwarded `::notice::`/`::warning::` annotation finding is NOT adopted** —
+measured on the new template, which still uses a bare `echo`. It remains an unsent
+note in `.agent-reports/`, which is why the divergence row for `pages-retry.yml` was
+deleted (the file is verbatim, so there is no divergence) while the item stays on the
+owner's list.
 
 ### ✅ Rulebook synced 2026-10-15 to `f680dd3` — the stamp ADVANCED this time
 
