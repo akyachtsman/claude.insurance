@@ -205,6 +205,39 @@ function ribbon() {
   ]);
 }
 
+// Bound an open panel from its MEASURED top so it cannot run past the bottom
+// of the viewport. `.k-menu`'s CSS carries `max-height: calc(100vh - 124px)`,
+// which subtracts a ribbon plus a single-line bar — and the real top moves
+// with the ribbon's height, the text size and the zoom. Measured at 740x300
+// with the chrome at 2x, the panel ran 39px past the viewport and stranded its
+// last link even after scrolling (Codex, #275). CSS cannot read an element's
+// own offset, so the figure is computed here.
+//
+// ⚠️ NO MINIMUM HEIGHT, AND THAT IS THE WHOLE POINT. This read
+// `Math.max(120, …)` when it shipped in #276, which DEFEATED the bound it was
+// written to be: where the room below the panel is under 120px the floor wins
+// and assigns more height than exists. Measured at 740x300 — real room 81px,
+// applied 120px, the panel 27px past the viewport and "Documents" unreachable
+// even after scrolling the panel, i.e. exactly the defect #275 closed, reopened
+// by its own fix (Codex, #276). A cramped scrollable panel is honest; one whose
+// last link cannot be reached is not. `Math.max(0, …)` only guards against a
+// trigger that is itself below the fold, which a sticky app bar never is.
+//
+// ⚠️ The clear is BELT, and labelled a survivor up front: deleting it passes
+// every scenario. `.k-menu` is `position: absolute`, so its top does not depend
+// on its own height and measuring through a stale height gives the same answer.
+// Kept because that is a property of the CSS rather than of this function — a
+// panel ever positioned in flow would make the measurement self-referential,
+// and the failure then would be a bound that creeps on every resize.
+function boundMenu(panel) {
+  if (!panel) return;
+  panel.style.maxHeight = "";
+  const top = panel.getBoundingClientRect().top;
+  // 12px of breathing room so the last item is not flush to the edge.
+  const room = Math.max(0, Math.round(window.innerHeight - top - 12));
+  panel.style.maxHeight = `${room}px`;
+}
+
 // ── App-bar menus (click-to-open popovers) ───────────────────────────────────
 function closeKeepMenus() {
   document.querySelectorAll(".k-pop.is-open").forEach((p) => {
@@ -247,6 +280,25 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
     if (e.target instanceof Element && e.target.closest(".k-menu")) return;
     closeKeepMenus();
   }, true);
+  // ⚠️ A BOUND MEASURED AT OPEN TIME GOES STALE. The pixel value above is
+  // computed once, on open, and then OVERRIDES `.k-menu`'s responsive CSS
+  // fallback — so a menu opened in a tall viewport and then rotated, or opened
+  // before the window was shortened, keeps a height the viewport no longer has.
+  // Measured: opened at 740x900 the bound is 788px; shrink to 740x300 and the
+  // panel stays open at 788px, 38px past the viewport, with "Documents"
+  // unreachable after scrolling (Codex, #276). Re-measuring rather than closing
+  // is deliberate — mobile browsers fire `resize` when the URL bar shows or
+  // hides, and closing a menu the client is mid-way through using would be a
+  // worse answer than keeping it correctly bounded.
+  // A panel whose own popover has been hidden by a breakpoint (the compact nav
+  // above 1129px) cannot be interacted with, so it is closed instead: leaving
+  // it `.is-open` would have it reappear already open on the way back down.
+  window.addEventListener("resize", () => {
+    document.querySelectorAll(".k-pop.is-open").forEach((p) => {
+      if (!p.offsetParent && getComputedStyle(p).position !== "fixed") closeKeepMenus();
+      else boundMenu(p.querySelector(".k-menu"));
+    });
+  });
 }
 
 // ── Search / command dropdowns ───────────────────────────────────────────────
@@ -364,18 +416,7 @@ function popover(trigger, panel, alignRight) {
     if (open) {
       wrap.classList.add("is-open");
       trigger.setAttribute("aria-expanded", "true");
-      // ⚠️ BOUND THE PANEL FROM ITS MEASURED TOP, not from an assumed one.
-      // `.k-menu`'s CSS carries `max-height: calc(100vh - 124px)`, which
-      // subtracts a ribbon plus a single-line bar — and the real top moves with
-      // the ribbon's height, the text size and the zoom. Measured at 740x300
-      // with the chrome at 2x, the panel ran 39px past the viewport and
-      // stranded its last link even after scrolling (Codex, #275). CSS cannot
-      // read an element's own offset, so the exact figure is set here, on each
-      // open, after the panel is laid out.
-      // 12px of breathing room so the last item is not flush to the edge.
-      const top = panel.getBoundingClientRect().top;
-      const room = Math.max(120, Math.round(window.innerHeight - top - 12));
-      panel.style.maxHeight = `${room}px`;
+      boundMenu(panel);
     }
   });
   wrap.appendChild(trigger);

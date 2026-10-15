@@ -4852,6 +4852,129 @@ test('S30: the brand sacrifice is app-bar only, and menu panels respect their re
     document.querySelectorAll('.k-ribbon, .k-bar__in').forEach((e) => { e.style.fontSize = ''; });
   });
 
+  // ── AND THE BOUND CARRIES NO MINIMUM. The block above passed while the
+  // bound was `Math.max(120, room)`, because at this chrome scale the real room
+  // is 125px — four pixels above the floor. It sampled just outside the regime
+  // where its own guard fails, which is the same "both endpoints clean"
+  // sampling defect #275 was about. Scale the chrome further and the floor wins
+  // over the measurement: measured at 48/46, real room 81px, applied 120px, the
+  // panel 27px past the viewport with "Documents" unreachable even after
+  // scrolling the panel (Codex, #276). Two scales, because at 40/38 the floor
+  // overshoots without yet stranding anything — only the larger one shows harm,
+  // and only the smaller one shows the overshoot alone.
+  for (const scale of [40, 48]) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(0);
+    await page.evaluate((px) => {
+      document.documentElement.style.fontSize = px + 'px';
+      document.querySelectorAll('.k-ribbon, .k-bar__in').forEach((e) => { e.style.fontSize = (px - 2) + 'px'; });
+    }, scale);
+    await page.locator('.k-pop--nav button').click();
+    await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+    const m = await page.evaluate(async () => {
+      const p = document.querySelector('.k-pop--nav .k-menu');
+      const top = p.getBoundingClientRect().top;
+      p.scrollTop = p.scrollHeight;
+      await new Promise((r) => setTimeout(r, 120));
+      const b = p.getBoundingClientRect();
+      return {
+        top: Math.round(top), ih: window.innerHeight,
+        room: Math.round(window.innerHeight - top - 12),
+        applied: parseInt(p.style.maxHeight, 10),
+        past: Math.round(b.bottom - window.innerHeight),
+        stranded: [...p.querySelectorAll('a')].filter((a) => a.getBoundingClientRect().bottom > window.innerHeight + 1).map((a) => a.textContent.trim()),
+      };
+    });
+    // ⚠️ ARMED-PRECONDITION, not an assertion about the app. The fix can only
+    // bind while the TRIGGER is on-screen: scale the bar past the viewport's own
+    // height and the panel's top measures below the fold (measured top 303 in a
+    // 300px viewport at 56/54), where no max-height helps and the answer is to
+    // anchor the panel to the viewport instead of the trigger — a repositioning
+    // design, recorded in CLAUDE.md and deliberately not done here. If this ever
+    // trips, the scenario is testing that residual rather than the floor.
+    expect(m.room, `S30 is disarmed at chrome ${scale}: the panel top (${m.top}) is below a ${m.ih}px viewport, which is the recorded repositioning residual, not the floor`).toBeGreaterThan(0);
+    // The floor is what this catches: room under 120 and an applied bound of 120.
+    expect(m.room, `S30 is disarmed at chrome ${scale}: real room ${m.room}px is above the 120px floor, so a floored bound would pass`).toBeLessThan(120);
+    expect(m.applied, `the bound ignored the measured room at chrome ${scale}: applied ${m.applied}px against ${m.room}px available`).toBeLessThanOrEqual(m.room);
+    expect(m.past, `the panel runs ${m.past}px past the viewport at chrome ${scale}`).toBeLessThanOrEqual(1);
+    expect(m.stranded, `destinations unreachable at chrome ${scale}: ${m.stranded.join(', ')}`).toHaveLength(0);
+  }
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '';
+    document.querySelectorAll('.k-ribbon, .k-bar__in').forEach((e) => { e.style.fontSize = ''; });
+  });
+
+  // ── A BOUND MEASURED AT OPEN TIME GOES STALE. The pixel value overrides
+  // `.k-menu`'s responsive CSS fallback, so a menu opened tall and then rotated
+  // or shortened keeps a height the viewport no longer has — measured 788px
+  // still applied after 740x900 → 740x300, 38px past, "Documents" unreachable
+  // (Codex, #276). Nothing closed or re-measured it.
+  await page.setViewportSize({ width: 740, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(0);
+  await page.locator('.k-pop--nav button').click();
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+  const tallBound = await page.evaluate(() => parseInt(document.querySelector('.k-pop--nav .k-menu').style.maxHeight, 10));
+  await page.setViewportSize({ width: 740, height: 300 });
+  // ⚠️ POLL FOR BOTH STATE CHANGES, DO NOT SLEEP THROUGH THEM. The first
+  // version waited a flat 150ms for the resize handler and 120ms for the
+  // panel's scroll, and went FLAKY on webkit/iphone: the re-bound had landed
+  // (`past` was fine) while the scroll had not, so the last link measured below
+  // the fold and the failure read as "Documents unreachable" — an app defect
+  // that was not one. Both are polled to a settled state now, bounded, so a
+  // genuinely unreachable link still fails.
+  const resized = await page.evaluate(async (was) => {
+    const p = document.querySelector('.k-pop--nav .k-menu');
+    for (let i = 0; i < 40 && parseInt(p.style.maxHeight, 10) === was; i++)
+      await new Promise((r) => setTimeout(r, 25));
+    let last = -1;
+    for (let i = 0; i < 12 && p.scrollTop !== last; i++) {
+      last = p.scrollTop;
+      p.scrollTop = p.scrollHeight;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const b = p.getBoundingClientRect();
+    return {
+      open: !!document.querySelector('.k-pop--nav.is-open'),
+      applied: parseInt(p.style.maxHeight, 10), ih: window.innerHeight,
+      past: Math.round(b.bottom - window.innerHeight),
+      stranded: [...p.querySelectorAll('a')].filter((a) => a.getBoundingClientRect().bottom > window.innerHeight + 1).map((a) => a.textContent.trim()),
+    };
+  }, tallBound);
+  // Re-measuring rather than closing is the chosen behaviour, so an open menu
+  // staying open is part of the claim — a mobile URL-bar show/hide fires resize.
+  expect(resized.open, 'the menu closed on resize instead of being re-bounded').toBe(true);
+  expect(tallBound, `the tall-viewport bound (${tallBound}px) was not larger than the short one, so this proves nothing`).toBeGreaterThan(resized.applied);
+  expect(resized.past, `the panel runs ${resized.past}px past the viewport after a resize (bound frozen at ${tallBound}px)`).toBeLessThanOrEqual(1);
+  expect(resized.stranded, `destinations unreachable after a resize: ${resized.stranded.join(', ')}`).toHaveLength(0);
+
+  // ── AND CROSSING THE BREAKPOINT WHILE OPEN CLOSES IT, rather than leaving an
+  // `.is-open` popover that `display: none` has made unreachable and that would
+  // reappear already open on the way back down.
+  // ⚠️ The block above ends with a menu deliberately OPEN — that is its claim —
+  // and `page.goto` to the same URL and hash does NOT reload the document, so
+  // without this the next click would toggle that menu SHUT and the open
+  // assertion below would read as an app defect. Measured: it did.
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 810, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(0);
+  await page.locator('.k-pop--nav button').click();
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.waitForTimeout(200);
+  const crossed = await page.evaluate(() => ({
+    open: document.querySelectorAll('.k-pop.is-open').length,
+    wide: getComputedStyle(document.querySelector('.k-nav')).display,
+    expanded: document.querySelector('.k-pop--nav button')?.getAttribute('aria-expanded'),
+  }));
+  expect(crossed.wide, 'the wide nav strip did not return above the breakpoint').not.toBe('none');
+  expect(crossed.open, 'a popover hidden by the breakpoint was left open').toBe(0);
+  expect(crossed.expanded, 'aria-expanded stayed true on a popover the breakpoint hid').not.toBe('true');
+
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
