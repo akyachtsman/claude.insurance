@@ -21,7 +21,41 @@ body.in-keep { background: var(--color-bg); }
 .k-bar { position: sticky; top: 33px; z-index: 50; background: rgba(255,255,255,.86); backdrop-filter: blur(8px); border-bottom: 1px solid var(--color-border); }
 .k-bar__in { max-width: var(--maxw-keep); margin: 0 auto; display: flex; align-items: center; gap: var(--space-4); min-height: 70px; padding: 0 var(--space-6); }
 .k-brand { display: inline-flex; align-items: center; gap: var(--space-2); font: 700 20px var(--font-display); color: var(--color-text-primary); }
-.k-brand .k-mark { color: var(--color-accent); }
+/* THE SACRIFICE ORDER. When the bar is tight something must give way, and
+   letting flex choose produced the defect Codex found on #274: the `<svg>`
+   logo — which is also the link home — was **crushed to 0px** at 320 and 360.
+   PRE-EXISTING (on `56ab848`: 0px at 320/360/390, 15px at 414) and invisible to
+   every overflow check, because `scrollWidth <= clientWidth` stays green
+   whatever collapsed to make it true.
+   What gives way, in order: the decorative `.k-tag`, then the brand WORDMARK,
+   and NEVER the mark or a 44px touch target.
+
+   ⚠️ `flex: none` IS BELT, NOT THE FIX, and is labelled a survivor up front
+   because this repo has twice had a comment keep calling a guard load-bearing
+   after it stopped being so. MEASURED by enumerating all eight subsets of the
+   three brand fixes against logo width, overflow and wordmark clipping:
+
+     kept                        failures
+     (none)                      logo crushed 320-600, wordmark clipped
+     flex:none only              wordmark clipped 320-600
+     wordmark only               logo crushed 320/390/414/600
+     tag-band + wordmark         CLEAN   <- the minimum
+     all three                   CLEAN
+
+   So the pair is load-bearing and this declaration is not. It is one line, it
+   costs nothing, and it is what keeps the icon safe if pressure returns — a
+   control added to the bar, a longer name, a bigger font.
+
+   ⚠️ AND THE FIRST RUN OF THAT ENUMERATION SAID THE OPPOSITE, because its
+   "remove the tag rule" step only PREPENDED A COMMENT. Non-empty diff, so the
+   applied-check passed, and every row involving it was meaningless — CLAUDE.md's
+   mutation-lie #3. On that evidence the tag-band rule was about to be reverted
+   as buying nothing; it is in fact half the minimum. A removal has to delete a
+   DECLARATION, and the enumeration now asserts the declaration count dropped. */
+.k-brand .k-mark { color: var(--color-accent); flex: none; }
+/* So the wordmark is what shrinks, not the icon beside it. */
+.k-brand { min-width: 0; }
+.k-brand__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-tag { font: 700 13px var(--font-sans); background: var(--color-accent-light); color: var(--color-accent); padding: 5px 12px; border-radius: var(--radius-pill); }
 .k-nav { display: flex; gap: var(--space-1); margin-left: var(--space-3); }
 .k-nav a { font: 700 15px var(--font-sans); color: var(--color-text-secondary); padding: 9px 16px; border-radius: var(--radius-pill); min-height: 44px; display: inline-flex; align-items: center; }
@@ -42,6 +76,16 @@ body.in-keep { background: var(--color-bg); }
 .k-pop--nav { display: none; margin-left: var(--space-2); }
 .k-pop--nav .k-menu { right: auto; left: 0; min-width: 220px; }
 .k-pop--nav .k-menu a.on { background: var(--color-accent-light); color: var(--color-accent-hover); }
+/* ⚠️ VIEWPORT-BOUNDED, because an unbounded panel is clipped with no way to
+   reach what is cut off. Measured at 740x320 (landscape phone): the compact
+   nav's five 44px links run to 338px from a panel starting at 100px, so
+   "Documents" fell off-screen — and the shared scroll handler closes every
+   popover, so the page could not be scrolled to it either (Codex, #274).
+   Applied to `.k-menu` rather than only the new panel: the account menu has
+   MORE items and the identical clipping, and fixing the one I just added while
+   leaving its neighbour broken is the fixed-the-visible-half pattern this repo
+   keeps recording. */
+.k-menu { max-height: calc(100vh - 124px); overflow-y: auto; }
 .k-menu { position: absolute; top: calc(100% + 10px); right: 0; min-width: 250px; max-width: calc(100vw - 32px); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: var(--space-2); z-index: 90; display: none; }
 .k-pop.is-open .k-menu { display: block; }
 .k-menu a, .k-menu .k-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; font: 600 14px var(--font-sans); color: var(--color-text-primary); padding: 11px 12px; border-radius: var(--radius-md); cursor: pointer; min-height: 44px; }
@@ -820,6 +864,13 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 @media (max-width: 1044px) {
   .k-nav { display: none; }
   .k-pop--nav { display: inline-flex; }
+  /* FIRST in the sacrifice order: the decorative "The Keep" pill, dropped
+     across the WHOLE band where the compact control is shown, because that band
+     is exactly where the bar is under pressure. It was hidden only below 480px,
+     which left 600px paying for the new control out of the brand wordmark
+     instead — measured as the wordmark clipped to 83px of 104 (Codex, #274).
+     The word is still in the page's own chrome and the logo still links home. */
+  .k-tag { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -832,16 +883,19 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
   .k-help__form { flex-direction: column; }
   .k-help__ask { align-self: flex-start; }
 }
+/* SECOND in the sacrifice order, and only here: the brand WORDMARK. Below
+   this width the icon alone has to carry the brand, because the alternative
+   measured out as "Harborl…" — an ellipsised wordmark is a worse answer than
+   no wordmark, and the icon is still the link home. With the pill and the
+   wordmark both gone the bar finally fits 320px (242px needed), a width the
+   previous round left overflowing and expected to stay that way. */
+@media (max-width: 380px) {
+  .k-brand__name { display: none; }
+}
+
 @media (max-width: 480px) {
   .k-search__in { width: 44px; padding-right: 0; }
   .k-search__in:focus { width: 200px; }
-  /* The compact nav costs the bar 68px (a 44px control plus its margin), which
-     at phone widths it does not have. This pays for it out of the brand's
-     decorative "The Keep" pill — the word is still in the page title and the
-     ribbon, and the logo beside it still links home. Measured: the bar needs
-     439px with the pill and 320px without it, so the smallest width in the
-     band fits instead of overflowing by 119px. */
-  .k-tag { display: none; }
 
   /* The bar's own gutters and inter-group gap, which at this width are the
      last 56px between it and fitting. `--space-6` gutters are right at 1280px
