@@ -259,7 +259,7 @@ test("past the model call, ONLY a provider HTTP error releases the reservation",
   // rewrite: a per-exit pattern list cannot see an exit nobody wrote a pattern
   // for, so a FOURTH billed outcome added later would have been silently
   // unchecked — the enumeration failure this repo has now hit on
-  // `privilege.test.mjs`, `BACK_ELIGIBLE` and `check-keep-back-routes.js`.
+  // `privilege.test.mjs`, `BACK_ELIGIBLE` and `check-keep-back-routes.mjs`.
   // So: find EVERY `"incomplete"` return past the call and check all of them.
   const incompletes = [...after.matchAll(/return (\w+)\("incomplete"\)/g)];
   assert.equal(incompletes.length, 3,

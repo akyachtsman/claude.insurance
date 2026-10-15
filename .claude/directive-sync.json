@@ -2,5 +2,22 @@
   "upstream": {
     "sha": "bbfdcfc287da2d34ef90f83d24d8fbd833d5fcac",
     "synced": "2026-10-06"
+  },
+  "refresh_kept": {
+    ".github/workflows/pages-retry.yml": {
+      "blob": "587141e479dacf40441530137ba6263ff8af3144",
+      "local": "8ccd79cf8f5c82e037a62c29418fb3208c85a551",
+      "reason": "Carries the concurrency group AND the obsolescence check, both still absent upstream at this head (verified: the pinned template has neither). Each retry job re-runs the ORIGINAL SHA of its triggering run, so two managed Pages runs failing in one outage start two independent retries and the older can redeploy stale content over the newer commit. The group only serializes (GitHub gives no FIFO guarantee for queued runs); the obsolescence check, keyed on workflow_id and never on a name, is what closes it. Also corrects upstream's timeout arithmetic (6.5 min, not 5.2). Recorded in CLAUDE.md -> Upstream Divergences; still to be reported upstream."
+    },
+    ".github/workflows/qa.yml": {
+      "blob": "fda7e7c028a70dbbc34d94c95834cd68ed5066e1",
+      "local": "6778fc1056c909e6bdb32256cec03b459941ed0d",
+      "reason": "Rebuilt FROM the pinned template this refresh, with three project adaptations re-applied: (1) three project-specific guard steps with no upstream equivalent (asset-manifest, undefined-call, Keep back-route classification), (2) the unit-tests job (node:test over js/ and supabase/functions/ plus html-validate — a deterministic blocking gate needing no browser or backend, #202), (3) ^content/ added to UI_PATHS because this app RENDERS content/*.json (help-guide seeds the Help desk, questionnaire builds the qualify flow) and a corpus-only PR otherwise skips the browser job. Everything else is upstream's, checkout@v7 / BUILD_* / the symlink step / check-yaml-anchors / the grep exit-code handling included."
+    },
+    ".github/scripts/check-contrast.js": {
+      "blob": "36e6918e52e6da12b39442af94b19d495b1b660f",
+      "local": "466dbbb603670ab3816224d2d1d9778aba51d5b4",
+      "reason": "Adds two project-specific contrast pairs for .k-ilink, which is 14px/700 body text and so answers to AA rather than AA_LARGE, and renders on the page background and on the accent tint, never on surface. Checking only accent/surface (4.65) passed while these measured 4.26 and 4.03; one of them is the Help desk's broker hand-off. design.md -> Accessibility asks each project to read the pair list against its own token roles and derive pairs from its components, so this is the directive being followed, not departed from. Upstream's template did not change at this head; the file is otherwise verbatim."
+    }
   }
 }
