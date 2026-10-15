@@ -1,7 +1,14 @@
 # Supabase project config, versioned so a deploy flag is not a sentence in a
 # comment that the next person has to remember.
 #
-# ⚠️ THERE IS NO [functions.help-ask] BLOCK, AND ITS ABSENCE IS DELIBERATE.
+# ⚠️ BOTH FUNCTIONS NOW PIN `verify_jwt = true` AT THE BOTTOM OF THIS FILE.
+# This heading used to read "THERE IS NO [functions.help-ask] BLOCK, AND ITS
+# ABSENCE IS DELIBERATE" — which was true until 2026-10-14 and then described the
+# exact configuration that FAILED to correct a live `false`. See the measurement
+# at the bottom: an absent block preserves, it does not default. The argument
+# below is still the record of why `verify_jwt = false` was wrong; it is not a
+# reason to leave the flag unstated.
+#
 # An earlier version of this file pinned `verify_jwt = false` for help-ask and
 # argued that the gateway flag "adds no protection" and "can reject the CORS
 # preflight". BOTH HALVES WERE WRONG, and both were testable from here all along
@@ -24,21 +31,44 @@
 #
 # ⚠️⚠️ AND "JUNK TRAFFIC" MEANS KEYLESS TRAFFIC — `verify_jwt` IS NOT USER
 # AUTHENTICATION, WHICH THE SENTENCE ABOVE READS AS CLAIMING. Raised by Codex on
-# #271, and it is right: the gateway checks for a VALID PROJECT JWT, and the
-# publishable/anon key is one — it is embedded in the browser bundle at
-# js/supabase.js and is public by construction. So anyone holding that key
-# reaches the worker, and the exposure this flag is credited with closing
-# (a billable invocation, an Auth round trip) is NOT closed for them.
+# #271, and it is right. The key embedded in the browser bundle at
+# js/supabase.js is `sb_publishable_…`, which is **NOT a JWT** — only the LEGACY
+# `anon` key was JWT-based. Supabase currently lets publishable keys pass the
+# gateway's check for migration compatibility, so a key holder reaches the worker
+# anyway, and the exposure this flag is credited with closing (a billable
+# invocation, an Auth round trip) is NOT closed for them.
+#
+# ⚠️ THE DISTINCTION IS NOT PEDANTRY, and a first version of this correction got
+# it wrong by writing "the gateway checks for a valid project JWT, and the
+# publishable key is one". Codex on #272: describing a non-JWT API key as a JWT
+# documents the wrong mechanism and invites the next change to treat it as a USER
+# token — handing it to `getUser()`, say, where it identifies nobody. It is an
+# API key accepted by a compatibility check, and legacy anon JWTs are a separate
+# thing. See Supabase's API-key reference for both formats.
 #
 # What the flag actually stops is the 2026-10-07 probe's own two cases: a POST
 # with NO Authorization, and one with a malformed bearer. Both died at the
 # gateway with no execution id. That is worth having and it is all it is.
 #
 # ⚠️ THE USER GATE IS IN THE HANDLER, AND ALWAYS WAS: `if (!authz) 401`, then
-# `getUser()` must return a user, then every table read runs as that user under
-# RLS. Nothing here depends on the gateway for identity, so this correction
-# changes no behaviour — only a claim. Do not "harden" by removing the flag
-# either: keyless junk dying early is still a real saving.
+# `getUser()` must return a user, then every read OF THAT CLIENT'S OWN RECORDS
+# runs as them under RLS, through `userDb`. Nothing here depends on the gateway
+# for identity, so this correction changes no behaviour — only a claim. Do not
+# "harden" by removing the flag either: keyless junk dying early is still a real
+# saving.
+#
+# ⚠️ "EVERY TABLE READ" WAS TOO BROAD, and the narrowing matters because it is
+# the service-role boundary a future privilege change has to preserve (Codex,
+# #272). help-ask deliberately reads TWO tables through the `admin`
+# (service-role) client and not as the caller: `help_settings` at handler.ts 209,
+# because its policies are broker-only and a CLIENT must still get an answer; and
+# `help_queries` at 565/605/709/732/749/790, because the throttle must count rows
+# the client holds no privilege on at all. Both are documented in CLAUDE.md as
+# load-bearing grants. The caller-scoped client covers the CLIENT RECORDS —
+# entities, assets, policies, profiles — and that is the claim.
+# (notify-enhancement is the stricter case: every TABLE access there is the
+# caller's, and its one service-role use is `auth.admin.getUserById`, not a
+# table.)
 #
 # ⚠️ NOT MEASURED FROM HERE, and stated rather than assumed: HTTPS egress to the
 # project is blocked from a session, so the publishable-key path has not been
@@ -53,8 +83,11 @@
 # a redeploy flipping anything, and the default it was overriding was the safe one.
 project_id = "bdsegmjcgfmgzuxwiplj"
 
-# ⚠️ THE [functions.notify-enhancement] BLOCK WAS REMOVED 2026-10-13, so this
-# function now takes the DEFAULT — verify_jwt = true — like help-ask above.
+# ⚠️ THE [functions.notify-enhancement] BLOCK WAS REMOVED 2026-10-13 AND IS BACK
+# AT THE BOTTOM OF THIS FILE, now pinning `verify_jwt = true`. The sentence that
+# followed this heading — "so this function now takes the DEFAULT" — is exactly
+# the belief that let a live `false` survive a successful deploy on 2026-10-14.
+# Removing a block does not take the default; it takes whatever is already live.
 #
 # It used to pin `verify_jwt = false`, and the stated reason was that the
 # function "accepts a service-role caller as well as a signed-in one and

@@ -9,8 +9,13 @@
 // ✅ CLOSED: the owner deleted `desk-ask` on 2026-10-14, verified from a session.
 // "help-ask" also matches what the feature is now called everywhere else.
 //
-// Deploy with the default, verify_jwt ON — see handler.ts's header for the
-// probe that reversed the earlier `--no-verify-jwt` decision.
+// Deploy with verify_jwt ON — see handler.ts's header for the probe that
+// reversed the earlier `--no-verify-jwt` decision.
+//
+// ⚠️ IT IS PINNED, NOT DEFAULTED. This said "with the default"; measured
+// 2026-10-14, an absent [functions.*] block does NOT apply the default, it
+// preserves whatever the function already has. supabase/config.toml pins
+// `verify_jwt = true` for both functions, and that pin is what makes this true.
 //
 // ⚠️ THE LOGIC IS NOT HERE. It is in ./handler.ts, with its collaborators
 // injected, because this file's `jsr:` and `npm:` specifiers are exactly what
