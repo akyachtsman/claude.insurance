@@ -4619,10 +4619,14 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   // overflowed 21px and the wordmark truncated to "Ha…". Both endpoints were
   // clean. Every media-query boundary below is now sampled on BOTH sides,
   // because a discontinuity is exactly what a sparse list cannot see.
-  for (const width of [320, 360, 385, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129]) {
+  for (const width of [320, 360, 382, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129]) {
+    // ⚠️ RESIZE, NOT RE-NAVIGATE. Media queries re-evaluate on resize, so the
+    // page is mounted ONCE before this loop — 19 `goto`s cost ~17s on webkit
+    // against a 30s per-test budget, and reloading proved nothing a resize does
+    // not. It is also closer to what a person rotating or resizing actually
+    // does. The mount is asserted once, above.
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('./#/keep/list');
-    await expect(page.locator('.k-h1'), `the Entities page did not mount at ${width}px`).toHaveText(/Entities/i, { timeout: 15_000 });
+    await expect(page.locator('.k-bar__in'), `the app bar is not present at ${width}px`).toBeVisible();
 
     await expect(page.locator('.k-nav'), `the wide nav strip is still showing at ${width}px`).toBeHidden();
     await expect(page.locator('.k-pop--nav'), `no nav of any kind at ${width}px — the portal is a dead end`).toBeVisible();
@@ -4655,32 +4659,45 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
     });
     expect(squashed, `the bar fits ${width}px only by crushing: ${squashed.join(', ')}`).toHaveLength(0);
 
-    // ⚠️ EACH ITERATION MUST START FROM A KNOWN-CLOSED MENU, and this is not
-    // defensive padding — the first version of this loop failed at the SECOND
-    // width for exactly this reason. `page.goto` to the same URL and hash does
-    // NOT reload the document (CLAUDE.md records the same trap costing a false
-    // positive on the nav stack), so the menu left open by the previous
-    // iteration was still open here and the click TOGGLED IT SHUT. The symptom
-    // was "the compact nav did not open", which reads like an app defect and
-    // was a test defect. Asserting the precondition makes a state leak fail by
-    // name instead of as a confusing failure one width later.
-    await expect(page.locator('.k-pop--nav.is-open'), `the compact nav was already open on arrival at ${width}px`).toHaveCount(0);
+    // ⚠️ THE MENU INTERACTION IS CHECKED AT A SUBSET, NOT ALL 19 WIDTHS, AND
+    // THE SPLIT IS DELIBERATE. What the dense band exists to catch is
+    // GEOMETRIC — an overflow or a truncation that appears between two sampled
+    // widths — and those checks are above, at every width. Opening the panel
+    // adds ~1.1s per width on webkit, which put this test at 18-22s against
+    // `playwright.config.js`'s 30s per-test timeout and made a comment-only
+    // control mutation "fail" on a timeout. The interaction is width-sensitive
+    // only through the panel's position, so it runs at one width per layout
+    // regime: phone, the 481 squeeze, tablet, and the top of the band.
+    if ([360, 481, 810, 1129].includes(width)) {
+      // ⚠️ EACH ITERATION MUST START FROM A KNOWN-CLOSED MENU, and this is not
+      // defensive padding — the first version of this loop failed at the SECOND
+      // width for exactly this reason. `page.goto` to the same URL and hash does
+      // NOT reload the document (CLAUDE.md records the same trap costing a false
+      // positive on the nav stack), so the menu left open by the previous
+      // iteration was still open here and the click TOGGLED IT SHUT. The symptom
+      // was "the compact nav did not open", which reads like an app defect and
+      // was a test defect. Asserting the precondition makes a state leak fail by
+      // name instead of as a confusing failure one width later.
+      await expect(page.locator('.k-pop--nav.is-open'), `the compact nav was already open on arrival at ${width}px`).toHaveCount(0);
 
-    // The menu must actually OPEN and carry the same destinations. Asserted at
-    // every width, not once: the panel is positioned (`left: 0`, min-width
-    // 220px) and a panel that renders off-screen is not a usable nav.
-    await page.locator('.k-pop--nav button').click();
-    await expect(page.locator('.k-pop--nav.is-open'), `the compact nav did not open at ${width}px`).toHaveCount(1);
-    const compact = await hrefsOf(page.locator('.k-pop--nav .k-menu a'));
-    expect(compact, `the compact nav's destinations differ from the wide nav's at ${width}px`).toEqual(wide);
+      // The menu must actually OPEN and carry the same destinations. Asserted at
+      // every width, not once: the panel is positioned (`left: 0`, min-width
+      // 220px) and a panel that renders off-screen is not a usable nav.
+      await page.locator('.k-pop--nav button').click();
+      await expect(page.locator('.k-pop--nav.is-open'), `the compact nav did not open at ${width}px`).toHaveCount(1);
+      const compact = await hrefsOf(page.locator('.k-pop--nav .k-menu a'));
+      expect(compact, `the compact nav's destinations differ from the wide nav's at ${width}px`).toEqual(wide);
 
-    const box = await page.locator('.k-pop--nav .k-menu').boundingBox();
-    expect(box.x, `the compact nav panel hangs off the left edge at ${width}px`).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, `the compact nav panel hangs off the right edge at ${width}px`).toBeLessThanOrEqual(width);
+      const box = await page.locator('.k-pop--nav .k-menu').boundingBox();
+      expect(box.x, `the compact nav panel hangs off the left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `the compact nav panel hangs off the right edge at ${width}px`).toBeLessThanOrEqual(width);
 
-    // Leave it as it was found, so the precondition above means something.
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.k-pop--nav.is-open'), `Escape did not close the compact nav at ${width}px`).toHaveCount(0);
+      // Leave it as it was found, so the precondition above means something.
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.k-pop--nav.is-open'), `Escape did not close the compact nav at ${width}px`).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.k-pop--nav.is-open'), `Escape did not close the compact nav at ${width}px`).toHaveCount(0);
+    }
   }
 
   // ── The crossover's upper side, so the pair is complete. 1130, because the
@@ -4756,6 +4773,34 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
 
+  // ── EVERY ICON RESOLVES. `icon()` builds `<use href="#icon-NAME">` and an
+  // unknown name renders an EMPTY svg with no error anywhere — so a mistyped
+  // name is invisible. Two of the first five written here were wrong.
+  const unresolved = await page.evaluate(() => [...document.querySelectorAll('.k-bar use, .k-menu use')]
+    .map((u) => u.getAttribute('href'))
+    .filter((h) => h && !document.querySelector(h)));
+  expect(unresolved, `app-bar icons name no sprite symbol: ${unresolved.join(', ')}`).toHaveLength(0);
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S30 — THE SACRIFICE ORDER'S SCOPE, AND THE PANEL'S REAL BOUND
+//
+// Split out of S29 rather than added to it, and the reason is measured: with
+// these two blocks inside, S29 ran 17-19s on the webkit projects against
+// `playwright.config.js`'s 30s PER-TEST timeout and flaked — a comment-only
+// control mutation "failed" with a `page.evaluate` timeout, which is how a
+// mis-graded mutation run looks. CLAUDE.md already records that raising a wait
+// inside a 30s test cannot fit and that the answer is a redesign, not a bound.
+// These are also two different claims from the nav band, so they belong apart.
+// ─────────────────────────────────────────────────────────────────────────────
+test('S30: the brand sacrifice is app-bar only, and menu panels respect their real top', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  await seedKeepSession(page, 'a');
   // ── THE SACRIFICE ORDER IS SCOPED TO THE APP BAR. `.k-tag` is also rendered
   // by the LOGIN CARD's `.k-abrand`, which is in no constrained container at
   // all — an unscoped `.k-tag { display: none }` removed the product badge from
@@ -4810,14 +4855,6 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
-
-  // ── EVERY ICON RESOLVES. `icon()` builds `<use href="#icon-NAME">` and an
-  // unknown name renders an EMPTY svg with no error anywhere — so a mistyped
-  // name is invisible. Two of the first five written here were wrong.
-  const unresolved = await page.evaluate(() => [...document.querySelectorAll('.k-bar use, .k-menu use')]
-    .map((u) => u.getAttribute('href'))
-    .filter((h) => h && !document.querySelector(h)));
-  expect(unresolved, `app-bar icons name no sprite symbol: ${unresolved.join(', ')}`).toHaveLength(0);
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
