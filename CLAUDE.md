@@ -395,7 +395,7 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 ## Required Commands
 | Purpose | Command |
 |---|---|
-| Validate HTML | `npx html-validate index.html` |
+| Validate HTML | `npm_config_legacy_peer_deps=true npx html-validate index.html` — ⚠️ the env var is load-bearing on a COLD npm cache (npm 10.9.7 crashes in `#loadPeerSet`); a warm cache passes without it, which is how CI stayed green until it did not |
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
 | Unit tests | `node --test $(find js supabase/functions -name '*.test.mjs')` |
 | Contrast guardrail | `node .github/scripts/check-contrast.js` |
@@ -4822,17 +4822,51 @@ upstream's and already exercised by `qa.yml`; the one ESM file is now `.mjs` and
 would be skipped by a `*.js` glob anyway. Run it by hand after installing the
 manifest in any repo, which is what upstream's `cicd-setup.md` Step 1 now says.
 
-⚠️ **AND THE OTHER HALF OF THAT REPORT DOES NOT APPLY HERE — MEASURED, NOT ASSUMED.**
-DIR9 also warned that `npx html-validate` can abort with a peer-dependency
-resolution error once a `package.json` sits beside the caller, and prescribed
-`npm_config_legacy_peer_deps=true` in the workflow. Checked before adopting it:
-`npx --yes html-validate@11.5.6 index.html` exits **0** from the repo root, from
-`.github/scripts/` and from `.github/scripts/ui-tests/`, and there is **no vitest
-anywhere in this repo** (`grep -rn vitest` finds nothing) — which is the dependency
-the conflict is between. So the env var is **deliberately NOT adopted**: it would
-silence a resolution error this repo cannot produce, and `legacy-peer-deps` globally
-disables the check that would report a real one later. Revisit if a `package.json`
-with a peer-dependency tree is ever added next to `index.html`.
+⛔ **RETRACTED WITHIN THE HOUR — I DISMISSED DIR9'S SECOND WARNING ON A WARM-CACHE
+MEASUREMENT, AND CI WENT RED FOR EXACTLY THE REASON IT GAVE.** This paragraph said
+the `npx html-validate` peer-dependency failure "does not apply here — measured, not
+assumed", on the strength of `npx --yes html-validate@11.5.6 index.html` exiting
+**0** from three working directories. That measurement was real and it was
+**worthless**: every one of those runs used an **already-warm npm cache**.
+
+**What the red run was.** `Unit Tests + HTML Validation` failed on `5eb49a4` at the
+**Validate HTML** step (unit tests passed), run `38784051580`. `index.html` is
+**byte-identical** between that commit and the green `aa996d1` before it
+(`git diff --quiet aa996d1 5eb49a4 -- index.html`), and the commit touches only
+`pages-retry.yml`, `CLAUDE.md` and `directive-sync.json` — so nothing html-validate
+reads had changed. The job log is unreadable from a session (the logs endpoint
+redirects to blob storage this `gh` will not contact), so the annotation said only
+*"Process completed with exit code 1."*
+
+**Reproduced locally in one call, by giving npm a COLD cache** — two runs a minute
+apart, separate cache directories, nothing else different:
+
+| run | result |
+|---|---|
+| cold cache, plain | **exit 1** — `npm error Cannot read properties of null (reading 'edgesOut')` |
+| cold cache, `npm_config_legacy_peer_deps=true` | **exit 0** |
+| warm cache, either | exit 0 |
+
+The stack names the cause precisely: `#loadPeerSet` in
+`@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289` — a **crash inside npm's
+peer-dependency resolver**, not an `ERESOLVE` conflict it reports and recovers from.
+`legacy-peer-deps` skips that code path, which is why it is the fix and why the
+"there is no vitest here" half of my reasoning was beside the point: the crash is in
+the resolver, not in a specific conflict.
+
+**Fixed** by `npm_config_legacy_peer_deps: 'true'` on that step's `env` in `qa.yml`,
+with the measurement in the comment beside it.
+
+⚠️ **The lesson is not "listen to DIR9" — it is the state-dependent measurement.**
+A cold cache is the CI condition and a warm one is the local condition, so every
+local run was answering a different question than the one asked. This file records
+the same shape at least four times already (*"no webkit in the image"* read off a
+directory listing, the auth-gate window, the `source`-filtered log absence, and
+`node --check` in the paragraph directly above). **A green run on a warm cache is
+not evidence the flag is unnecessary; the only informative test is a cold one.**
+⚠️ And note the order: the remedy was in hand, from a peer, BEFORE the failure —
+and was argued away. A warning dismissed on a measurement that cannot see the
+failure mode costs the same as no warning at all.
 
 ### ⛔ OPEN (owner decision) — the kit's helpers moved into `tests/lib/`, and taking them costs a documented divergence
 

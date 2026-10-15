@@ -220,6 +220,30 @@ jobs:
         run: node --test $(find js supabase/functions -name '*.test.mjs')
 
       - name: Validate HTML
+        # npm_config_legacy_peer_deps IS LOAD-BEARING, and it took a red CI run
+        # to find out. `npx --yes html-validate@11.5.6` installs into a cold npx
+        # cache on every runner, and npm 10.9.7 CRASHES in that install:
+        #     npm error Cannot read properties of null (reading 'edgesOut')
+        #     at #loadPeerSet (@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289)
+        # i.e. a crash inside arborist's PEER-DEPENDENCY resolver, not an
+        # ERESOLVE conflict it reports and recovers from. legacy-peer-deps skips
+        # that code path entirely, which is why it fixes it.
+        #
+        # ⚠️ IT IS INTERMITTENT ONLY BECAUSE OF THE CACHE, and that is what hid
+        # it. Measured here 2026-10-15, two cold caches one minute apart,
+        # everything else identical:
+        #     cold + plain                    -> exit 1 (the crash above)
+        #     cold + legacy_peer_deps=true    -> exit 0
+        # A WARM cache passes either way — so this step was green on every run
+        # whose runner happened to resolve the tree, and `index.html` was
+        # byte-identical between the last green run and the red one. Do not read
+        # a green run as evidence the flag is unnecessary; the only informative
+        # test is a cold cache.
+        #
+        # Reported upstream by a peer session (claude.directives#455) before it
+        # was ever seen here, and dismissed on a WARM-cache measurement.
+        env:
+          npm_config_legacy_peer_deps: 'true'
         run: npx --yes html-validate@11.5.6 index.html
 
   ui-changes:
