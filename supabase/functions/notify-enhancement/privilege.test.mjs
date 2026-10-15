@@ -954,7 +954,7 @@ test("the deploy header names every RPC the code calls", () => {
 // replay stays green while the privilege is live in the database.
 //
 // So the question is inverted, exactly as `BACK_ELIGIBLE` and
-// `check-keep-back-routes.js` were inverted after their second failure: instead
+// `check-keep-back-routes.mjs` were inverted after their second failure: instead
 // of asking "does this look like a grant I know?", every GRANT/REVOKE is parsed
 // and its TARGET classified, and anything unclassifiable **fails the suite by
 // name** (see the completeness test below). A spelling nobody thought of now
@@ -1846,7 +1846,7 @@ test("every GRANT/REVOKE in every migration is one this suite can account for", 
   // GRANT or REVOKE in this repo whose TARGET the classifier cannot read? If
   // so it FAILS BY NAME, with the file and the statement. A spelling nobody
   // thought of now costs a loud failure instead of a hole, which is the same
-  // inversion `BACK_ELIGIBLE` and `check-keep-back-routes.js` took after their
+  // inversion `BACK_ELIGIBLE` and `check-keep-back-routes.mjs` took after their
   // second failure — and the reason the harm is bounded in the right direction.
   //
   // ⚠️ IT CANNOT BE REPLACED BY "add ROUTINE to the regex". That is the fourth
@@ -1881,7 +1881,7 @@ test("every GRANT/REVOKE in every migration is one this suite can account for", 
   // ⚠️ AND THE CLASSIFIER ITSELF IS PINNED, in both directions. Without this, a
   // later edit could make classifyTarget return `other` for everything and the
   // check above would pass vacuously — the empty-set failure mode this repo has
-  // already recorded twice (check-keep-back-routes.js fails closed for the same
+  // already recorded twice (check-keep-back-routes.mjs fails closed for the same
   // reason, and the concatenated-migrations scan did not).
   const cases = [
     ["table public.enhancement_notifications", "table"],

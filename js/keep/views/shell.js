@@ -611,7 +611,7 @@ const KEEP_LABELS = {
 //
 // Inverted, the failure mode of forgetting a route is a MISSING back control,
 // which is cosmetic, instead of one pointing at a login card or a submitted
-// form, which is not. And `.github/scripts/check-keep-back-routes.js` makes
+// form, which is not. And `.github/scripts/check-keep-back-routes.mjs` makes
 // forgetting one fail the build: it asserts this table's keys are exactly the
 // `case` labels in `dispatchKeep`, so a new Keep route cannot ship without a
 // decision recorded here.

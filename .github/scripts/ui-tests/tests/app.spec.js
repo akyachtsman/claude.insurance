@@ -4568,7 +4568,7 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
 // hrefs — because the single list is only a convention until something fails
 // when a renderer stops consulting it. Equality, not containment: a stale entry
 // in the menu fails too, which is the inversion lesson CLAUDE.md records for
-// `BACK_ELIGIBLE` and `check-keep-back-routes.js`.
+// `BACK_ELIGIBLE` and `check-keep-back-routes.mjs`.
 //
 // ✅ 320px IS NOW IN THE BAND, and the previous version of this comment said it
 // never could be: "closing the last 28px means shrinking the 44px touch

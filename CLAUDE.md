@@ -395,7 +395,7 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 ## Required Commands
 | Purpose | Command |
 |---|---|
-| Validate HTML | `npx html-validate index.html` |
+| Validate HTML | `npm_config_legacy_peer_deps=true npx html-validate index.html` — ⚠️ the env var is load-bearing on a COLD npm cache (npm 10.9.7 crashes in `#loadPeerSet`); a warm cache passes without it, which is how CI stayed green until it did not |
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
 | Unit tests | `node --test $(find js supabase/functions -name '*.test.mjs')` |
 | Contrast guardrail | `node .github/scripts/check-contrast.js` |
@@ -404,9 +404,10 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
-| Keep back-route classification | `node .github/scripts/check-keep-back-routes.js` |
+| Keep back-route classification | `node .github/scripts/check-keep-back-routes.mjs` |
 | Python compiles clean | `python3 .github/scripts/check-py-warnings.py` |
 | ui-suite env parity | `python3 .github/scripts/check-ui-suite-env.py --kit-dir .github/scripts/ui-tests` |
+| Workflow/action YAML as GitHub reads it | `python3 .github/scripts/check-yaml-anchors.py` |
 
 **Required watchers (`.github/workflow-ref-required.json`).** The guard checks
 two different things and only that file supplies the second: rule 1 is that
@@ -1150,7 +1151,7 @@ login** rather than a deep link:
    submitted form. `keepSubRoute()` mirrors `main.js`'s own parse (strip query,
    split, drop empties), so the trailing-slash and query-string variants cannot
    diverge from what the router thinks a hash names.
-   The other half is **`node .github/scripts/check-keep-back-routes.js`** (now in
+   The other half is **`node .github/scripts/check-keep-back-routes.mjs`** (now in
    Required Commands and `qa.yml`): it asserts the table's keys are **exactly**
    `dispatchKeep`'s cases — set equality, not containment, so a stale entry cannot
    outlive its route either — and **fails closed**, reporting that it could not
@@ -1729,7 +1730,7 @@ difference is that a dead selector fails loudly and this one passes quietly.
 
 ### ⚠️ OPEN (owner decision) — the route guard is a net, not a proof
 
-`check-keep-back-routes.js` asserts `BACK_ELIGIBLE`'s keys are exactly
+`check-keep-back-routes.mjs` asserts `BACK_ELIGIBLE`'s keys are exactly
 `dispatchKeep`'s routes. Its **scan has now been fixed twice**, both times on a
 Codex finding, both times because a route can be selected in a shape the scan
 did not read:
@@ -2220,7 +2221,7 @@ patch.** The defect is not that `ROUTINE` was missing; it is that the suite
 could not tell it was missing.
 
 **So the question is inverted**, exactly as `BACK_ELIGIBLE` and
-`check-keep-back-routes.js` were inverted after their second failures. Every
+`check-keep-back-routes.mjs` were inverted after their second failures. Every
 `GRANT`/`REVOKE` in every migration is parsed and its TARGET classified, and
 anything unclassifiable **fails the suite by name** with the file and the
 statement. A spelling nobody thought of now costs a loud failure instead of a
@@ -2434,7 +2435,7 @@ bodies that can do anything. **Privileges do not arrive only through GRANT
 statements, and SQL has a procedural sublanguage inside it.** So:
 
 ⛔ **`privilege.test.mjs` is a NET, not a proof** — the same language this repo
-already uses for `check-keep-back-routes.js`, and it should have been used here
+already uses for `check-keep-back-routes.mjs`, and it should have been used here
 from the start instead of three successive claims to have closed the class.
 What bounds the harm is that a construct it cannot read now **fails by name**,
 so the cost of a novel one is a loud failure rather than a silent hole.
@@ -4554,7 +4555,7 @@ and `questionnaire.json`, by `ASSET_META`, and by `entityAvatarIcon()`.
 checking the 87 literals and skipping the 33 variables is this repo's own
 most-repeated defect — the scanner that under-reports — which
 `privilege.test.mjs` was redesigned over five rounds to escape and
-`check-keep-back-routes.js` twice before it. Both arrived at the same rule:
+`check-keep-back-routes.mjs` twice before it. Both arrived at the same rule:
 **anything the scan cannot account for must fail BY NAME**, not be skipped.
 Here that means resolving three data sources plus the content JSON, which is a
 guard with its own semantics and its own mutation tests — a separate change,
@@ -4714,6 +4715,208 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
 | S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **19 widths — 320, 360, 382, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129** — that inverts, with `scrollWidth <= clientWidth`, the logo at its natural width, no 44px control shrunk, and **the wordmark never truncated** at each. ⚠️ Both sides of every media-query boundary are sampled, because #275's defect lived entirely between 480 and 600 and both endpoints were clean. ⚠️ The wordmark check is the one that catches it: a shrinkable wordmark turns an overflow into an ellipsis, which every `scrollWidth` assertion reports as a pass. The band **resizes rather than re-navigating** (media queries re-evaluate on resize; 19 `goto`s cost ~17s against a 30s per-test budget), and the menu INTERACTION — opens, panel on-screen, hrefs **EQUAL AS A SET** to the strip's, Escape closes, `aria-expanded` tracks — runs at one width per layout regime (360, 481, 810, 1129). 1129/1130 are asserted as a **pair**. A menu link navigates, and **no app-bar `<use href>` resolves to nothing**. ⚠️ 382 is in the list deliberately: at 385 the wordmark's shortfall is 1px and the tolerance absorbs it, so the mutation reverting that breakpoint survived a band that sampled 385/386 | Any width shows both navs or neither, the Keep scrolls sideways, the wordmark ellipsises, the logo or a touch target is crushed, the compact menu's destinations drift from the strip's, Escape stops closing it, or an app-bar icon names no sprite symbol |
 | S30 | The brand sacrifice is app-bar only, and menu panels respect their real top (offline harness, **runs locally**) | Signed OUT **in a fresh context** (`localStorage` is shared, so a second page on the seeded context is already signed in and renders the home view — the first version failed with "the login card did not mount", which reads as an app defect), the login card keeps its `.k-abrand .k-tag` badge at 390, 481, 810, 1129 and 1280: the sacrifice order belongs to the app bar, and an unscoped `.k-tag { display: none }` stripped the badge from the authentication screen at every width 320-1044. Then at 740×320 with the chrome enlarged to 2x, the open panel's bottom stays within the viewport and no destination is stranded after scrolling it — `calc(100vh - 124px)` subtracts an ASSUMED top and measured 39px past the viewport. ⚠️ Split out of S29 because that test hit 17-22s against a 30s per-test timeout and a comment-only control mutation "failed" on a timeout. Then at chrome **40/38 and 48/46** the applied bound must not exceed the measured room — `Math.max(120, room)` defeated its own bound below 120px, measured 27px past with "Documents" stranded, and **the 32/30 sample above passed throughout because its real room is 125px**, four pixels outside the failing regime. Each scale asserts an **armed precondition** (room is positive, and under 120) so it fails by name rather than quietly ceasing to test the clamp. Then a menu opened at 740x900 and resized to 740x300 must be **re-measured, not left frozen** (788px stale, 38px past, "Documents" stranded) and must **stay open** — a mobile URL-bar show/hide fires `resize`. Then crossing the breakpoint while open **closes** the popover and clears `aria-expanded`. ⚠️ Both of the latter poll for a settled state rather than sleeping: a flat wait made the resize block flaky on webkit, failing as "destinations unreachable" when only the panel's scroll had not landed | The login card loses its badge at any width, an enlarged ribbon or text size pushes a menu panel past the viewport and strands its last link, a bound measured at open time survives a viewport change, or a popover the breakpoint hid is left open |
+### ⚠️ THE REPOSITORY IS PUBLIC, AND `.claude/settings.json` WAS WRITTEN AS IF IT WERE NOT (measured 2026-10-15)
+
+Measured during `/refresh-repo`, from `GET /repos/akyachtsman/claude.insurance`:
+**`visibility=public`, `private=false`**. Nothing in this file had ever said so, and
+17 pre-approved tool grants had been written on the opposite assumption.
+
+`global.md` → *Scheduling Tools Never Prompt* admits a tool to `permissions.allow`
+only if it passes two tests, the second being **"does it return content an outsider
+can write?"** On a public repository anyone can write issue and PR bodies and
+comments, a PR branch's files and commit messages, and what a PR's CI prints — so a
+read that hands that text to an agent removes the prompt standing in front of text
+an attacker may have authored. The directive admits those reads **for a private
+repository only**, and gates the `search_*` family **everywhere**, private
+repositories included (owner ruling 2026-10-07): an unqualified search spans all of
+GitHub, so what it returns is unbounded by this repository's visibility.
+
+**Removed this refresh — 17 entries**, leaving 37:
+
+| class | entries |
+|---|---|
+| `search_*` — gated everywhere by ruling | `search_code`, `search_issues`, `search_pull_requests`, `search_repositories`, `search_users`, `search_commits` |
+| outsider-content reads — private-only | `get_file_contents`, `list_commits`, `get_commit`, `list_pull_requests`, `pull_request_read`, `list_issues`, `issue_read`, `get_check_run`, `get_job_logs`, `actions_get`, `actions_list` |
+
+What stays is the scheduling set and the reads whose content only a collaborator
+writes (branches, tags, releases, labels, collaborators, teams, issue types and
+fields, `get_me`), plus `get_trigger` and `read_documentation` in both server-name
+spellings, which upstream added and this repo was missing.
+⚠️ Settings load at **session start**, so this takes effect in the NEXT session; the
+one that made the change keeps whatever it already had.
+⚠️ A session that needs one of the removed reads still gets it — it prompts, which
+is the point. Do not re-add an entry to stop a prompt.
+
+⚠️ **AND IT SHARPENS THE PUBLISHED-CREDENTIALS ITEM, WHICH THIS FILE HAS NEVER
+STATED CORRECTLY.** The invite-runbook entry says *"this file publishes their
+passwords"* and weighs that as an internal exposure. It is not: `CLAUDE.md` is
+world-readable, so the client, broker and underwriter passwords for a live Supabase
+project are published **on the open internet**, and have been for as long as they
+have been in the file. The precondition that made it acceptable — three
+`@example.com` rows and no real client data — expired with the 2026-10-15 test
+invite. Rotation is no longer a before-the-first-client item; it is overdue.
+(Branch-source Pages publishes the whole repository at the public URL too, so the
+file is served from `akyachtsman.github.io/claude.insurance/CLAUDE.md` as well as
+from GitHub.)
+
+⚠️ **One repo setting is off and an agent cannot change it** (`git.md` →
+*Repo-settings preflight*, warn once): **`allow_auto_merge=false`** —
+Settings → General → Pull Requests → Allow auto-merge. Until it is on, the
+auto-merge-on-green rule falls back to the session watching CI and squash-merging
+itself, which is what has been happening. `delete_branch_on_merge` is already on.
+
+### ⚠️ `.github/scripts/package.json` DECLARES `"type": "commonjs"`, AND THIS REPO HAD AN ESM GUARD THERE (2026-10-15)
+
+Found by running the gates after installing it, not by reading it. The derivation in
+`/refresh-repo` names `.github/scripts/package.json` whenever a caller runs a
+CommonJS script there — correctly, and installing it **broke
+`check-keep-back-routes.js` immediately**:
+
+```
+SyntaxError: Cannot use import statement outside a module
+```
+
+**Why it had worked without the manifest:** this repo has **no root
+`package.json` at all** (measured), so Node applied its own default and an ESM
+file with `import` was tolerated by extension alone. Upstream's own comment states
+the manifest's purpose as protecting CommonJS scripts from a root
+`"type": "module"` — the opposite direction — so a repo with no root manifest gets
+the constraint without the problem it solves.
+
+Measured module style of the six `.js` files there: **five CommonJS** (upstream's
+`browser-ladder`, `check-contrast`, `check-ui-viewports`, and this repo's
+`check-asset-manifest`, `check-undefined-calls`) and **one ESM**, this repo's own
+`check-keep-back-routes`.
+
+**Fixed by renaming that one file to `.mjs`**, which overrides the manifest's
+`type` per-file, matching what this repo already does for `js/**/*.test.mjs`. The
+manifest stays, because it is what keeps the five CommonJS scripts working if a root
+`package.json` is ever added. Seven files referenced the old name (`qa.yml`, two
+Edge Function tests, the Playwright spec, `shell.js`, this file, and the guard
+itself) and all seven were updated.
+
+⚠️ **The generalisable bit:** a template installed because something *names* it can
+carry a constraint on files the template has never heard of. The derivation is right
+to install it; the check is to run the gates afterwards.
+
+⚠️ **CORRECTION, 2026-10-15 — this paragraph said "nothing static would have caught
+this — `node --check` parses a module fine", and THAT IS FALSE.** Measured here on
+Node 22.22.2, on an identical probe file, after DIR9 reported it
+(`claude.directives#455`):
+
+| where the probe sat | `node --check` |
+|---|---|
+| `.github/scripts/` (manifest present) | **exit 1**, `SyntaxError: Cannot use import statement outside a module` |
+| the repo root (no manifest) | exit 0 |
+
+**Why I got it wrong, since the mechanism is the interesting part:** `node --check`
+only parses — true — but the manifest changes *which grammar it parses against*. With
+no `package.json` Node detects ES syntax and accepts it; under `"type": "commonjs"`
+the same bytes are a syntax error. So the claim was true of the state BEFORE the
+install and I asserted it as a property of the tool. That is this file's most
+repeated defect — a fact about one state written as a general one — and I wrote it in
+the very section recording the install.
+**What follows practically:** `node --check .github/scripts/*.js` is a real guard for
+this class and costs nothing. Not added here, because the five CommonJS files are
+upstream's and already exercised by `qa.yml`; the one ESM file is now `.mjs` and
+would be skipped by a `*.js` glob anyway. Run it by hand after installing the
+manifest in any repo, which is what upstream's `cicd-setup.md` Step 1 now says.
+
+⛔ **RETRACTED WITHIN THE HOUR — I DISMISSED DIR9'S SECOND WARNING ON A WARM-CACHE
+MEASUREMENT, AND CI WENT RED FOR EXACTLY THE REASON IT GAVE.** This paragraph said
+the `npx html-validate` peer-dependency failure "does not apply here — measured, not
+assumed", on the strength of `npx --yes html-validate@11.5.6 index.html` exiting
+**0** from three working directories. That measurement was real and it was
+**worthless**: every one of those runs used an **already-warm npm cache**.
+
+**What the red run was.** `Unit Tests + HTML Validation` failed on `5eb49a4` at the
+**Validate HTML** step (unit tests passed), run `38784051580`. `index.html` is
+**byte-identical** between that commit and the green `aa996d1` before it
+(`git diff --quiet aa996d1 5eb49a4 -- index.html`), and the commit touches only
+`pages-retry.yml`, `CLAUDE.md` and `directive-sync.json` — so nothing html-validate
+reads had changed. The job log is unreadable from a session (the logs endpoint
+redirects to blob storage this `gh` will not contact), so the annotation said only
+*"Process completed with exit code 1."*
+
+**Reproduced locally in one call, by giving npm a COLD cache** — two runs a minute
+apart, separate cache directories, nothing else different:
+
+| run | result |
+|---|---|
+| cold cache, plain | **exit 1** — `npm error Cannot read properties of null (reading 'edgesOut')` |
+| cold cache, `npm_config_legacy_peer_deps=true` | **exit 0** |
+| warm cache, either | exit 0 |
+
+The stack names the cause precisely: `#loadPeerSet` in
+`@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289` — a **crash inside npm's
+peer-dependency resolver**, not an `ERESOLVE` conflict it reports and recovers from.
+`legacy-peer-deps` skips that code path, which is why it is the fix and why the
+"there is no vitest here" half of my reasoning was beside the point: the crash is in
+the resolver, not in a specific conflict.
+
+**Fixed** by `npm_config_legacy_peer_deps: 'true'` on that step's `env` in `qa.yml`,
+with the measurement in the comment beside it.
+
+⚠️ **The lesson is not "listen to DIR9" — it is the state-dependent measurement.**
+A cold cache is the CI condition and a warm one is the local condition, so every
+local run was answering a different question than the one asked. This file records
+the same shape at least four times already (*"no webkit in the image"* read off a
+directory listing, the auth-gate window, the `source`-filtered log absence, and
+`node --check` in the paragraph directly above). **A green run on a warm cache is
+not evidence the flag is unnecessary; the only informative test is a cold one.**
+⚠️ And note the order: the remedy was in hand, from a peer, BEFORE the failure —
+and was argued away. A warning dismissed on a measurement that cannot see the
+failure mode costs the same as no warning at all.
+
+### ⛔ OPEN (owner decision) — the kit's helpers moved into `tests/lib/`, and taking them costs a documented divergence
+
+**This is the one thing `/refresh-repo` did not take on 2026-10-15, and it is why
+the stamp did not advance.** Recorded rather than decided because it changes the core
+of the whole UI suite and because the two ways out each give something up.
+
+**What upstream did** (`8c1a398`, batch C/S2): `templates/ui-tests/tests/app.spec.js`
+dropped from 2,623 lines to 1,269 by moving its helpers into two new files —
+`tests/lib/fixtures.js` (515 lines) and `tests/lib/auth.js` (1,124) — which the spec
+now imports. Taking it means adding those two files, adding the import block, and
+deleting the inline copies **together**: the imports without the deletions declare
+each helper twice, a SyntaxError that fails every scenario.
+
+**Why it is not mechanical here.** This repo's `app.spec.js` is **4,983 lines** — the
+stamp-era kit plus S5–S30 — so the migration deletes ~1,400 lines from a file
+carrying 26 project scenarios. And one local divergence collides head-on:
+
+| | upstream `lib/auth.js:25` | this repo |
+|---|---|---|
+| `AUTH_CREDENTIAL` | `process.env.TEST_AUTH_CREDENTIAL \|\| null` | `… \|\| readCredentialFromClaude() \|\| null` |
+
+`readCredentialFromClaude()` is a deliberate divergence (*"Kept so local runs work
+without the secret"*), and `AUTH_CREDENTIAL` is consumed **inside** `lib/auth.js` by
+`detectAndAuth`, `gotoAndAuth` and `gateShipsCredential` — so an importer cannot
+override it. The options:
+
+- **(A) Take the lib verbatim and drop `readCredentialFromClaude()`.** Clean, and
+  `/refresh-repo` keeps the file in step forever after. Cost: a local Playwright run
+  without `TEST_AUTH_CREDENTIAL` set loses its credential, so the auth scenarios
+  self-skip here.
+- **(B) Take the lib and edit that one line.** Keeps local runs working. Cost: the
+  vendored lib is `CUSTOM` from the day it lands, which is exactly the drift the
+  extraction was meant to end — and it needs its own `refresh_kept` reason.
+- **(C) Defer.** The suite keeps working as it does today (124 tests list, 394 unit
+  tests pass), and the stamp stays at `bbfdcfc` so the next refresh sees this delta
+  again rather than skipping past it.
+
+⚠️ **What deferring actually costs**, since it is the default: the better
+`awaitAuthReady` stays unadopted — upstream's resolves on `requestfinished` where
+this repo's resolves on `response`, so an app whose session payload streams is marked
+ready before the gate can render (Codex, #438). `TEST_AUTH_READY_REQUEST` is unset in
+this repo, so nothing is broken today; it is a trap armed for whoever sets it.
+
+⚠️ **`playwright.config.js` is in the same bundle** and is also unapplied: upstream
+now derives the screenshot directory from `GITHUB_WORKSPACE` rather than a hardcoded
+`../../../`, which only works when the kit sits at exactly `.github/scripts/ui-tests/`
+— it does here, so this is latent rather than live.
+
+
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local
@@ -4727,15 +4930,23 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | S5–S10 instead of upstream's NAV / CTRL / ENTRY / DISMISS | S5–S10 cover *this* app (see Project-Specific Test Scenarios). Upstream's four are **deliberately not carried**. Revisit NAV only if this app gains multi-level drill-down with an in-app back control — it self-skips otherwise, so its downside is bounded. |
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
-| ~~`check-contrast.js` carries `css/tokens.css`~~ **RESOLVED — adopted upstream** | No longer a divergence. The template now checks `styles/tokens.css` **or** `css/tokens.css` by default and takes `--tokens <file>` for anything else, which is exactly what was reported. Row kept only so the next refresh does not re-add it as a finding; delete it after one more sync. |
+| `check-contrast.js` carries two project-specific `.k-ilink` pairs | ⚠️ **The ORIGINAL divergence is resolved and a DIFFERENT one now stands in its place — do not read the old row's "delete after one more sync" as applying to this file any more.** Upstream adopted `css/tokens.css` as a default and takes `--tokens <file>`, so that half is gone. What makes the local copy `CUSTOM` at `8c1a398` is two added pairs: `accent-hover / bg` and `accent-hover / accent-light`. `.k-ilink` is 14px/700 body text, so it answers to AA and not AA_LARGE, and it renders on the page background and on the accent tint, never on surface — checking only `accent / surface` (4.65) passed while these two measured **4.26** and **4.03**, and one of them is the Help desk's broker hand-off, i.e. the remedy the whole fact/advice boundary routes a client to. `design.md` → *Accessibility* asks each project to read the pair list against its own token roles and to derive pairs from its own components, so this is the directive being followed. The file is otherwise verbatim; upstream's template did not change at this head. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
-| `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
-| `awaitAuthReady` consults an already-arrived response | **Absent upstream; a real bug in the upstream kit, found by Codex on #253 and reproduced before fixing.** `page.waitForResponse()` resolves only on a FUTURE response — Playwright does not replay ones already received — and every caller arms it AFTER awaiting `page.goto()`. So a readiness request that completes DURING navigation is missed and the wait times out, failing S2/S3/S4 with *"never resolved"* on a request that did arrive. Measured: `TEST_AUTH_READY_REQUEST=tokens.css` failed S4 at 25000ms; with the fix it passes in 6.8s, and the SELECTOR and default paths are unchanged. The fix is an `auto` fixture recording matching responses from before the body navigates, plus a check ahead of the wait. The SELECTOR path never had this race (`waitForSelector` with `state:'attached'` matches an element already present), which is why only the REQUEST branch is touched. **Report upstream at the next `/refresh-repo`** — the whole kit has it, and a refresh that takes the kit verbatim would delete this. |
+| `pages-retry.yml` keeps an obsolescence check; the `concurrency` group is **GONE** | ⚠️ **REVERSED 2026-10-15, and the reversal is a safety fix rather than an alignment one.** This repo carried a `concurrency: {group: pages-retry, cancel-in-progress: false}` block from #249 and argued for it at length. `claude.directives#455` took the obsolescence check and the 390s timeout correction and deliberately left the group OUT, with the reason that settles it: **only one run may be PENDING in a concurrency group, and a newly queued run cancels the pending one** — `cancel-in-progress: false` governs the RUNNING run, not the pending one. Retries fire off `workflow_run` completions, which need not arrive in deploy order, so retry(A) running + retry(C, newest) pending + retry(B) queuing cancels C, then A and B both correctly decline on the check and **nothing is retried at all**. The group therefore made its own neighbour unsafe: the check already handles ordering, and the group only supplied a way to lose the one retry that should happen. Removed, with that sequence written into the workflow so it cannot be re-added for the old reason. **What STAYS local:** the obsolescence check itself (keyed on `workflow_run.workflow_id`, never a name — the managed Pages workflow reports two different names across the two APIs, verified against the live API 2026-08-26) and the corrected timeout arithmetic, both now adopted upstream too. ⚠️ Upstream's own template at `a9c8859` carries its version of the check; this repo's copy is still its own, because `a9c8859` is NEWER than the head this refresh pinned (`8c1a398`) and taking it now would mix two upstream heads — the next `/refresh-repo` reconciles them at its own pin. |
+| ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
-| **Two `test.md` additions NOT yet reported upstream** (2026-10-15) | A proposal was written and handed to the owner for forwarding; `claude.directives` is readable from here (raw 200, `git ls-remote` fine) but **ACT scope is this repo only**, and no peer session was running to receive it (`ListAgents`: none). Two mechanisms are absent upstream and cost four PRs here: (1) **a satisfied constraint does not say what paid for it** — `scrollWidth <= clientWidth` is green when a flex child shrank, ellipsised or collapsed to 0px, so assert the SACRIFICE ORDER beside the constraint; (2) **to measure an intrinsic width, neutralise the absorber first** — `flex: none; overflow: visible`, then read, because `scrollWidth` on a flex container reports what it SETTLED FOR. Upstream already covers the clamp half (*"A cap is proven BINDING, never assumed"*) and the sampling half (*"the resolution of the measurement, not the absence of a window"*), so **do not re-report those**. ⚠️ Carry the framing correction with it: all four findings came from a REVIEWER READING CODE, not from measuring — measurement is what settled them and what killed three confident claims of mine. "Measure, don't argue" credits the wrong instrument. |
+| ~~Two `test.md` additions not yet reported upstream~~ **RESOLVED — ADOPTED UPSTREAM, measured 2026-10-15** | No longer a divergence, and the correction matters because this repo claimed otherwise for a few hours. `test.md` at `8c1a398` now carries **all three** mechanisms under *Layered UI: rendered is not reachable*, credited to `claude.insurance` (2026-10-15) with this repo's own figures: *"A satisfied constraint does not say what paid for it"* (the 0px logo and the `Ha…` wordmark), *"To measure an intrinsic need, neutralise the absorber first"* (1045 un-neutralised vs 1130 neutralised, one child squeezed to 55px of 83), and *"Sweep a band at every width"*. ⚠️ **Upstream's versions are STRICTER than the proposal that was drafted here, so read theirs and not the draft:** the neutralise rule also sets `flex-wrap: nowrap; width: max-content` on the CONTAINER — without it freed children wrap to a second line and a container wider than its content reports its own width — and the sweep rule says **every integer width**, media-query boundaries included, where the draft said every 8px. The forwardable message in `.agent-reports/` is therefore obsolete; do not send it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
+
+### ✅ Rulebook synced 2026-10-15 to `8c1a398` (was 9 days / ~180 files stale)
+
+`/refresh-repo` run 2026-10-15: stamp `bbfdcfc` → `8c1a398`. Phase 1 clean (5 upstream
+references, none broken). Phase 1.5: 19 installed files compared — 3 matched, 13 STALE
+and taken, 3 CUSTOM and each dispositioned by reading the diff, 1 MODE (exec bit)
+restored. The kit-helper migration is the one thing NOT taken; see the open item below.
+The owner rulings this pulled in are read and in force. Previous sync below.
 
 ### ✅ Rulebook synced 2026-10-06 (was six weeks / 43 commits stale)
 

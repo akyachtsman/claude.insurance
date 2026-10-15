@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// check-keep-back-routes.js — every Keep route is classified as a back
+// check-keep-back-routes.mjs — every Keep route is classified as a back
 // destination, or the build fails.
 //
 // WHY THIS EXISTS. `originRoute()` in js/keep/views/shell.js decides where a

@@ -2,5 +2,22 @@
   "upstream": {
     "sha": "bbfdcfc287da2d34ef90f83d24d8fbd833d5fcac",
     "synced": "2026-10-06"
+  },
+  "refresh_kept": {
+    ".github/workflows/pages-retry.yml": {
+      "blob": "587141e479dacf40441530137ba6263ff8af3144",
+      "local": "f7c13c9e42fd400f56bf860e5b6fbadf9ccdc0b5",
+      "reason": "Carries the obsolescence check, absent upstream at this head. Each retry job re-runs the ORIGINAL SHA of its triggering run, so two managed Pages runs failing in one outage start two independent retries and the older can redeploy stale content over the newer commit; the check, keyed on workflow_id and never on a name (the managed workflow reports two different names across the workflows and runs APIs), is what closes that. Also corrects upstream's timeout arithmetic (6.5 min, not 5.2). The `concurrency` block this entry used to name as the other half of the divergence is GONE as of 2026-10-15 -- REMOVED, not synced away: only one run may be PENDING in a group, so a newly queued retry CANCELS the pending one even with cancel-in-progress: false (which governs the RUNNING run only), and with retries arriving out of deploy order the NEWEST retry is the one that can be cancelled while the older two decline on the check -- nothing is retried at all. The group made its own neighbour unsafe. claude.directives#455 (merged a9c8859) ruled the same way on the same reasoning; that commit is NEWER than this refresh's pinned head and was deliberately not fetched, so this file still diverges from the pinned template and the entry stands. Recorded in CLAUDE.md -> Upstream Divergences."
+    },
+    ".github/workflows/qa.yml": {
+      "blob": "fda7e7c028a70dbbc34d94c95834cd68ed5066e1",
+      "local": "6778fc1056c909e6bdb32256cec03b459941ed0d",
+      "reason": "Rebuilt FROM the pinned template this refresh, with three project adaptations re-applied: (1) three project-specific guard steps with no upstream equivalent (asset-manifest, undefined-call, Keep back-route classification), (2) the unit-tests job (node:test over js/ and supabase/functions/ plus html-validate \u2014 a deterministic blocking gate needing no browser or backend, #202), (3) ^content/ added to UI_PATHS because this app RENDERS content/*.json (help-guide seeds the Help desk, questionnaire builds the qualify flow) and a corpus-only PR otherwise skips the browser job. Everything else is upstream's, checkout@v7 / BUILD_* / the symlink step / check-yaml-anchors / the grep exit-code handling included."
+    },
+    ".github/scripts/check-contrast.js": {
+      "blob": "36e6918e52e6da12b39442af94b19d495b1b660f",
+      "local": "466dbbb603670ab3816224d2d1d9778aba51d5b4",
+      "reason": "Adds two project-specific contrast pairs for .k-ilink, which is 14px/700 body text and so answers to AA rather than AA_LARGE, and renders on the page background and on the accent tint, never on surface. Checking only accent/surface (4.65) passed while these measured 4.26 and 4.03; one of them is the Help desk's broker hand-off. design.md -> Accessibility asks each project to read the pair list against its own token roles and derive pairs from its components, so this is the directive being followed, not departed from. Upstream's template did not change at this head; the file is otherwise verbatim."
+    }
   }
 }
