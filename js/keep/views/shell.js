@@ -407,8 +407,48 @@ function signOutButton(cls) {
   return btn;
 }
 
+// The app bar's primary destinations, in ONE place because they are rendered
+// TWICE — as the wide `.k-nav` strip and as the compact `.k-navmenu` popover
+// that replaces it below the bar's intrinsic width. Two hand-maintained copies
+// is how `.k-nav` came to hold five links while the account menu (the only
+// other way around below 760px) carried just one of them, leaving Entities,
+// Assets and Policies unreachable on a phone. Add a destination here and both
+// renderers pick it up; S29 asserts the two sets are equal, so a renderer that
+// stops consulting this list fails rather than silently dropping a link.
+// ⚠️ Every `icon` here must name a `<symbol id="icon-…">` in index.html's
+// sprite. `icon()` builds a `<use href="#icon-NAME">` and an unknown name
+// renders an EMPTY svg with no error anywhere — the silent-failure shape this
+// repo keeps paying for. The names below are the vocabulary already used for
+// these same concepts elsewhere, not new art: `ent-company` from
+// `entity-display.js`'s `entityAvatarIcon`, `briefcase` from `ASSET_META`.
+const KEEP_NAV = [
+  { label: "Home", href: "#/keep", key: "home", icon: "home" },
+  { label: "Entities", href: "#/keep/list", key: "list", icon: "ent-company" },
+  { label: "Assets", href: "#/keep/assets", key: "assets", icon: "briefcase" },
+  { label: "Policies", href: "#/keep/insurance", key: "insurance", icon: "shield" },
+  { label: "Documents", href: "#/keep/documents", key: "documents", icon: "doc" },
+];
+
+// The compact form of `.k-nav`, shown exactly where that strip is hidden.
+// Deliberately built on the shared `popover()` so it inherits what this
+// project's "Collapsible reveals (always)" standard requires and what the
+// other two app-bar menus already have: outside-click, Escape and scroll all
+// close it, and `aria-expanded` tracks the state.
+function navMenu(active) {
+  const trigger = el("button", { class: "k-iconbtn k-navmenu", attrs: { type: "button", "aria-label": "Portal menu" } }, [icon("menu", { size: 20 })]);
+  const panel = el("nav", { class: "k-menu", attrs: { "aria-label": "Portal" } },
+    KEEP_NAV.map((n) => el("a", { class: n.key === active ? "on" : "", attrs: { href: n.href } }, [icon(n.icon, { size: 18 }), el("span", { text: n.label })])));
+  // `.k-menu` is right-aligned (`right: 0`) because the other two app-bar
+  // menus hang off the bar's right edge. This one hangs off the LEFT, beside
+  // the brand, so without the modifier the panel would extend leftwards and
+  // run off the viewport at exactly the narrow widths it exists to serve.
+  const wrap = popover(trigger, panel, false);
+  wrap.classList.add("k-pop--nav");
+  return wrap;
+}
+
 function appBar(active) {
-  const link = (label, href, key) => el("a", { class: key === active ? "on" : "", attrs: { href } }, [el("span", { text: label })]);
+  const link = (n) => el("a", { class: n.key === active ? "on" : "", attrs: { href: n.href } }, [el("span", { text: n.label })]);
   return el("header", { class: "k-bar" }, [
     el("div", { class: "k-bar__in" }, [
       el("a", { class: "k-brand", attrs: { href: "#/keep", "aria-label": "The Keep — home" } }, [
@@ -416,13 +456,8 @@ function appBar(active) {
         el("span", { text: "Harborline" }),
         el("span", { class: "k-tag", text: "The Keep" }),
       ]),
-      el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, [
-        link("Home", "#/keep", "home"),
-        link("Entities", "#/keep/list", "list"),
-        link("Assets", "#/keep/assets", "assets"),
-        link("Policies", "#/keep/insurance", "insurance"),
-        link("Documents", "#/keep/documents", "documents"),
-      ]),
+      navMenu(active),
+      el("nav", { class: "k-nav", attrs: { "aria-label": "Portal" } }, KEEP_NAV.map(link)),
       el("div", { class: "k-bar__rt" }, [searchBox(), notifMenu(), accountMenu()]),
     ]),
   ]);

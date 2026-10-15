@@ -4106,6 +4106,138 @@ deploy. Worth adding the new names as a fallback before then; not done here
 because the correct new names should be read off Supabase's docs at the time, not
 recalled.
 
+### ✅ RESOLVED 2026-10-15 — the app bar overflowed 761-1044px, AND there was no nav at all below 760px
+
+⚠️ **THE SECOND HALF OF THAT HEADING IS THE ONE NOBODY HAD RECORDED, and it was
+the worse defect.** Below 760px `.k-nav` was `display: none` with **nothing in
+its place** — no hamburger, no bottom bar. The account menu is the only other
+way around and carries Documents alone, so **Entities, Assets and Policies —
+three of the portal's five screens — were unreachable on a phone.** (The brand
+logo links to Home, so four of five were reachable in total.)
+It sat one line above a carefully measured overflow table for nine days. The
+overflow was the thing being looked at, so the `display: none` beside it read as
+the *fix* for narrow widths rather than as a dead end.
+
+**Why both are one fix.** This section used to say there was "no minimal fix"
+because "raising the hide breakpoint to 1044px would strip the main nav for
+every tablet user with no hamburger to replace it". That is exactly right, and
+the conclusion drawn from it was wrong: the missing hamburger was not a *cost*
+of fixing the overflow, it was **an existing defect at narrower widths**. Build
+the compact control once and one breakpoint closes both.
+
+`KEEP_NAV` in `shell.js` is now the single source for the five destinations;
+the wide `.k-nav` strip and the `.k-pop--nav` popover both render from it. The
+popover is built on the shared `popover()`, so outside-click, Escape and
+`aria-expanded` come with it rather than being hand-rolled — which is what the
+*Collapsible reveals (always)* standard requires.
+
+**Measured pre- AND post-change across the whole band** (headless chromium,
+local static server, the offline `page.route` harness — the original method,
+re-run on a stashed tree so the comparison is controlled rather than remembered):
+
+| width | before | after |
+|---|---|---|
+| 320 | overflow, bar needs **371** | overflow, bar needs **348** — improved, still open |
+| 360 | overflow | **ok** |
+| 390-480 | overflow (`page` 502) | **ok** |
+| **761-1044** | **OVERFLOW at every width** | **ok** |
+| **320-760** | **NO NAV AT ALL** | compact nav |
+| 1045+ | ok | ok |
+
+**Three causes, so three fixes** — listed separately because two are not about
+the nav at all:
+1. the breakpoint moves 760 → **1044**, the bar's measured intrinsic width;
+2. the brand's decorative "The Keep" pill and the bar's `--space-6` gutters are
+   dropped below 480px. That pays for the 68px the new control costs: the bar
+   needs **348px** at 320 where it needed **371** before, so this is a strict
+   improvement at every width rather than a trade;
+3. `.k-seg` wraps below 480px. ⚠️ **PRE-EXISTING and unrelated to the bar** —
+   the Entities tablist is `inline-flex` with no wrap, needs **478px**, and was
+   the *only unclipped element* driving a 502px page on `#/keep/list`. ⚠️ Finding
+   it needed a scan that **excludes elements inside a horizontal scroller**: the
+   820px `.k-itable` is correctly inside `.k-itable-wrap { overflow: auto }`, and
+   sorting overflowing elements by width surfaced that table on every route and
+   buried the real culprit. It wraps rather than shrinks because there are
+   **four** segments and one reads "Relationships": no padding or font tuning
+   fits them on one row at 390px, and the alternatives were an ellipsis or a
+   scroller that hides a tab — a hidden navigation control being the very defect
+   fixed above.
+
+⚠️ **320px IS STILL OPEN, deliberately, and S29 NAMES it rather than omitting
+it.** Closing the last 28px means shrinking the 44px touch targets the Keep
+maintains everywhere (`min-height: 44px`, repeatedly, by design) — a worse trade
+than a sideways scroll on a phone narrower than any device in the matrix (the
+smallest is iPhone 12 at 390px). A test that silently skips a width it would
+fail at is the kind of omission this file records elsewhere; the exclusion and
+its reason are in the scenario.
+
+**Mutation-tested 10/10**, with a control that correctly survived: breakpoint
+reverted to 760, compact nav never revealed, menu links hardcoded with one
+dropped, wide strip left visible, panel right-aligned, brand pill kept, bar
+gutters kept, tablist no longer wrapping, a misspelt icon name, and `popover()`
+swapped for a hand-rolled toggle.
+
+**Three method findings from writing it, all of the kind this file keeps
+re-learning:**
+- ⚠️ **`icon()` renders an EMPTY `<svg>` for a name with no sprite symbol** — no
+  error, no exception, no failing test. Two of the first five icon names written
+  here were wrong, and `icon-menu` did not exist in the sprite at all. A
+  repo-wide diff then showed `menu` was the **only** missing symbol, so the
+  sprite is otherwise complete. S29 now fails on any app-bar `<use href>` that
+  resolves to nothing. See the next section for why a general guard was NOT built.
+- ⚠️ **S29's first version failed at the SECOND width with "the compact nav did
+  not open" — which reads as an app defect and was a test defect.** `page.goto`
+  to the same URL and hash **does not reload the document**, so the menu left
+  open by the previous iteration was still open and the click toggled it *shut*.
+  This file already records that trap for the nav stack; same trap, new surface.
+  Each iteration now asserts a known-closed menu and restores it.
+  ⚠️ And the probe that diagnosed it was wrong the same way FIRST: its
+  `addEventListener` calls stacked across iterations for the identical reason,
+  producing `fires: 2` and a convincing "the handler double-fires" story. The
+  giveaway was the count rising monotonically — 1, 2, 3, 4 — across widths.
+- ⚠️ **THE MUTATION HARNESS ATE THIS SECTION ONCE, with the warning about it
+  already in this file AND copied into the harness's own docstring.** The
+  harness ends every mutation with `git checkout -- .`; these CLAUDE.md edits
+  were uncommitted while it ran, so all three of them were reverted. The
+  2026-10-14 entry under *FOUR WAYS A MUTATION TEST LIES* says "commit before
+  EVERY run, not before the first" — the failure was reading that as a rule
+  about the *code under test* when it is a rule about **every tracked file in
+  the tree**. A harness that destroys uncommitted work should refuse to run on a
+  dirty tree in BOTH directions; mine only checked at startup.
+
+### ⛔ NOT BUILT, deliberately — a sprite-reference guard, and why the cheap one is the wrong shape
+
+The `icon()` finding above is a defect CLASS, not a one-off: an unknown name
+renders an empty `<svg>` with no error, no exception and no failing test. S29
+closes it for the app bar — the surface this change touched — and nothing covers
+the other hundred-odd call sites.
+
+**Measured before deciding** (2026-10-15): **87** call sites pass a string
+literal and **33** pass a variable, the latter fed by `content/coverage.json`
+and `questionnaire.json`, by `ASSET_META`, and by `entityAvatarIcon()`.
+
+**The cheap version is the wrong shape, and that is the whole point.** A guard
+checking the 87 literals and skipping the 33 variables is this repo's own
+most-repeated defect — the scanner that under-reports — which
+`privilege.test.mjs` was redesigned over five rounds to escape and
+`check-keep-back-routes.js` twice before it. Both arrived at the same rule:
+**anything the scan cannot account for must fail BY NAME**, not be skipped.
+Here that means resolving three data sources plus the content JSON, which is a
+guard with its own semantics and its own mutation tests — a separate change,
+reviewable on its merits, not a fifth surface on a nav fix.
+
+**What it would take**, so the next session does not re-derive it: parse
+`id="icon-…"` from `index.html` for the symbol set; take the literal
+`icon("…")`/`iconBadge("…")` names; resolve `ASSET_META`'s `icon:` values,
+`entityAvatarIcon`'s three returns and `KEEP_NAV`'s `icon:` values; resolve the
+`icon` fields in `content/*.json`; and fail by name on any call site whose
+argument it cannot read. One fact already established: a repo-wide diff of used
+names against sprite ids found `menu` to be the **only** missing symbol, so the
+guard goes green on its first run — it is a ratchet against regression, not a
+backlog of existing breakage.
+
+**Was, for the record:**
+
 ### ⚠️ OPEN — the Keep's app bar overflows horizontally from 761px to 1044px
 
 **Measured 2026-10-06** (headless chromium, local static server, the offline
@@ -4195,7 +4327,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
-| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
+| Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), app bar nav: `.k-nav` (the wide strip, visible **only above 1044px**), `.k-pop--nav` (the compact control that replaces it at or below 1044px; trigger `.k-pop--nav button`, panel `.k-pop--nav .k-menu`, open state `.k-pop--nav.is-open`). ⚠️ **The two are exact inverses**, so a Keep nav assertion written against `.k-nav` matches nothing on the `tablet` (810px), `mobile-chrome` (393px) and `iphone` (390px) projects — only `desktop` is above the breakpoint. That is three of four projects silently matching nothing, the `.card` failure this table already records, model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
 
 ⚠️ **The PUBLIC selectors in that row were verified against the rendered page on
 2026-10-05** (headless chromium, local static server) — not read off the source.
@@ -4246,6 +4378,7 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S26 | Help desk model tier — the BROKER CONTROL (offline harness, **runs locally**) | A CLIENT sees no `.k-tier` at all, and the rest of Security is untouched. A BROKER sees three `.k-tier__opt`s and a status naming the **stored** tier — the fixture stores the NON-default Sonnet, so a control rendering the default without reading anything fails. Clicking Haiku sends a PATCH whose keys are **exactly** `['model']` (sending `updated_at`/`updated_by` would be refused 42501 by the live column grant while passing any fixture that ignores extra keys) and the row moves. A DENIED write **reverts** the selection to what is stored. A table denied from the start reports "Could not read the current tier" with **nothing** selected and all three options disabled. ⚠️ It cannot test a POLICY — the denials are measured in the migration's probe footer as real `authenticated` sessions | A client is shown the admin control, the control reports a tier it never read, a refused write leaves the screen claiming a tier the row does not hold, or the write carries a column the live grant refuses |
 | S27 | Help desk model tier — the ANSWER names the model, to EVERYONE, inside FR-10's sentence (offline harness, **runs locally**) | A CLIENT payload carrying `model` renders exactly one `.k-help__ai` reading *"AI-generated by Anthropic (Haiku)"* **and** still carrying FR-10's own tail ("check anything important with your broker") — both asserted, because a check for the model alone passes a mutation that drops the rest of the sentence. A BROKER sees the **same** thing, which is what proves the old role gate is gone rather than inverted. An id this build does not know is shown **verbatim**. A payload with **no** `model` renders the plain sentence with **no empty parenthesis**. ⚠️ Still the only end-to-end proof a stored tier is IN USE: FR-17 makes a tier the deployed function never read look exactly like one it honours. ⚠️ Inverted 2026-10-14 — it previously asserted a broker-only `.k-help__tier` and its ABSENCE for clients | Any caller is not told which model answered, FR-10's wording is lost when the model is folded in, an unrecognised id is rounded to a tier that is not in use, or a missing model renders "Anthropic ()" |
 | S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
+| S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044** that inverts, with `scrollWidth <= clientWidth` at each, the menu opening, its panel fully on-screen, and its rendered hrefs **EQUAL AS A SET** to the wide strip's — equality not containment, so a stale menu entry fails too (the `BACK_ELIGIBLE` inversion). 1044/1045 are asserted as a **pair**, because one breakpoint drives both controls and an off-by-one showing neither is what a single sample cannot see. Escape closes it, `aria-expanded` tracks, a menu link actually navigates, and **no app-bar `<use href>` resolves to nothing** — `icon()` renders an empty svg for an unknown name, silently, and two of the first five names here were wrong. ⚠️ **320px is deliberately excluded and the reason is IN the scenario**: the bar needs 348px there (371 before this change), and closing it means shrinking the 44px touch targets. ⚠️ Each iteration asserts a **known-closed** menu first — `page.goto` to the same hash does not reload, so the previous width's open menu made the next click toggle it shut, which reads as an app defect | Any width shows both navs or neither, the Keep scrolls sideways, the compact menu's destinations drift from the strip's, its panel renders off-screen, Escape stops closing it, or an app-bar icon names no sprite symbol |
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
 
 Synced from `claude.directives` @ `1d57879` (#316). These are **intentional** local

@@ -35,6 +35,13 @@ body.in-keep { background: var(--color-bg); }
 
 /* ── App-bar popover menus (notifications + account) ─────────────────────────── */
 .k-pop { position: relative; display: inline-flex; }
+/* The compact portal nav. Hidden by default and revealed by the breakpoint in
+   the Responsive block, which is the inverse of `.k-nav` — the two must never
+   be visible or hidden together. It hangs off the bar's LEFT edge, so it
+   overrides `.k-menu`'s `right: 0`. */
+.k-pop--nav { display: none; margin-left: var(--space-2); }
+.k-pop--nav .k-menu { right: auto; left: 0; min-width: 220px; }
+.k-pop--nav .k-menu a.on { background: var(--color-accent-light); color: var(--color-accent-hover); }
 .k-menu { position: absolute; top: calc(100% + 10px); right: 0; min-width: 250px; max-width: calc(100vw - 32px); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: var(--space-2); z-index: 90; display: none; }
 .k-pop.is-open .k-menu { display: block; }
 .k-menu a, .k-menu .k-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; font: 600 14px var(--font-sans); color: var(--color-text-primary); padding: 11px 12px; border-radius: var(--radius-md); cursor: pointer; min-height: 44px; }
@@ -800,9 +807,23 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 .k-help__notice p { font: 600 14px var(--font-sans); color: var(--color-text-primary); line-height: 1.5; }
 
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
+
+/* The app bar's own intrinsic width, which is NOT a round number and is not a
+   taste call: brand + the five-link `.k-nav` + the right-hand controls need
+   1045px, measured. Below that the bar overflowed horizontally — and `.k-nav`
+   used to be hidden only below 760px, so 761-1044px scrolled sideways while
+   every width under 760px lost Entities, Assets and Policies altogether (the
+   account menu is the only other way around and carries none of them).
+   One breakpoint closes both: the strip gives way to `.k-pop--nav`, which
+   holds the same destinations from the same `KEEP_NAV` list.
+   ⚠️ Verify any change to this number across the WHOLE band, not at one width. */
+@media (max-width: 1044px) {
+  .k-nav { display: none; }
+  .k-pop--nav { display: inline-flex; }
+}
+
 @media (max-width: 760px) {
   .k-pg { grid-template-columns: 1fr 1fr; }
-  .k-nav { display: none; }
   .k-banner .k-btn { margin-left: 0; }
   .k-stats { grid-template-columns: 1fr 1fr; }
   .k-eband__who { flex-basis: 100%; }
@@ -814,6 +835,33 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 @media (max-width: 480px) {
   .k-search__in { width: 44px; padding-right: 0; }
   .k-search__in:focus { width: 200px; }
+  /* The compact nav costs the bar 68px (a 44px control plus its margin), which
+     at phone widths it does not have. This pays for it out of the brand's
+     decorative "The Keep" pill — the word is still in the page title and the
+     ribbon, and the logo beside it still links home. Measured: the bar needs
+     439px with the pill and 320px without it, so the smallest width in the
+     band fits instead of overflowing by 119px. */
+  .k-tag { display: none; }
+
+  /* The bar's own gutters and inter-group gap, which at this width are the
+     last 56px between it and fitting. `--space-6` gutters are right at 1280px
+     and are simply unaffordable on a 360px-wide phone. */
+  .k-bar__in { padding: 0 var(--space-3); gap: var(--space-2); }
+
+  /* `.k-seg` is `inline-flex` with no wrap, so the Entities tablist needed
+     478px and was the single element driving a 502px page at every width from
+     320 to 480 — measured on #/keep/list, where it is the only unclipped
+     overflow (the 820px `.k-itable` beside it is correctly inside
+     `.k-itable-wrap { overflow: auto }`).
+     ⚠️ PRE-EXISTING and unrelated to the app bar: it is the same 502px before
+     and after the nav change, and it is on this ONE route.
+     Wrapping rather than shrinking, deliberately: there are FOUR segments and
+     one reads "Relationships", so no padding or font tuning fits them on one
+     row at 390px — the alternatives were an ellipsis ("Relat…") or a scroller
+     that hides a tab, and a hidden navigation control is the very defect the
+     compact nav above exists to fix. Two rows lose nothing. */
+  .k-seg { display: flex; flex-wrap: wrap; border-radius: var(--radius-lg); }
+  .k-seg__btn { padding: 9px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
 }
