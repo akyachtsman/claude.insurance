@@ -4917,12 +4917,40 @@ templates — a classification artifact, not a local edit, provable only by hash
 local blob against the template at the head it was actually taken from. So a deliberate
 deferral is now recorded as **`refresh_kept` entries with a revisit trigger** and the
 stamp advances: `.github/scripts/ui-tests/tests/` (the whole tree, which subsumes
-`tests/lib/`) and `.github/scripts/ui-tests/playwright.config.js`. The record stops
-binding the moment upstream or the local file changes, which is what a deferral should
-do; an un-advanced stamp degrades every later classification instead.
+`tests/lib/`) and `.github/scripts/ui-tests/playwright.config.js`; an un-advanced stamp
+degrades every later classification instead.
 **REVISIT TRIGGER, written into the record so the exception cannot outlive its reason:**
 the owner rules on A/B/C, **or** `TEST_AUTH_READY_REQUEST` is set as a repository
 variable — which arms the `awaitAuthReady` defect below — whichever comes first.
+
+⚠️ **AND THE SENTENCE THAT USED TO SIT HERE WAS FALSE — THE COMMENT-OVERCLAIMS-CODE
+DEFECT, WRITTEN INTO THE RECORD OF A DEFERRAL, IN THE SECTION ABOUT RECORDING IT
+HONESTLY.** It read: *"The record stops binding the moment upstream or the local file
+changes, which is what a deferral should do."* **The upstream half is true and the local
+half is not**, for the directory-keyed entry — and the asymmetry is in the refresh
+script, not only in what I wrote. Found by Codex on #281 (P2), verified here rather than
+taken on its word:
+
+| record form | what the script matches on |
+|---|---|
+| a FILE entry, via `check()` | `.blob == $b` **and** `.local == $l and $l != ""` — and its comment says why: *"a later edit or a replaced file never inherits an old approval"* |
+| a DIRECTORY entry, via `kit_dir_kept()` | `.tree == $t` **alone** — no `local` is read at all |
+
+**Measured, three ways, on the real jq filter** (the stamp script itself refuses to run
+now, upstream having moved to `f0e2838`, so the filter is the instrument): as recorded
+it **binds**; with a deliberately WRONG `local` added it **still binds**; with a wrong
+UPSTREAM tree it correctly does **not** bind, which is what stops the test being
+vacuous.
+
+⚠️ **So Codex's recommended fix — "store the local tree hash alongside the upstream
+tree" — is INERT as stated**, and writing it would have looked exactly like the fix
+while changing nothing. That is this repo's own most-repeated trap (the round-19
+duplicate listener, the first `pageErrors` filter), met in a remedy. The local tree
+hash is recorded anyway, because it is the value a future reader needs to re-review the
+entry by hand — but it is labelled in the record as **read by nothing today**, which is
+the honest form.
+**The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
+and is reported there: `.agent-reports/directives-note-kit-dir-local-guard.md`.
 
 **What upstream did** (`8c1a398`, batch C/S2): `templates/ui-tests/tests/app.spec.js`
 dropped from 2,623 lines to 1,269 by moving its helpers into two new files —
