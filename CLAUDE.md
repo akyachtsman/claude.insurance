@@ -4759,11 +4759,34 @@ invite. Rotation is no longer a before-the-first-client item; it is overdue.
 file is served from `akyachtsman.github.io/claude.insurance/CLAUDE.md` as well as
 from GitHub.)
 
-⚠️ **One repo setting is off and an agent cannot change it** (`git.md` →
-*Repo-settings preflight*, warn once): **`allow_auto_merge=false`** —
-Settings → General → Pull Requests → Allow auto-merge. Until it is on, the
-auto-merge-on-green rule falls back to the session watching CI and squash-merging
-itself, which is what has been happening. `delete_branch_on_merge` is already on.
+✅ **`allow_auto_merge` IS ON — turned on by the owner 2026-10-15, measured from
+the API rather than taken on trust** (`GET /repos/akyachtsman/claude.insurance` →
+`allow_auto_merge: true`, `delete_branch_on_merge: true`, `allow_squash_merge:
+true`). It was `false` for as long as this repo had existed, and `git.md` →
+*Repo-settings preflight* says to warn once, which is why the paragraph was here.
+
+**What changes in practice:** `git.md` → *Conditional Auto-Merge on Green* is now
+executable as written — a session enables auto-merge on the PR and GitHub merges it
+when the checks pass, instead of the session having to stay alive through the whole
+CI run and squash-merge by hand. That fallback is what every merge in this repo has
+actually used, #279 included.
+
+⚠️ **PASS THE MERGE METHOD EXPLICITLY — `squash`.** Measured in the same call:
+`allow_merge_commit` and `allow_rebase_merge` are **also** true, so the repo permits
+all three and nothing here forces the convention. Every merge in this repo's history
+is a squash (`#254`, `#256`, `#258`, `#268`, `#274`-`#276`, `#279`), so a plain
+auto-merge enable that inherits the repo default would quietly start producing merge
+commits. `enable_pr_auto_merge` takes the method; name it.
+
+⚠️ **AND A DRAFT CONVERSION SILENTLY DROPS IT**, which this repo will hit because it
+opens every PR as a draft: auto-merge does not survive `ready_for_review` → draft →
+ready. Re-enable it after any such round trip rather than assuming it held.
+
+⚠️ **It is a repo SETTING, not schema** — the same blind spot class this file
+records three times already (public sign-up, custom SMTP, the Auth templates).
+Nothing in this repository goes red if it is switched back off; the only check is
+re-reading the API, which a session CAN do here (unlike the Supabase ones), so
+`/env-chk` is the place for it.
 
 ### ⚠️ `.github/scripts/package.json` DECLARES `"type": "commonjs"`, AND THIS REPO HAD AN ESM GUARD THERE (2026-10-15)
 
