@@ -4797,9 +4797,42 @@ itself) and all seven were updated.
 
 ⚠️ **The generalisable bit:** a template installed because something *names* it can
 carry a constraint on files the template has never heard of. The derivation is right
-to install it; the check is to run the gates afterwards. Nothing static would have
-caught this — `node --check` parses a module fine, and the guard's own exit code is
-the only signal.
+to install it; the check is to run the gates afterwards.
+
+⚠️ **CORRECTION, 2026-10-15 — this paragraph said "nothing static would have caught
+this — `node --check` parses a module fine", and THAT IS FALSE.** Measured here on
+Node 22.22.2, on an identical probe file, after DIR9 reported it
+(`claude.directives#455`):
+
+| where the probe sat | `node --check` |
+|---|---|
+| `.github/scripts/` (manifest present) | **exit 1**, `SyntaxError: Cannot use import statement outside a module` |
+| the repo root (no manifest) | exit 0 |
+
+**Why I got it wrong, since the mechanism is the interesting part:** `node --check`
+only parses — true — but the manifest changes *which grammar it parses against*. With
+no `package.json` Node detects ES syntax and accepts it; under `"type": "commonjs"`
+the same bytes are a syntax error. So the claim was true of the state BEFORE the
+install and I asserted it as a property of the tool. That is this file's most
+repeated defect — a fact about one state written as a general one — and I wrote it in
+the very section recording the install.
+**What follows practically:** `node --check .github/scripts/*.js` is a real guard for
+this class and costs nothing. Not added here, because the five CommonJS files are
+upstream's and already exercised by `qa.yml`; the one ESM file is now `.mjs` and
+would be skipped by a `*.js` glob anyway. Run it by hand after installing the
+manifest in any repo, which is what upstream's `cicd-setup.md` Step 1 now says.
+
+⚠️ **AND THE OTHER HALF OF THAT REPORT DOES NOT APPLY HERE — MEASURED, NOT ASSUMED.**
+DIR9 also warned that `npx html-validate` can abort with a peer-dependency
+resolution error once a `package.json` sits beside the caller, and prescribed
+`npm_config_legacy_peer_deps=true` in the workflow. Checked before adopting it:
+`npx --yes html-validate@11.5.6 index.html` exits **0** from the repo root, from
+`.github/scripts/` and from `.github/scripts/ui-tests/`, and there is **no vitest
+anywhere in this repo** (`grep -rn vitest` finds nothing) — which is the dependency
+the conflict is between. So the env var is **deliberately NOT adopted**: it would
+silence a resolution error this repo cannot produce, and `legacy-peer-deps` globally
+disables the check that would report a real one later. Revisit if a `package.json`
+with a peer-dependency tree is ever added next to `index.html`.
 
 ### ⛔ OPEN (owner decision) — the kit's helpers moved into `tests/lib/`, and taking them costs a documented divergence
 
@@ -4867,7 +4900,7 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
-| `pages-retry.yml` keeps a `concurrency` group **and an obsolescence check** | Both absent upstream. Each retry job re-runs the **original SHA** of the run that triggered it, so two managed Pages runs failing in one outage start two independent retries — and the older one can **redeploy stale content over the newer commit**. The group (which this repo had before #249 and lost by adopting the template verbatim) only serializes: **a concurrency group is mutual exclusion, not FIFO** — GitHub guarantees no ordering for queued runs, so it does *not* close the stale overwrite. What closes it is the check in the step, which skips the rerun when a newer run of the same workflow exists. `cancel-in-progress: false` is deliberate: a retry already re-running a failed deploy must finish, or the site stays on the failed build. **The check keys on `workflow_run.workflow_id`, never on a name** — the managed Pages workflow is `pages-build-deployment` in the *workflows* API but `pages build and deployment` in the *runs* API, so a name filter matches nothing and the guard silently never fires. **NOT yet reported upstream** (no write access to `claude.directives` from here and the peer session was unreachable) — carry it at the next `/refresh-repo`: the template needs *both* the concurrency group **and** the obsolescence check, since serializing alone does not order queued runs. Also tell them their `timeout-minutes` comment says the worst case is 5.2 min; it is 6.5 min (90s initial + 20+40+80+160s), though `timeout-minutes: 10` still bounds it. |
+| `pages-retry.yml` keeps an obsolescence check; the `concurrency` group is **GONE** | ⚠️ **REVERSED 2026-10-15, and the reversal is a safety fix rather than an alignment one.** This repo carried a `concurrency: {group: pages-retry, cancel-in-progress: false}` block from #249 and argued for it at length. `claude.directives#455` took the obsolescence check and the 390s timeout correction and deliberately left the group OUT, with the reason that settles it: **only one run may be PENDING in a concurrency group, and a newly queued run cancels the pending one** — `cancel-in-progress: false` governs the RUNNING run, not the pending one. Retries fire off `workflow_run` completions, which need not arrive in deploy order, so retry(A) running + retry(C, newest) pending + retry(B) queuing cancels C, then A and B both correctly decline on the check and **nothing is retried at all**. The group therefore made its own neighbour unsafe: the check already handles ordering, and the group only supplied a way to lose the one retry that should happen. Removed, with that sequence written into the workflow so it cannot be re-added for the old reason. **What STAYS local:** the obsolescence check itself (keyed on `workflow_run.workflow_id`, never a name — the managed Pages workflow reports two different names across the two APIs, verified against the live API 2026-08-26) and the corrected timeout arithmetic, both now adopted upstream too. ⚠️ Upstream's own template at `a9c8859` carries its version of the check; this repo's copy is still its own, because `a9c8859` is NEWER than the head this refresh pinned (`8c1a398`) and taking it now would mix two upstream heads — the next `/refresh-repo` reconciles them at its own pin. |
 | ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | ~~Two `test.md` additions not yet reported upstream~~ **RESOLVED — ADOPTED UPSTREAM, measured 2026-10-15** | No longer a divergence, and the correction matters because this repo claimed otherwise for a few hours. `test.md` at `8c1a398` now carries **all three** mechanisms under *Layered UI: rendered is not reachable*, credited to `claude.insurance` (2026-10-15) with this repo's own figures: *"A satisfied constraint does not say what paid for it"* (the 0px logo and the `Ha…` wordmark), *"To measure an intrinsic need, neutralise the absorber first"* (1045 un-neutralised vs 1130 neutralised, one child squeezed to 55px of 83), and *"Sweep a band at every width"*. ⚠️ **Upstream's versions are STRICTER than the proposal that was drafted here, so read theirs and not the draft:** the neutralise rule also sets `flex-wrap: nowrap; width: max-content` on the CONTAINER — without it freed children wrap to a second line and a container wider than its content reports its own width — and the sweep rule says **every integer width**, media-query boundaries included, where the draft said every 8px. The forwardable message in `.agent-reports/` is therefore obsolete; do not send it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |

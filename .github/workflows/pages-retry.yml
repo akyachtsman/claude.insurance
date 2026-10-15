@@ -53,31 +53,40 @@ permissions:
   actions: write
   contents: read
 
-# ── LOCAL DIVERGENCE from claude.directives (restored 2026-08-26, #249) ────────
-# Absent upstream. This existed in this repo's previous pages-retry.yml and was
-# dropped when the template was adopted verbatim; Codex caught the regression.
+# ── NO `concurrency` BLOCK HERE, AND ITS ABSENCE IS THE DECISION ──────────────
+# This repo carried one (`group: pages-retry`, `cancel-in-progress: false`) from
+# 2026-08-26 (#249) until 2026-10-15. It is GONE, and removing it is a SAFETY
+# change rather than an alignment one — claude.directives#455 ruled the same way
+# on the same reasoning.
 #
-# WHY IT MATTERS: each job re-runs the ORIGINAL SHA of the run it was triggered
-# by. Two managed Pages runs failing in one outage therefore start two
-# INDEPENDENT retry jobs, and the long API backoff inside them can let the newer
-# one be re-triggered before the older — at which point the older job redeploys
-# STALE CONTENT OVER THE NEWER COMMIT. Serializing stops the two jobs from
-# interleaving, which is worth having on its own.
+# WHY IT WAS ADDED: each job re-runs the ORIGINAL SHA of the run that triggered
+# it, so two managed Pages runs failing in one outage start two INDEPENDENT
+# retries, and the older one can redeploy STALE CONTENT OVER THE NEWER COMMIT.
+# Serializing was meant to stop them interleaving.
 #
-# ⚠️ BUT SERIALIZING IS NOT SUFFICIENT, AND DO NOT RE-READ IT AS ORDERING. A
-# concurrency group gives MUTUAL EXCLUSION, not FIFO: GitHub does not guarantee
-# the order in which queued runs in a group execute. So the older retry can
-# still run SECOND and redeploy the older commit. An earlier revision of this
-# comment claimed the group made retries "strictly ordered"; it does not, and
-# nothing in Actions does. The stale-overwrite is closed by the obsolescence
-# CHECK in the step below — this block only keeps the two from overlapping.
+# ⚠️ WHY IT HAD TO GO: the group makes the obsolescence check below able to lose
+# the ONE retry that should happen. Only one run may be PENDING in a concurrency
+# group — a newly queued run CANCELS the pending one even with
+# `cancel-in-progress: false`, which governs the RUNNING run only. Retries fire
+# off `workflow_run` completion events, which need not arrive in deploy order,
+# so:
 #
-# cancel-in-progress is false ON PURPOSE: a retry that is already re-running a
-# failed deploy must be allowed to finish. Cancelling it would leave the site on
-# the failed build, which is the state this workflow exists to escape.
-concurrency:
-  group: pages-retry
-  cancel-in-progress: false
+#     retry(A, oldest) starts, holds the group
+#     retry(C, newest) queues  -> pending
+#     retry(B, middle) queues  -> CANCELS pending C; B becomes pending
+#     A runs its check, sees a newer deploy exists -> exits 0, no re-run
+#     B runs its check, sees C is newer            -> exits 0, no re-run
+#     C was cancelled                              -> NOTHING IS RETRIED
+#
+# Without the group all three run concurrently, A and B decline on the check,
+# and C re-runs — the correct outcome. So the check does the ordering job the
+# group was added for, and the group now only supplies a way to drop the newest
+# retry. A guard that makes its neighbour unsafe goes.
+#
+# ⚠️ Do NOT re-add it to "stop interleaving". Two retries overlapping is
+# harmless now: each one asks whether a newer run exists before re-running, so
+# at most the newest re-runs and the others exit 0. Interleaving was only ever a
+# problem while the check did not exist.
 jobs:
   retry:
     # Only when the Pages deploy failed, and only for the first few attempts.
@@ -142,13 +151,20 @@ jobs:
           for wait in 0 20 40 80 160; do
             [ "$wait" -gt 0 ] && { echo "re-run request failed; waiting ${wait}s"; sleep "$wait"; }
 
-            # ⚠️ REJECT AN OBSOLETE RUN — this, not the concurrency group, is what
-            # prevents a stale redeploy. The group serializes; it does NOT order
-            # (GitHub gives no FIFO guarantee for queued runs in a group). Since this
-            # job re-runs its OWN event's RUN_ID, an older retry executing second
-            # would republish an OLDER commit over a newer one. Only checking closes
-            # that, and it is re-checked on EVERY attempt because the waits above can
-            # span minutes and a newer deploy can land mid-loop.
+            # ⚠️ REJECT AN OBSOLETE RUN — this is the WHOLE of what prevents a stale
+            # redeploy, and since 2026-10-15 it is the only thing here that does: the
+            # `concurrency` block that used to sit above was removed because it could
+            # cancel the newest pending retry and leave nothing re-run at all (the
+            # header says how). Since this job re-runs its OWN event's RUN_ID, an
+            # older retry executing second would republish an OLDER commit over a
+            # newer one. Only checking closes that, and it is re-checked on EVERY
+            # attempt because the waits above can span minutes and a newer deploy can
+            # land mid-loop.
+            #
+            # ⚠️ KNOWN LIMIT (claude.directives#455, owner ruling): this check and the
+            # re-run request are two API calls, so a newer run created in the
+            # sub-second gap between them is missed. Judged not worth a
+            # poll-and-cancel loop.
             #
             # ⚠️ KEYED ON workflow_id, NEVER ON A NAME. The managed Pages workflow
             # reports TWO different names: the workflows API calls it
