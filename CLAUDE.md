@@ -4874,8 +4874,17 @@ The stack names the cause precisely: `#loadPeerSet` in
 `@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289` — a **crash inside npm's
 peer-dependency resolver**, not an `ERESOLVE` conflict it reports and recovers from.
 `legacy-peer-deps` skips that code path, which is why it is the fix and why the
-"there is no vitest here" half of my reasoning was beside the point: the crash is in
-the resolver, not in a specific conflict.
+"there is no vitest here" half of my reasoning was beside the point.
+
+⚠️ **AND THE SENTENCE THAT USED TO END THIS PARAGRAPH WAS STILL HALF WRONG.** It read
+*"the crash is in the resolver, not in a specific conflict"* — which is how the stack
+reads and is not what upstream measured. `claude.directives#455` names the conflict:
+**since vitest 5.0.5, npm 10 crashes resolving html-validate's optional peers.** The
+vitest is **html-validate's own optional peer**, not anything in this repo — which is
+exactly why my `grep -rn vitest` over the project found nothing and why I concluded
+there was no conflict to find. A dependency that is not in your tree can still be in
+your *resolution*. So the right correction to "there is no vitest here" was never
+"the conflict is irrelevant"; it was "you are grepping the wrong tree."
 
 **Fixed** by `npm_config_legacy_peer_deps: 'true'` on that step's `env` in `qa.yml`,
 with the measurement in the comment beside it.
@@ -4893,9 +4902,27 @@ failure mode costs the same as no warning at all.
 
 ### ⛔ OPEN (owner decision) — the kit's helpers moved into `tests/lib/`, and taking them costs a documented divergence
 
-**This is the one thing `/refresh-repo` did not take on 2026-10-15, and it is why
-the stamp did not advance.** Recorded rather than decided because it changes the core
-of the whole UI suite and because the two ways out each give something up.
+**This is the one thing `/refresh-repo` did not take, on 2026-10-15 at `8c1a398` and
+again the same day at `f680dd3`.** Recorded rather than decided because it changes the
+core of the whole UI suite and because the two ways out each give something up.
+
+⚠️ **AND THE WAY IT IS RECORDED CHANGED ON THE SECOND REFRESH, which is the part worth
+reading.** The first refresh declined it by **holding the stamp back** at `bbfdcfc` —
+and that cost something the next refresh paid: a held-back stamp makes every
+genuinely-stale file classify as **CUSTOM** rather than `STALE`, because `CUSTOM` means
+"differs from the template at the stamp too". Two files
+(`.github/scripts/package.json`, `.github/scripts/check-ui-suite-env.py`) came up
+CUSTOM at `f680dd3` and both turned out to be **byte-identical** to the `8c1a398`
+templates — a classification artifact, not a local edit, provable only by hashing the
+local blob against the template at the head it was actually taken from. So a deliberate
+deferral is now recorded as **`refresh_kept` entries with a revisit trigger** and the
+stamp advances: `.github/scripts/ui-tests/tests/` (the whole tree, which subsumes
+`tests/lib/`) and `.github/scripts/ui-tests/playwright.config.js`. The record stops
+binding the moment upstream or the local file changes, which is what a deferral should
+do; an un-advanced stamp degrades every later classification instead.
+**REVISIT TRIGGER, written into the record so the exception cannot outlive its reason:**
+the owner rules on A/B/C, **or** `TEST_AUTH_READY_REQUEST` is set as a repository
+variable — which arms the `awaitAuthReady` defect below — whichever comes first.
 
 **What upstream did** (`8c1a398`, batch C/S2): `templates/ui-tests/tests/app.spec.js`
 dropped from 2,623 lines to 1,269 by moving its helpers into two new files —
@@ -4937,7 +4964,9 @@ this repo, so nothing is broken today; it is a trap armed for whoever sets it.
 ⚠️ **`playwright.config.js` is in the same bundle** and is also unapplied: upstream
 now derives the screenshot directory from `GITHUB_WORKSPACE` rather than a hardcoded
 `../../../`, which only works when the kit sits at exactly `.github/scripts/ui-tests/`
-— it does here, so this is latent rather than live.
+— it does here, so this is latent rather than live. It has its own `refresh_kept` entry
+with the same revisit trigger, because it is not separable from the migration in
+practice.
 
 
 ## Upstream Divergences (deliberate — `/refresh-repo` must DIFF, not revert)
@@ -4957,11 +4986,43 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
-| `pages-retry.yml` keeps an obsolescence check; the `concurrency` group is **GONE** | ⚠️ **REVERSED 2026-10-15, and the reversal is a safety fix rather than an alignment one.** This repo carried a `concurrency: {group: pages-retry, cancel-in-progress: false}` block from #249 and argued for it at length. `claude.directives#455` took the obsolescence check and the 390s timeout correction and deliberately left the group OUT, with the reason that settles it: **only one run may be PENDING in a concurrency group, and a newly queued run cancels the pending one** — `cancel-in-progress: false` governs the RUNNING run, not the pending one. Retries fire off `workflow_run` completions, which need not arrive in deploy order, so retry(A) running + retry(C, newest) pending + retry(B) queuing cancels C, then A and B both correctly decline on the check and **nothing is retried at all**. The group therefore made its own neighbour unsafe: the check already handles ordering, and the group only supplied a way to lose the one retry that should happen. Removed, with that sequence written into the workflow so it cannot be re-added for the old reason. **What STAYS local:** the obsolescence check itself (keyed on `workflow_run.workflow_id`, never a name — the managed Pages workflow reports two different names across the two APIs, verified against the live API 2026-08-26) and the corrected timeout arithmetic, both now adopted upstream too. ⚠️ Upstream's own template at `a9c8859` carries its version of the check; this repo's copy is still its own, because `a9c8859` is NEWER than the head this refresh pinned (`8c1a398`) and taking it now would mix two upstream heads — the next `/refresh-repo` reconciles them at its own pin. |
+| ~~`pages-retry.yml` keeps an obsolescence check~~ **RESOLVED — ADOPTED UPSTREAM, AND THE FILE IS NOW VERBATIM (2026-10-15)** | This repo wrote the obsolescence check (#249, 2026-08-26) and carried it as a divergence for seven weeks. Upstream took it at `f680dd3`, so `.github/workflows/pages-retry.yml` is now byte-identical to `templates/workflows/pages-retry.yml` (blob `8b903a7`) and its `refresh_kept` entry is **deleted**. ⚠️ **The REQUIRED watcher entry in `.github/workflow-ref-required.json` stays** — `{"pages-retry.yml": ["pages-build-deployment"]}` — and `workflow-ref-guard` confirms it intact; this repo is branch-source, so dropping it would let a later watch-list edit silently disable the retry while every static check stayed green. **What taking it GAINED:** a non-numeric guard the local copy lacked (`case "$newest" in ''|*[!0-9]*) return 1`) — both versions fail open, so this is cleanliness rather than a behaviour change, but ours printed a shell error to the log where upstream returns. **What taking it COST, stated rather than quietly dropped:** the local copy emitted `::notice::`/`::warning::` annotations on the supersede and the unverifiable-check paths, which surface in the Actions run summary where a bare `echo` does not. That is a real improvement and it is **not kept locally** — keeping it would restart the divergence over log formatting. Forwarded upstream as a Downstream-Finding Loop item instead, so every project gets it rather than this one. The `concurrency` removal was ALSO adopted upstream on this repo's reasoning (only one run may be PENDING in a group, so a newly queued retry cancels the pending one even with `cancel-in-progress: false`; with retries arriving out of deploy order the NEWEST retry is the one that can be dropped while the older two decline on the check, and nothing is retried at all) — upstream's inline comment now carries it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |
 | ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | ~~Two `test.md` additions not yet reported upstream~~ **RESOLVED — ADOPTED UPSTREAM, measured 2026-10-15** | No longer a divergence, and the correction matters because this repo claimed otherwise for a few hours. `test.md` at `8c1a398` now carries **all three** mechanisms under *Layered UI: rendered is not reachable*, credited to `claude.insurance` (2026-10-15) with this repo's own figures: *"A satisfied constraint does not say what paid for it"* (the 0px logo and the `Ha…` wordmark), *"To measure an intrinsic need, neutralise the absorber first"* (1045 un-neutralised vs 1130 neutralised, one child squeezed to 55px of 83), and *"Sweep a band at every width"*. ⚠️ **Upstream's versions are STRICTER than the proposal that was drafted here, so read theirs and not the draft:** the neutralise rule also sets `flex-wrap: nowrap; width: max-content` on the CONTAINER — without it freed children wrap to a second line and a container wider than its content reports its own width — and the sweep rule says **every integer width**, media-query boundaries included, where the draft said every 8px. The forwardable message in `.agent-reports/` is therefore obsolete; do not send it. Row kept for one sync so the next session does not re-report an adopted finding, then delete it. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
+
+### ✅ Rulebook synced 2026-10-15 to `f680dd3` — the stamp ADVANCED this time
+
+A second `/refresh-repo` the same day, `8c1a398` → `f680dd3` (3 commits, 16 files).
+Short delta, and worth recording because almost all of it is this repo's own findings
+coming back:
+
+| upstream commit | what it is |
+|---|---|
+| `f680dd3` — *"Carry the html-validate npm workaround to the downstream call sites (#456)"* | the fix for the red CI run this session diagnosed, which **DIR9 had warned about before the failure and I argued away on three warm-cache runs** — see the retraction above |
+| the `pages-retry.yml` obsolescence check | written here (#249), carried as a divergence for seven weeks, now **upstream's**; the local file is byte-identical and its `refresh_kept` entry is gone |
+| `test.md` → *Layered UI: rendered is not reachable* | all three mechanisms from #274-#276, credited to `claude.insurance` with this repo's own figures |
+| `qa.yml`'s UI_PATHS comment | the `^content/` finding, generalised as *"ADD the directories your app FETCHES AT RUNTIME"* and credited here |
+
+**Phase 1 clean** (5 upstream references, none broken). **Phase 1.5**: 22 installed
+files compared, 17 matched, 0 `DRIFT`, 0 `MODE`. Hook healthy and registered.
+**Phase 2/3**: two script templates taken verbatim
+(`.github/scripts/package.json`, `check-ui-suite-env.py` — both measured
+byte-identical to the `8c1a398` templates first, so their `CUSTOM` lines were a
+held-stamp artifact rather than a local edit), `pages-retry.yml` taken verbatim,
+`qa.yml` reconciled so the only upstream-only line left in a 2-way diff is the
+`UI_PATHS` value itself. `refresh-vars.sh`: no new variables or secrets.
+**`check-contrast.js`'s `refresh_kept` record still binds** — recorded blob equals
+the template at the pinned head and the local file is unchanged — so it is reported,
+not re-asked.
+
+⚠️ **The one substantive change is HOW the kit-helper deferral is recorded**: as
+`refresh_kept` entries with a revisit trigger, so the stamp advances instead of being
+held at `bbfdcfc`. The section above says what the held stamp cost and why.
+
+All gates green after: 394 unit tests, 124 Playwright instances listed, `html-validate`
+clean (with the flag), and all nine guards.
 
 ### ✅ Rulebook synced 2026-10-15 to `8c1a398` (was 9 days / ~180 files stale)
 
