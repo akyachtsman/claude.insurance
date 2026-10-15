@@ -223,9 +223,12 @@ function ribbon() {
 // last link cannot be reached is not. `Math.max(0, …)` only guards against a
 // trigger that is itself below the fold, which a sticky app bar never is.
 //
-// Clearing first matters: the measurement must not be taken through a height
-// set at some other viewport size. `.k-menu` is `position: absolute`, so its
-// top does not depend on its own height and this cannot feed back.
+// ⚠️ The clear is BELT, and labelled a survivor up front: deleting it passes
+// every scenario. `.k-menu` is `position: absolute`, so its top does not depend
+// on its own height and measuring through a stale height gives the same answer.
+// Kept because that is a property of the CSS rather than of this function — a
+// panel ever positioned in flow would make the measurement self-referential,
+// and the failure then would be a bound that creeps on every resize.
 function boundMenu(panel) {
   if (!panel) return;
   panel.style.maxHeight = "";
