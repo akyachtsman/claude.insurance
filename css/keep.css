@@ -84,7 +84,18 @@ body.in-keep { background: var(--color-bg); }
    Applied to `.k-menu` rather than only the new panel: the account menu has
    MORE items and the identical clipping, and fixing the one I just added while
    leaving its neighbour broken is the fixed-the-visible-half pattern this repo
-   keeps recording. */
+   keeps recording.
+
+   ⚠️ THIS IS A FALLBACK NOW, NOT THE BOUND. `calc(100vh - 124px)` subtracts an
+   ASSUMED panel top — the ribbon plus a single-line bar — and the panel's real
+   top moves with the ribbon's height, the text size and the zoom. Measured at
+   740x300 with the chrome at 2x: the panel started at 163px and ran to 339px,
+   **39px past a 300px viewport**, stranding "Documents" again after the scroll
+   (Codex, #275). `popover()` now sets an exact `max-height` from the panel's
+   measured top on every open, which this declaration cannot do because CSS
+   cannot read an element's own offset. It is kept for the window between mount
+   and the first open, and for a caller that ever opens a panel without going
+   through `popover()`. */
 .k-menu { max-height: calc(100vh - 124px); overflow-y: auto; }
 .k-menu { position: absolute; top: calc(100% + 10px); right: 0; min-width: 250px; max-width: calc(100vw - 32px); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: var(--space-2); z-index: 90; display: none; }
 .k-pop.is-open .k-menu { display: block; }
@@ -852,16 +863,35 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
 
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 
-/* The app bar's own intrinsic width, which is NOT a round number and is not a
-   taste call: brand + the five-link `.k-nav` + the right-hand controls need
-   1045px, measured. Below that the bar overflowed horizontally — and `.k-nav`
-   used to be hidden only below 760px, so 761-1044px scrolled sideways while
-   every width under 760px lost Entities, Assets and Policies altogether (the
-   account menu is the only other way around and carries none of them).
-   One breakpoint closes both: the strip gives way to `.k-pop--nav`, which
-   holds the same destinations from the same `KEEP_NAV` list.
-   ⚠️ Verify any change to this number across the WHOLE band, not at one width. */
-@media (max-width: 1044px) {
+/* The app bar's own intrinsic width. NOT a round number and not a taste call:
+   brand + the five-link `.k-nav` + the right-hand controls need **1130px**.
+   Below that the bar overflowed horizontally — and `.k-nav` used to be hidden
+   only below 760px, so 761-1129px scrolled sideways while every width under
+   760px lost Entities, Assets and Policies altogether (the account menu is the
+   only other way around and carries none of them). One breakpoint closes both:
+   the strip gives way to `.k-pop--nav`, which holds the same destinations from
+   the same `KEEP_NAV` list.
+
+   ⚠️ THIS NUMBER WAS 1044 FOR TWO PRs AND THAT FIGURE WAS WRONG, because of
+   HOW it was measured. It came from `.k-bar__in.scrollWidth` — which reports
+   the LAID-OUT width, not the intrinsic need, whenever a child can shrink. The
+   `.k-tag` pill is itself a shrinking flex item (measured 55px at 1045 against
+   a natural 83px), so the original reading was of an already-compressed bar.
+   At 1045 the strip and the pill both returned and the wordmark was squeezed to
+   **54px of 104** — truncated, not overflowing, so every overflow assertion
+   stayed green. Measured need, letting the wordmark take its natural width:
+
+     1045 -> 1045   wordmark 54/104     1100 -> 1100   wordmark 89/104
+     1060 -> 1060   wordmark 64/104     1120 -> 1120   wordmark 102/104
+     1080 -> 1080   wordmark 77/104     1130 -> 1130   wordmark 104/104  <- fits
+
+   ⚠️ To measure an intrinsic width, neutralise the shrink first (`flex: none`,
+   `overflow: visible`) and read it then. `scrollWidth` on a flex container
+   whose children shrink tells you what it settled for, not what it wanted.
+   ⚠️ And verify any change to this number across the WHOLE band at 1px steps
+   over each boundary — #275 sampled 480 and 600 and the entire defect lived
+   between them. */
+@media (max-width: 1129px) {
   .k-nav { display: none; }
   .k-pop--nav { display: inline-flex; }
   /* FIRST in the sacrifice order: the decorative "The Keep" pill, dropped
@@ -869,8 +899,15 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
      is exactly where the bar is under pressure. It was hidden only below 480px,
      which left 600px paying for the new control out of the brand wordmark
      instead — measured as the wordmark clipped to 83px of 104 (Codex, #274).
-     The word is still in the page's own chrome and the logo still links home. */
-  .k-tag { display: none; }
+     The word is still in the page's own chrome and the logo still links home.
+     ⚠️ SCOPED TO `.k-bar`, and the unscoped version was a real regression:
+     `.k-tag` is ALSO rendered by the login card's `.k-abrand`
+     (`js/keep/views/keep.js:48`), which is not in the app bar and is under no
+     width pressure at all. Measured before the fix: the login card's "The Keep"
+     badge was gone at every width from 320 to 1044 and present only at 1045+.
+     A sacrifice order is about one constrained container; a bare class selector
+     applies it to the whole portal (Codex, #275). */
+  .k-bar .k-tag { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -889,11 +926,35 @@ a.k-prq:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); color
    no wordmark, and the icon is still the link home. With the pill and the
    wordmark both gone the bar finally fits 320px (242px needed), a width the
    previous round left overflowing and expected to stay that way. */
-@media (max-width: 380px) {
+@media (max-width: 385px) {
+  /* ⚠️ 385, not 380. At 381 the wordmark reappeared into 99px of the 104 it
+     needs — truncated by 5px, the same discontinuity as the 481 one below and
+     invisible to a probe that sampled 380 and 390 (Codex, #275). */
   .k-brand__name { display: none; }
 }
 
-@media (max-width: 480px) {
+/* ⚠️ 560px, NOT 480px, AND THE DIFFERENCE WAS A REAL OVERFLOW.
+   These three rules make the bar compact — a 44px search, tighter gutters and
+   gaps — and at 481px they all switched off AT ONCE while the bar still had no
+   room for the result. Measured across the band this change exists to check,
+   which the previous round sampled at 480 and 600 and never between:
+
+     width   wordmark                       page overflow
+     480     full                           0
+     481     TRUNCATED to 43px of 104       21px     <- both defects
+     490     TRUNCATED to 52px              12px
+     500     TRUNCATED to 62px               2px
+     520     TRUNCATED to 82px               0
+     540     TRUNCATED to 102px              0
+     560     full                            0
+
+   So #275's "zero overflow from 320 to 1440" was FALSE, and the ellipsis it
+   added turned the brand into "Ha…" across 481-540 — the very outcome its own
+   comment calls worse than hiding the wordmark (Codex, #275). The jump belongs
+   where the roomier layout actually fits, measured, not at a round number.
+   ⚠️ A discontinuity like this is invisible to sampling: both endpoints were
+   clean and the whole defect lived between them. */
+@media (max-width: 560px) {
   .k-search__in { width: 44px; padding-right: 0; }
   .k-search__in:focus { width: 200px; }
 

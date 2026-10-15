@@ -4613,7 +4613,13 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   // sides of the crossover. 1044/1045 are asserted as a PAIR: one breakpoint
   // drives both controls, so an off-by-one that showed neither (or both) at the
   // boundary is exactly the mistake a single sample cannot see.
-  for (const width of [320, 360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044]) {
+  // ⚠️ THE DENSE WIDTHS ARE THE FINDING, NOT PADDING. The previous version of
+  // this list went 480 -> 600 and the whole of #275's defect lived between
+  // them: at 481 the compact bar rules all switched off at once, the page
+  // overflowed 21px and the wordmark truncated to "Ha…". Both endpoints were
+  // clean. Every media-query boundary below is now sampled on BOTH sides,
+  // because a discontinuity is exactly what a sparse list cannot see.
+  for (const width of [320, 360, 385, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('./#/keep/list');
     await expect(page.locator('.k-h1'), `the Entities page did not mount at ${width}px`).toHaveText(/Entities/i, { timeout: 15_000 });
@@ -4629,6 +4635,15 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
       const bad = [];
       const mark = document.querySelector('.k-brand .k-mark');
       if (mark && mark.getBoundingClientRect().width < 24) bad.push(`brand logo ${Math.round(mark.getBoundingClientRect().width)}px`);
+      // The wordmark ellipsises rather than overflowing, so a tight bar shows
+      // "Harborli…" with `scrollWidth <= clientWidth` still green. That is the
+      // outcome this change's own sacrifice order calls worse than hiding it,
+      // and it was live in three separate bands (381-384, 481-540, 1045-1120)
+      // while every overflow assertion passed (Codex, #275).
+      const name = document.querySelector('.k-brand__name');
+      if (name && getComputedStyle(name).display !== 'none' && name.scrollWidth > name.clientWidth + 1) {
+        bad.push(`wordmark truncated to ${name.clientWidth}px of ${name.scrollWidth}`);
+      }
       // Every 44px control the Keep declares as a touch target.
       for (const sel of ['.k-pop--nav button', '.k-av--btn', '.k-bar__rt .k-iconbtn']) {
         document.querySelectorAll(sel).forEach((e) => {
@@ -4668,12 +4683,16 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
     await expect(page.locator('.k-pop--nav.is-open'), `Escape did not close the compact nav at ${width}px`).toHaveCount(0);
   }
 
-  // ── The crossover's upper side, so the pair is complete.
-  await page.setViewportSize({ width: 1045, height: 900 });
+  // ── The crossover's upper side, so the pair is complete. 1130, because the
+  // wide layout's intrinsic need is 1130 and not the 1044 two earlier PRs
+  // used — that figure came from `scrollWidth` on a bar whose `.k-tag` was
+  // already compressed, so it measured what the bar settled for.
+  await page.setViewportSize({ width: 1130, height: 900 });
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
-  await expect(page.locator('.k-nav'), 'the strip is hidden at 1045px, one pixel above the breakpoint').toBeVisible();
-  await expect(page.locator('.k-pop--nav'), 'both navs showed at 1045px').toBeHidden();
+  await expect(page.locator('.k-nav'), 'the strip is hidden at 1130px, one pixel above the breakpoint').toBeVisible();
+  await expect(page.locator('.k-pop--nav'), 'both navs showed at 1130px').toBeHidden();
+  expect(await overflow(), 'the Keep overflows horizontally at 1130px').toBeLessThanOrEqual(0);
 
   // ── ESCAPE CLOSES IT. This project's "Collapsible reveals (always)" standard
   // requires outside-click and Escape, and the control gets both by being built
@@ -4732,6 +4751,61 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   // the guard above must not have disabled it.
   await page.evaluate(() => window.scrollBy(0, 200));
   await expect(page.locator('.k-pop--nav.is-open'), 'a page scroll no longer closes the menu').toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+
+  // ── THE SACRIFICE ORDER IS SCOPED TO THE APP BAR. `.k-tag` is also rendered
+  // by the LOGIN CARD's `.k-abrand`, which is in no constrained container at
+  // all — an unscoped `.k-tag { display: none }` removed the product badge from
+  // the authentication screen at every width from 320 to 1044 (Codex, #275).
+  // Checked signed OUT, which is the only way that element renders.
+  // ⚠️ A FRESH CONTEXT, not a new page. `localStorage` is shared across a
+  // context, so a second page on this one is already signed in by the seeded
+  // session and renders the home view — the first version of this block failed
+  // with "the login card did not mount", which reads as an app defect.
+  {
+    const anonCtx = await page.context().browser().newContext();
+    const anon = await anonCtx.newPage();
+    for (const width of [390, 481, 810, 1129, 1280]) {
+      await anon.setViewportSize({ width, height: 900 });
+      await anon.goto('./#/keep');
+      await expect(anon.locator('.k-authcard'), `the login card did not mount at ${width}px`).toBeVisible({ timeout: 15_000 });
+      await expect(anon.locator('.k-abrand .k-tag'), `the login card lost its product badge at ${width}px`).toBeVisible();
+    }
+    await anonCtx.close();
+  }
+
+  // ── THE PANEL IS BOUND BY ITS MEASURED TOP, not a fixed subtraction. With
+  // the chrome enlarged the panel starts lower, and `calc(100vh - 124px)`
+  // allowed the same height regardless — measured 39px past a 300px viewport
+  // with "Documents" stranded after scrolling (Codex, #275).
+  await page.setViewportSize({ width: 740, height: 300 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '32px';
+    document.querySelectorAll('.k-ribbon, .k-bar__in').forEach((e) => { e.style.fontSize = '30px'; });
+  });
+  await page.locator('.k-pop--nav button').click();
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+  const tall = await page.evaluate(async () => {
+    const p = document.querySelector('.k-pop--nav .k-menu');
+    const box = p.getBoundingClientRect();
+    p.scrollTop = p.scrollHeight;
+    await new Promise((r) => setTimeout(r, 120));
+    return {
+      past: Math.round(box.bottom - window.innerHeight),
+      stranded: [...p.querySelectorAll('a')].filter((a) => a.getBoundingClientRect().bottom > window.innerHeight + 1).map((a) => a.textContent.trim()),
+    };
+  });
+  expect(tall.past, `the panel runs ${tall.past}px past the viewport when the chrome is enlarged`).toBeLessThanOrEqual(1);
+  expect(tall.stranded, `destinations unreachable with enlarged chrome: ${tall.stranded.join(', ')}`).toHaveLength(0);
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '';
+    document.querySelectorAll('.k-ribbon, .k-bar__in').forEach((e) => { e.style.fontSize = ''; });
+  });
 
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('./#/keep/list');
