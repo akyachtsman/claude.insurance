@@ -311,14 +311,18 @@ jobs:
           # advertises paths like vendor/console.html, and a matcher anchored to
           # root-level files let a PR touching only that page set ui=false and
           # skip the very ENTRY gate the page exists for.
-          # LOCAL ADDITION: ^content/. Upstream's extension arms already cover
-          # this repo's css/ and js/, so only this one is local. The app RENDERS
-          # content/*.json: content/help-guide.json seeds the Help desk's chips
-          # and its credited-source links, and content/questionnaire.json builds
-          # the whole qualify flow. A corpus-only PR set ui=false and skipped the
-          # browser job entirely — the same class of gap upstream widened the
-          # extension arms to close, arriving through a data file instead of a
-          # source file. styles/ is kept as shipped: it costs nothing here.
+          # ADD the directories your app FETCHES AT RUNTIME: a data file the page
+          # renders (content/*.json that builds a form or a list, say) changes what
+          # the browser shows without touching a source file, so a PR touching
+          # only it sets ui=false (claude.insurance, 2026-10-15: `^content/`). The
+          # name is per-project, so the template cannot list it.
+          #
+          # LOCAL ADDITION, which is the instruction above applied here: ^content/.
+          # Upstream's extension arms already cover this repo's css/ and js/, so
+          # that one directory is the whole of the local delta. content/help-guide.json
+          # seeds the Help desk's chips and its credited-source links, and
+          # content/questionnaire.json builds the whole qualify flow. styles/ is
+          # kept as shipped: it costs nothing here.
           UI_PATHS: '(\.(html|css|m?js)$|^js/|^styles/|^content/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
         run: |
           # A build whose inputs are not listed would let a source-only PR skip

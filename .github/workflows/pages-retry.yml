@@ -52,41 +52,6 @@ on:
 permissions:
   actions: write
   contents: read
-
-# ── NO `concurrency` BLOCK HERE, AND ITS ABSENCE IS THE DECISION ──────────────
-# This repo carried one (`group: pages-retry`, `cancel-in-progress: false`) from
-# 2026-08-26 (#249) until 2026-10-15. It is GONE, and removing it is a SAFETY
-# change rather than an alignment one — claude.directives#455 ruled the same way
-# on the same reasoning.
-#
-# WHY IT WAS ADDED: each job re-runs the ORIGINAL SHA of the run that triggered
-# it, so two managed Pages runs failing in one outage start two INDEPENDENT
-# retries, and the older one can redeploy STALE CONTENT OVER THE NEWER COMMIT.
-# Serializing was meant to stop them interleaving.
-#
-# ⚠️ WHY IT HAD TO GO: the group makes the obsolescence check below able to lose
-# the ONE retry that should happen. Only one run may be PENDING in a concurrency
-# group — a newly queued run CANCELS the pending one even with
-# `cancel-in-progress: false`, which governs the RUNNING run only. Retries fire
-# off `workflow_run` completion events, which need not arrive in deploy order,
-# so:
-#
-#     retry(A, oldest) starts, holds the group
-#     retry(C, newest) queues  -> pending
-#     retry(B, middle) queues  -> CANCELS pending C; B becomes pending
-#     A runs its check, sees a newer deploy exists -> exits 0, no re-run
-#     B runs its check, sees C is newer            -> exits 0, no re-run
-#     C was cancelled                              -> NOTHING IS RETRIED
-#
-# Without the group all three run concurrently, A and B decline on the check,
-# and C re-runs — the correct outcome. So the check does the ordering job the
-# group was added for, and the group now only supplies a way to drop the newest
-# retry. A guard that makes its neighbour unsafe goes.
-#
-# ⚠️ Do NOT re-add it to "stop interleaving". Two retries overlapping is
-# harmless now: each one asks whether a newer run exists before re-running, so
-# at most the newest re-runs and the others exit 0. Interleaving was only ever a
-# problem while the check did not exist.
 jobs:
   retry:
     # Only when the Pages deploy failed, and only for the first few attempts.
@@ -94,11 +59,8 @@ jobs:
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.run_attempt < 4
     runs-on: ubuntu-latest
-    # Raised 5 -> 10 with the backoff below. Worst case is 90s of initial wait
-    # (30s x ATTEMPT, and the `if` above caps ATTEMPT at 3) plus 20+40+80+160s of
-    # call retries = 390s ≈ 6.5 min, which would have been killed at 5. Upstream's
-    # version of this comment says 5.2 min; that is arithmetically wrong, though
-    # its conclusion — that 10 is enough and 5 was not — still holds.
+    # Raised 5 -> 10 with the backoff below: worst case is 90s of initial wait plus
+    # 20+40+80+160s of call retries = 390s, 6.5 min, which would have been killed at 5.
     timeout-minutes: 10
     steps:
       - name: Re-run the failed Pages deployment
@@ -106,12 +68,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          WF_ID: ${{ github.event.workflow_run.workflow_id }}
           ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           SHA: ${{ github.event.workflow_run.head_sha }}
-          # The triggering workflow's own id. Used to look for NEWER runs of the
-          # same workflow — see the obsolescence check below for why this is an
-          # id and not a name.
-          WF_ID: ${{ github.event.workflow_run.workflow_id }}
         run: |
           set -euo pipefail
           echo "Pages deploy run ${RUN_ID} (commit ${SHA:0:7}) failed on attempt ${ATTEMPT}."
@@ -145,50 +104,46 @@ jobs:
           # synchronously does not care about 90 seconds.
           sleep $(( 30 * ATTEMPT ))
 
+          # ⚠️ A NEWER RUN SUPERSEDES THIS ONE (claude.insurance #249, carried there since
+          # 2026-08-26). A re-run replays THIS run's commit, so when two deploys fail in
+          # one outage, two retries start and the older one can finish last and put the
+          # stale commit back on the site. Before every re-run request, ask whether a
+          # newer run of the same workflow exists, and stop if one does: that run
+          # carries the newer content, and its own failure starts its own retry.
+          # Keyed on the workflow ID, NEVER a name: the runs API reports this workflow
+          # as "pages build and deployment" (prose, spaces) while the trigger above
+          # needs the slug "pages-build-deployment", so a name filter matches nothing,
+          # the newest ID falls through to empty, and the guard never fires while
+          # looking correct (verified against the live API, 2026-08-26).
+          # A check that cannot run is NOT evidence of a newer run: proceed with the
+          # re-run rather than abandon a deploy the site is waiting on.
+          # No `concurrency:` block, deliberately (owner, 2026-10-15): by default a
+          # group holds ONE pending run and queuing another CANCELS it (GitHub docs,
+          # `queue: single`), so the newer deploy's retry could be the one dropped,
+          # the older one would then stop here, and nothing would retry at all. This
+          # check alone stops the stale overwrite.
+          # KNOWN LIMIT (owner ruling, 2026-10-15): the check and the re-run request
+          # are two API calls, so a newer deploy created in the instant between them
+          # is missed and this re-run still goes ahead. Closing it would mean polling
+          # the re-run and cancelling it, judged not worth its code for a gap that
+          # narrow.
+          superseded() {
+            local newest
+            newest=$(gh api "repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=1" \
+              --jq '.workflow_runs[0].id // empty' 2>/dev/null) || return 1
+            case "$newest" in ''|*[!0-9]*) return 1 ;; esac
+            [ "$newest" -gt "$RUN_ID" ]
+          }
+
           # Full re-run (not just failed jobs): re-running the whole run is what
           # reliably clears the transient publish error.
           ok=0
           for wait in 0 20 40 80 160; do
             [ "$wait" -gt 0 ] && { echo "re-run request failed; waiting ${wait}s"; sleep "$wait"; }
-
-            # ⚠️ REJECT AN OBSOLETE RUN — this is the WHOLE of what prevents a stale
-            # redeploy, and since 2026-10-15 it is the only thing here that does: the
-            # `concurrency` block that used to sit above was removed because it could
-            # cancel the newest pending retry and leave nothing re-run at all (the
-            # header says how). Since this job re-runs its OWN event's RUN_ID, an
-            # older retry executing second would republish an OLDER commit over a
-            # newer one. Only checking closes that, and it is re-checked on EVERY
-            # attempt because the waits above can span minutes and a newer deploy can
-            # land mid-loop.
-            #
-            # ⚠️ KNOWN LIMIT (claude.directives#455, owner ruling): this check and the
-            # re-run request are two API calls, so a newer run created in the
-            # sub-second gap between them is missed. Judged not worth a
-            # poll-and-cancel loop.
-            #
-            # ⚠️ KEYED ON workflow_id, NEVER ON A NAME. The managed Pages workflow
-            # reports TWO different names: the workflows API calls it
-            # "pages-build-deployment" (the slug the `workflows:` trigger above must
-            # use), while the RUNS API calls it "pages build and deployment" (prose,
-            # spaces). Filtering runs by the slug therefore matches NOTHING — the max
-            # would fall through to 0, never exceed RUN_ID, and this guard would
-            # silently never fire while looking correct. Verified against the live API
-            # 2026-08-26.
-            #
-            # If the check itself cannot run, PROCEED rather than skip: an
-            # unverifiable check is not evidence of obsolescence, and skipping would
-            # silently abandon a deploy the site is waiting on. The stale overwrite
-            # needs a rare double-failure; an abandoned deploy needs only a flaky API.
-            if newest=$(gh api "repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=1" \
-                          --jq '.workflow_runs[0].id // 0'); then
-              if [ "${newest:-0}" -gt "${RUN_ID}" ]; then
-                echo "::notice::Pages run ${RUN_ID} (commit ${SHA:0:7}) is superseded by newer run ${newest} — skipping the re-run so an older commit is not republished over a newer one."
-                exit 0
-              fi
-            else
-              echo "::warning::Could not determine whether run ${RUN_ID} is superseded; proceeding with the re-run."
+            if superseded; then
+              echo "A newer Pages deploy run exists: not re-running ${RUN_ID} (commit ${SHA:0:7}), which would put older content back."
+              exit 0
             fi
-
             # A failing command in an `if` CONDITION does not trip `set -e`, which is what
             # lets the loop keep going — this call is expected to fail sometimes; that is
             # the entire reason the loop exists.
