@@ -85,7 +85,10 @@ export interface Deps {
 // unambiguously retired and its deletion stayed a separate, closable item —
 // ✅ CLOSED: the owner deleted `desk-ask` on 2026-10-14, verified from a session.
 // "help-ask" also matches what the feature is now called everywhere else.
-// DEPLOY WITH THE DEFAULT — `verify_jwt` ON. An earlier version of this header
+// DEPLOY WITH `verify_jwt` ON — PINNED in supabase/config.toml, not defaulted.
+// ⚠️ This read "WITH THE DEFAULT"; an absent [functions.*] block preserves the
+// live value rather than applying the default (measured 2026-10-14, caught by
+// the deploy smoke probe). An earlier version of this header
 // argued at length for `--no-verify-jwt`, on two claims that were both false and
 // both testable from here the whole time. The retired `desk-ask` stub WAS
 // deployed with verify_jwt = true, which made it a live control. ⚠️ It was

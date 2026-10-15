@@ -18,8 +18,14 @@ replace.
 
 ✅ **AND IT IS NOW DEPLOYED (2026-10-14).** `functions-deploy.yml` became a
 per-function matrix and carries `notify-enhancement` as a second row, so it
-deploys from the runner's checkout with `verify_jwt` ON (no `[functions.*]` block,
-so the CLI applies the safe default).
+deploys from the runner's checkout with `verify_jwt` **ON**.
+
+⚠️ **That is because `supabase/config.toml` now PINS `verify_jwt = true`, not
+because a block is absent.** This line said "no `[functions.*]` block, so the CLI
+applies the safe default" — which is the belief that let a live `false` survive a
+*successful* deploy on 2026-10-14. An absent block sends nothing and the platform
+keeps the existing value; the smoke probe caught it. Do not remove those pins as
+"cleanup".
 
 ⚠️ **It was never "not deployed", which is what this said.** Measured before the
 change: ACTIVE, **version 2**, `verify_jwt: false`, entrypoint under
