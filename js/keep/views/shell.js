@@ -211,8 +211,14 @@ function closeKeepMenus() {
     p.classList.remove("is-open");
     const t = p.querySelector("[aria-expanded]");
     if (t) t.setAttribute("aria-expanded", "false");
-    // Drop the measured bound with the open state, so the next open measures
-    // afresh rather than inheriting a height computed at another size.
+    // ⚠️ BELT, and labelled a survivor up front: deleting this passes every
+    // scenario. `popover()` sets `maxHeight` on EVERY open, so a stale value is
+    // always overwritten before it can be seen, and between close and the next
+    // open the panel is `display: none`. Kept on two narrow grounds — it leaves
+    // no inline style behind for a reader or a future layout pass to puzzle
+    // over, and a caller that ever opens a panel WITHOUT going through
+    // `popover()` then gets `.k-menu`'s CSS fallback rather than a pixel height
+    // measured at some other viewport size.
     const m = p.querySelector(".k-menu");
     if (m) m.style.maxHeight = "";
   });
