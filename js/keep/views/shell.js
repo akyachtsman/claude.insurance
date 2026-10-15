@@ -211,6 +211,16 @@ function closeKeepMenus() {
     p.classList.remove("is-open");
     const t = p.querySelector("[aria-expanded]");
     if (t) t.setAttribute("aria-expanded", "false");
+    // ⚠️ BELT, and labelled a survivor up front: deleting this passes every
+    // scenario. `popover()` sets `maxHeight` on EVERY open, so a stale value is
+    // always overwritten before it can be seen, and between close and the next
+    // open the panel is `display: none`. Kept on two narrow grounds — it leaves
+    // no inline style behind for a reader or a future layout pass to puzzle
+    // over, and a caller that ever opens a panel WITHOUT going through
+    // `popover()` then gets `.k-menu`'s CSS fallback rather than a pixel height
+    // measured at some other viewport size.
+    const m = p.querySelector(".k-menu");
+    if (m) m.style.maxHeight = "";
   });
 }
 // Close any open search/command dropdowns (the nav search and the landing box).
@@ -351,7 +361,22 @@ function popover(trigger, panel, alignRight) {
     e.stopPropagation();
     const open = !wrap.classList.contains("is-open");
     closeKeepMenus();
-    if (open) { wrap.classList.add("is-open"); trigger.setAttribute("aria-expanded", "true"); }
+    if (open) {
+      wrap.classList.add("is-open");
+      trigger.setAttribute("aria-expanded", "true");
+      // ⚠️ BOUND THE PANEL FROM ITS MEASURED TOP, not from an assumed one.
+      // `.k-menu`'s CSS carries `max-height: calc(100vh - 124px)`, which
+      // subtracts a ribbon plus a single-line bar — and the real top moves with
+      // the ribbon's height, the text size and the zoom. Measured at 740x300
+      // with the chrome at 2x, the panel ran 39px past the viewport and
+      // stranded its last link even after scrolling (Codex, #275). CSS cannot
+      // read an element's own offset, so the exact figure is set here, on each
+      // open, after the panel is laid out.
+      // 12px of breathing room so the last item is not flush to the edge.
+      const top = panel.getBoundingClientRect().top;
+      const room = Math.max(120, Math.round(window.innerHeight - top - 12));
+      panel.style.maxHeight = `${room}px`;
+    }
   });
   wrap.appendChild(trigger);
   wrap.appendChild(panel);
