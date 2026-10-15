@@ -227,7 +227,16 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeKeepMenus(); closeKeepSearch(); } });
   // Fixed-positioned popovers (e.g. the Documents download menu inside a scroll
   // container) don't follow their trigger on scroll — close them instead.
-  window.addEventListener("scroll", () => closeKeepMenus(), true);
+  // ⚠️ BUT NOT A SCROLL INSIDE THE PANEL ITSELF. This listener is on `window`
+  // with capture, and scroll does not bubble but IS caught capturing, so a
+  // panel that scrolls its own overflow was closing itself the moment it was
+  // used — which would have made `.k-menu`'s new `overflow-y: auto` useless
+  // and left the clipped links just as unreachable. A scroll originating in an
+  // open menu is not a page scroll.
+  window.addEventListener("scroll", (e) => {
+    if (e.target instanceof Element && e.target.closest(".k-menu")) return;
+    closeKeepMenus();
+  }, true);
 }
 
 // ── Search / command dropdowns ───────────────────────────────────────────────
@@ -453,7 +462,7 @@ function appBar(active) {
     el("div", { class: "k-bar__in" }, [
       el("a", { class: "k-brand", attrs: { href: "#/keep", "aria-label": "The Keep — home" } }, [
         icon("shield", { size: 26, class: "k-mark" }),
-        el("span", { text: "Harborline" }),
+        el("span", { class: "k-brand__name", text: "Harborline" }),
         el("span", { class: "k-tag", text: "The Keep" }),
       ]),
       navMenu(active),

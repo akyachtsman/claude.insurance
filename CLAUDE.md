@@ -4205,6 +4205,77 @@ re-learning:**
   the tree**. A harness that destroys uncommitted work should refuse to run on a
   dirty tree in BOTH directions; mine only checked at startup.
 
+### ⚠️ A GREEN `scrollWidth` SAYS THE BAR FITS, NOT WHAT GAVE WAY TO MAKE IT FIT (2026-10-15)
+
+Two Codex P2s on #274, both reproduced, and the first one **invalidates a claim
+the section above makes**.
+
+**The bar was fitting dishonestly.** `scrollWidth <= clientWidth` was green at
+360px — and it was green because the brand's `<svg>` logo, which is also the
+link home, was **rendered at 0px**. Measured across the band:
+
+| width | logo on `56aa848`→`56ab848` (old main) | after #274 | after this fix |
+|---|---|---|---|
+| 320, 360 | **0px** | 0px | 26px |
+| 390 | **0px** | 26px | 26px |
+| 414 | **15px** | 26px | 26px |
+| 600 | 26px | **16px** ← #274's | 26px |
+
+So it is **pre-existing**, #274 *shrank* the band (320-414 → 320-360), and #274
+**introduced a fresh instance at 600px** where the compact control's 52px came
+out of the brand. No overflow assertion could have caught any of it.
+
+✅ **AND 320px NOW CLOSES, WHICH #274 SAID IT NEVER COULD.** That section reads
+"closing the last 28px means shrinking the 44px touch targets" — wrong, because
+the bar was never 28px short: it was crushing the logo. Giving the icon
+`flex: none` and letting the wordmark go instead freed far more than the icon
+needed. Measured: **zero overflow from 320 to 1440**, logo at 26px, no control
+under 44px. The conclusion was reasonable and the premise was never checked.
+
+**The fix is a stated sacrifice order, not three fixes:** the decorative
+`.k-tag` goes first, then the brand WORDMARK (hidden below 380px — an
+ellipsised "Harborl…" measured worse than no wordmark), and never the mark or a
+touch target.
+
+⚠️ **WHICH PARTS EARN THEIR PLACE WAS SETTLED BY ENUMERATING ALL EIGHT
+SUBSETS**, not by argument. The minimum is **tag-band + wordmark**; `flex: none`
+is **BELT** and is labelled a survivor in the code, because this file records
+twice already that a comment kept calling a guard load-bearing after it stopped
+being so.
+
+⚠️⚠️ **AND THE FIRST RUN OF THAT ENUMERATION SAID THE OPPOSITE, ON A BROKEN
+MUTATION.** Its "remove the tag rule" step only **prepended a comment** — a
+non-empty diff, so the applied-check passed, and every row involving it was
+meaningless. On that evidence the tag-band rule was about to be reverted as
+"a cost with no measured benefit"; it is in fact *half the minimum*. That is
+**mutation-lie #3** (a mutation that reads as applied and encodes nothing) with
+a new disguise: not an empty diff, but a diff that changes only a comment. The
+enumeration now asserts the **declaration count dropped**, and the anchor is
+taken from the file verbatim rather than retyped — the retyped version also
+failed once on an em dash written as `--`.
+
+**The second finding: the menu panels stranded destinations.** At 740×320 the
+compact nav's five 44px links ran to 338px from a panel starting at 100px, so
+"Documents" was off-screen — and the shared scroll handler closes every
+`.k-pop`, so the page could not be scrolled to it either. Fixed on `.k-menu`
+rather than only the new panel, because the ACCOUNT menu has more items and the
+identical defect: measured, **"Sign out" unreachable at 896×414** and
+`Documents, Help, Sign out` at 740×320.
+⚠️ **The second half of that fix is load-bearing and the first half is inert
+without it:** the scroll listener is on `window` with **capture**, and scroll
+does not bubble but *is* caught capturing — so a panel scrolling its own
+overflow closed itself the moment it was used. It now ignores a scroll
+originating inside a `.k-menu`, and a window scroll still closes the menus.
+Mutation-tested 3/3 on the panel half (unbounded again, in-panel scroll closing
+it, window scroll no longer closing it); the three brand fixes are covered by
+the subset enumeration above instead, since each survives alone.
+
+**S29 was extended rather than duplicated:** 320px joins the band, every width
+additionally asserts that **nothing is crushed** (the logo keeps its natural
+width, no 44px control shrinks), and a 740×320 block asserts the panel is
+viewport-bounded, scrolls, **stays open when scrolled**, strands nothing, and
+still closes on a page scroll.
+
 ### ⛔ NOT BUILT, deliberately — a sprite-reference guard, and why the cheap one is the wrong shape
 
 The `icon()` finding above is a defect CLASS, not a one-off: an unknown name

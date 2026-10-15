@@ -4570,12 +4570,21 @@ test('S28: a cancelled policy is never shown as active', async ({ page, renderWi
 // in the menu fails too, which is the inversion lesson CLAUDE.md records for
 // `BACK_ELIGIBLE` and `check-keep-back-routes.js`.
 //
-// ⚠️ 320px IS DELIBERATELY NOT IN THE BAND. Measured: the bar needs 348px there,
-// so it still overflows — as it did BEFORE this change, when it needed 371px.
-// Closing the last 28px means shrinking the 44px touch targets the Keep keeps
-// everywhere, which is a worse trade than a sideways scroll on a 2016 phone.
-// Asserting 320 would therefore fail on purpose; omitting it silently would
-// hide that, so it is named here instead.
+// ✅ 320px IS NOW IN THE BAND, and the previous version of this comment said it
+// never could be: "closing the last 28px means shrinking the 44px touch
+// targets". That was wrong, and the reason is the finding below — the bar was
+// never 28px short, it was fitting by CRUSHING THE BRAND LOGO TO 0px. Giving
+// the icon `flex: none` and sacrificing the wordmark instead freed far more
+// than the icon needed, so 320 closes with the touch targets intact.
+//
+// ⚠️ AND THAT IS WHY THIS SCENARIO ASSERTS MORE THAN OVERFLOW. A green
+// `scrollWidth <= clientWidth` says the bar FITS; it says nothing about WHAT
+// GAVE WAY to make it fit. The logo was rendering at zero width at 320/360 —
+// pre-existing (0px at 320/360/390 and 15px at 414 on `56ab848`) and invisible
+// to every overflow check — and the compact control pushed a fresh instance of
+// it to 600px. Found by Codex on #274, measured, and the two assertions below
+// (`.k-mark` keeps its natural width; no 44px control shrinks) are the ones no
+// overflow assertion could have made.
 // ─────────────────────────────────────────────────────────────────────────────
 test('S29: the Keep nav is reachable at every width and the bar never overflows', async ({ page, renderWitness }) => {
   renderWitness();
@@ -4604,7 +4613,7 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   // sides of the crossover. 1044/1045 are asserted as a PAIR: one breakpoint
   // drives both controls, so an off-by-one that showed neither (or both) at the
   // boundary is exactly the mistake a single sample cannot see.
-  for (const width of [360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044]) {
+  for (const width of [320, 360, 390, 414, 480, 600, 760, 761, 810, 900, 1024, 1044]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('./#/keep/list');
     await expect(page.locator('.k-h1'), `the Entities page did not mount at ${width}px`).toHaveText(/Entities/i, { timeout: 15_000 });
@@ -4612,6 +4621,24 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
     await expect(page.locator('.k-nav'), `the wide nav strip is still showing at ${width}px`).toBeHidden();
     await expect(page.locator('.k-pop--nav'), `no nav of any kind at ${width}px — the portal is a dead end`).toBeVisible();
     expect(await overflow(), `the Keep overflows horizontally at ${width}px`).toBeLessThanOrEqual(0);
+
+    // NOTHING IS CRUSHED TO ACHIEVE THAT. See the header: fitting and fitting
+    // honestly are different claims, and only this one catches a flex item
+    // being squeezed to nothing.
+    const squashed = await page.evaluate(() => {
+      const bad = [];
+      const mark = document.querySelector('.k-brand .k-mark');
+      if (mark && mark.getBoundingClientRect().width < 24) bad.push(`brand logo ${Math.round(mark.getBoundingClientRect().width)}px`);
+      // Every 44px control the Keep declares as a touch target.
+      for (const sel of ['.k-pop--nav button', '.k-av--btn', '.k-bar__rt .k-iconbtn']) {
+        document.querySelectorAll(sel).forEach((e) => {
+          const r = e.getBoundingClientRect();
+          if (r.width > 0 && r.width < 42) bad.push(`${sel} ${Math.round(r.width)}px`);
+        });
+      }
+      return bad;
+    });
+    expect(squashed, `the bar fits ${width}px only by crushing: ${squashed.join(', ')}`).toHaveLength(0);
 
     // ⚠️ EACH ITERATION MUST START FROM A KNOWN-CLOSED MENU, and this is not
     // defensive padding — the first version of this loop failed at the SECOND
@@ -4668,6 +4695,47 @@ test('S29: the Keep nav is reachable at every width and the bar never overflows'
   await trigger.click();
   await page.locator('.k-pop--nav .k-menu a[href="#/keep/insurance"]').click();
   await expect(page.locator('.k-h1'), 'the compact nav did not navigate to Policies').toHaveText(/Policies/i, { timeout: 15_000 });
+
+  // ── A SHORT VIEWPORT MUST NOT STRAND A DESTINATION. An unbounded panel is
+  // clipped by the viewport, and the shared scroll handler closes every
+  // `.k-pop`, so the page cannot be scrolled to what is cut off either.
+  // Measured at 740x320: "Documents" was off-screen and unreachable (Codex,
+  // #274). The panel is now `max-height` + `overflow-y: auto`, and the scroll
+  // handler ignores a scroll that originates inside a menu — without that
+  // second half the overflow would close the panel the moment it was used,
+  // which is the fix defeating itself.
+  await page.setViewportSize({ width: 740, height: 320 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+  await page.locator('.k-pop--nav button').click();
+  await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
+
+  const panel = page.locator('.k-pop--nav .k-menu');
+  const pbox = await panel.boundingBox();
+  expect(pbox.y + pbox.height, 'the compact nav panel runs past the bottom of a 320px-tall viewport').toBeLessThanOrEqual(320);
+
+  const reach = await page.evaluate(async () => {
+    const p = document.querySelector('.k-pop--nav .k-menu');
+    const scrollable = p.scrollHeight > p.clientHeight + 1;
+    p.scrollTop = p.scrollHeight;
+    await new Promise((r) => setTimeout(r, 150));
+    const stranded = [...p.querySelectorAll('a')]
+      .filter((a) => a.getBoundingClientRect().bottom > window.innerHeight)
+      .map((a) => a.textContent.trim());
+    return { scrollable, open: !!document.querySelector('.k-pop--nav.is-open'), stranded };
+  });
+  expect(reach.scrollable, 'the panel is taller than the viewport but does not scroll').toBe(true);
+  expect(reach.open, "the panel closed itself when scrolled — its own overflow is unusable").toBe(true);
+  expect(reach.stranded, `destinations unreachable in a short viewport: ${reach.stranded.join(', ')}`).toHaveLength(0);
+
+  // A WINDOW scroll must still close it — that is what the handler is for, and
+  // the guard above must not have disabled it.
+  await page.evaluate(() => window.scrollBy(0, 200));
+  await expect(page.locator('.k-pop--nav.is-open'), 'a page scroll no longer closes the menu').toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
 
   // ── EVERY ICON RESOLVES. `icon()` builds `<use href="#icon-NAME">` and an
   // unknown name renders an EMPTY svg with no error anywhere — so a mistyped
