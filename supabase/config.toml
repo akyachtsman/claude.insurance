@@ -67,8 +67,23 @@
 # load-bearing grants. The caller-scoped client covers the CLIENT RECORDS —
 # entities, assets, policies, profiles — and that is the claim.
 # (notify-enhancement is the stricter case: every TABLE access there is the
-# caller's, and its one service-role use is `auth.admin.getUserById`, not a
-# table.)
+# caller's, under RLS. It has TWO service-role surfaces, and BOTH must be kept
+# in view by any future privilege change — ⚠️ a first version of this sentence
+# named only the first and called it "its one service-role use", which is
+# exactly the kind of omission that gets a load-bearing grant dropped as
+# unused (Codex, #273):
+#   · `authAdmin` (index.ts 490) → `auth.admin.getUserById` (775). The GoTrue
+#     ADMIN API, not a table — it resolves the client's email on the approved
+#     path, where the caller is the underwriter and `profiles` has no email
+#     column. Unaffected by Postgres table grants, which is why it works where
+#     the old service-role table reads did not.
+#   · `claims` (405) → `claim_notification` (433). A table-adjacent surface and
+#     the one that is easy to miss: the RPC is SECURITY DEFINER with EXECUTE
+#     granted to `service_role` ONLY, it reads `enhancement_requests` and
+#     inserts into the server-only `enhancement_notifications`, and
+#     `authenticated` holds nothing on either the table or the function. That
+#     grant is the whole point of the claim redesign — revoking it as "unused"
+#     would make every claim fail and silence the notifications.)
 #
 # ⚠️ NOT MEASURED FROM HERE, and stated rather than assumed: HTTPS egress to the
 # project is blocked from a session, so the publishable-key path has not been
