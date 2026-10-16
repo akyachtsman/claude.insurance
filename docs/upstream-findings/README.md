@@ -44,6 +44,20 @@ quote `claude.directives` source by blob and by variable name, and the
 **Re-read the template before sending**, and say in the note which upstream head
 the quotations were taken from.
 
+## When a note moves, fix the pointers to it
+
+Three places pointed at these notes under `.agent-reports/` and kept doing so
+after they moved: `CLAUDE.md` twice and `.claude/directive-sync.json` once (its
+`local_tree_note`, where the kit-dir finding is explained). Following any of them
+landed on a path that is not in the tree, which defeats the discoverability this
+directory exists for. Found by Codex on the very change that created it.
+
+So: `grep -rn '<old path>' --include=*.md --include=*.json .` before calling a
+move done, and read what each hit *claims* as well as where it points — two of
+those three said the finding **"is reported upstream"**, of a note that had never
+left the repository. *A note's existence is not its delivery*, which is the same
+mistake as the section below, made by the pointers rather than by the reader.
+
 ## Not a substitute for sending it
 
 Committing a note is storage, not delivery. Each one is still owed to

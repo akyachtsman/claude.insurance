@@ -4999,7 +4999,13 @@ hash is recorded anyway, because it is the value a future reader needs to re-rev
 entry by hand — but it is labelled in the record as **read by nothing today**, which is
 the honest form.
 **The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
-and is reported there: `.agent-reports/directives-note-kit-dir-local-guard.md`.
+and is written up for upstream — ⚠️ **WRITTEN, NOT YET SENT** — at
+`docs/upstream-findings/kit-dir-local-guard.md`.
+⚠️ This line said "**is reported there**", of a note that had never left this
+repository, and pointed at `.agent-reports/`, which is gitignored and so was not
+in the tree at all. Both halves are the same defect: *a note's existence read as
+its delivery.* Found by Codex on #284 (P2) — correctly, and on the change whose
+whole purpose was making the note findable.
 
 **What upstream did** (`8c1a398`, batch C/S2): `templates/ui-tests/tests/app.spec.js`
 dropped from 2,623 lines to 1,269 by moving its helpers into two new files —
@@ -5190,7 +5196,8 @@ Stamp advanced to `bde28c9719f1`.
 
 ⚠️ **The forwarded `::notice::`/`::warning::` annotation finding is NOT adopted** —
 measured on the new template, which still uses a bare `echo`. It remains an unsent
-note in `.agent-reports/`, which is why the divergence row for `pages-retry.yml` was
+note at `docs/upstream-findings/pages-retry-annotations.md`, which is why the
+divergence row for `pages-retry.yml` was
 deleted (the file is verbatim, so there is no divergence) while the item stays on the
 owner's list.
 
