@@ -29,8 +29,18 @@ see. Both current notes were checked against that before being committed.
 | state | what it looks like |
 |---|---|
 | **written, not sent** | the file's `**Status:**` line says so, with where and when it was found |
-| **sent** | the `**Status:**` line names the upstream issue or PR |
+| **sent** | the `**Status:**` line names where it went and what came back |
+| **accepted, not shipped** | kept, with the `**Status:**` line saying the gap is still LIVE until the fix lands, and in what form it is expected |
 | **landed** | the file is **deleted**, in the same change that records the adoption in CLAUDE.md |
+| **declined** | the file is **deleted**, in the same change that records the refusal and its REASON in CLAUDE.md |
+
+⚠️ **The last two states were not in the first version of this table, and first
+contact produced both.** On 2026-10-16 one note came back *accepted but batched*
+and the other *declined outright*, and the table had a slot for neither — it
+assumed every report either waits or lands. A note that is accepted-but-unshipped
+is the dangerous one: the gap is still live in every installed copy, so deleting
+it on the strength of "they agreed" would lose the only local record of an open
+defect.
 
 Deleting on adoption is the point: a note that outlives its fix becomes a
 report of a defect that no longer exists, which is the
@@ -57,6 +67,28 @@ move done, and read what each hit *claims* as well as where it points — two of
 those three said the finding **"is reported upstream"**, of a note that had never
 left the repository. *A note's existence is not its delivery*, which is the same
 mistake as the section below, made by the pointers rather than by the reader.
+
+## The channel is a human relay, and that is measured
+
+Reaching the upstream session is **not** a `SendMessage` away, and three attempts
+failed before this was understood. Measured 2026-10-16 from `get_session`:
+
+| what | value | consequence |
+|---|---|---|
+| `DIR9` | a session **title**, not a registered peer name | `SendMessage` resolves registered names; a title never resolves |
+| `environment_kind` | `anthropic_cloud` | `ListAgents` reports only **this machine**, so it can never list it |
+| `connection_status` | `disconnected` | Remote Control is not connected on this side |
+| `send_message` | **absent from both sessions' toolsets** | `create_session`'s description references it; neither side has it |
+
+So the owner pastes the report in and pastes the reply back. Write a relayed
+message to survive that: say at the top that it is hand-relayed and that a reply
+must come back the same way, or the far side spends a turn trying to answer
+through a tool it does not have.
+
+⚠️ **Do not re-diagnose this as a flaky registry.** That was the first conclusion
+here, drawn from `ListAgents` naming this session three different things across
+one conversation. The unstable self-name was real; it was **not** the cause, and
+chasing it cost a turn. The cause is in the table above.
 
 ## Not a substitute for sending it
 
