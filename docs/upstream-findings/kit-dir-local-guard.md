@@ -1,6 +1,28 @@
 # `claude.directives` — `kit_dir_kept()` lacks `check()`'s `local` guard
 
-**Status:** WRITTEN, NOT SENT. Found on `claude.insurance` #281 by Codex (P2),
+**Status:** ✅ **SENT 2026-10-16 and ACCEPTED** — relayed by hand to the
+`claude.directives` session titled `DIR9` (`session_01CzWcrNCvrqkWMoG1g27qou`),
+which confirmed it at `refresh-stamp.sh:89-103` and called it *"the directory-path
+twin of the hole #451 closed for files"*.
+
+**NOT shipped, and not this repo's to ship.** It is on upstream's batched-release
+list — the owner is now batching downstream findings rather than shipping each
+one — so the gap is still LIVE in every installed copy until that batch lands.
+The likely form is the **smaller alternative** from the end of this note (the
+stamp printing the local tree beside the upstream one when it honours a directory
+record), not the two-sided binding.
+
+**The `local_tree` key stays exactly as it is** — confirmed by DIR9 as the right
+call. Do not rename it to `local`, and do not "promote" it to a guard here: the
+whole point is that it re-asks if upstream ever adds a real `.local` check.
+
+⚠️ **This file is NOT deleted yet.** Per `README.md`'s lifecycle a note is deleted
+when the fix LANDS, and a batched acceptance is not a landing. Delete it when the
+batch ships, in the same change that records the adoption in CLAUDE.md — and
+re-read the template first, because a batched fix may arrive in a different shape
+than the one suggested below.
+
+Found on `claude.insurance` #281 by Codex (P2),
 verified against the script 2026-10-15, **re-verified against upstream `main`
 2026-10-16**.
 **Upstream head the quotations are taken from:** `e78b6dd58796b4aa68056fb99e2416ed8f8d8f88`

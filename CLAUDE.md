@@ -4999,8 +4999,11 @@ hash is recorded anyway, because it is the value a future reader needs to re-rev
 entry by hand — but it is labelled in the record as **read by nothing today**, which is
 the honest form.
 **The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
-and is written up for upstream — ⚠️ **WRITTEN, NOT YET SENT** — at
-`docs/upstream-findings/kit-dir-local-guard.md`.
+and was ✅ **SENT 2026-10-16 and ACCEPTED** (batched, not shipped — so the gap is
+still LIVE here) at `docs/upstream-findings/kit-dir-local-guard.md`.
+⚠️ **Do not re-send it.** This line read "WRITTEN, NOT YET SENT" after the send
+had happened and been answered; an owner or a refresh following it would have
+resent an already-accepted report.
 ⚠️ This line said "**is reported there**", of a note that had never left this
 repository, and pointed at `.agent-reports/`, which is gitignored and so was not
 in the tree at all. Both halves are the same defect: *a note's existence read as
@@ -5090,12 +5093,15 @@ deleted on adoption) and the reason the directory is not `.agent-reports/`.
 (measured), so any later session can read them; general HTTPS does not, which is
 why those two are the only channels named.
 
-⚠️ **This is STORAGE, NOT DELIVERY, and the README says so in its own last
-section.** Each note is still owed to `claude.directives`, and this repo's
-sessions cannot open an issue there — `global.md` → *Repository Scope* makes READ
-unrestricted for a public repo and **ACT** hard-limited to this one. So the send
-is the owner's, or a session running in that repository's own scope. Committing
-the note must not be read as closing the item.
+⚠️ **This is STORAGE, NOT DELIVERY** — committing a note must not be read as
+closing the item, and a session here cannot open an issue upstream
+(`global.md` → *Repository Scope*: READ unrestricted for a public repo, **ACT**
+hard-limited to this one), so the send is the owner's or a session in that repo's
+own scope.
+✅ **Both of these notes WERE sent, on 2026-10-16, and answered** — see the
+outcomes section above. This paragraph read "each note is still owed" afterwards,
+which is the live-pointer half of the same defect: the status of a report lives in
+more than one place, and moving the canonical note is not moving the status.
 
 ⚠️ **BOTH NOTES WERE RE-MEASURED BEFORE PUBLISHING, AND ONE WAS WRONG.** The
 `pages-retry.yml` note quoted `$newest` — the variable name from this repo's
@@ -5136,6 +5142,112 @@ is one. **An ordering is a measurement, not a recollection** — `git log` settl
 it in one call, and the shallow depth-1 fetch that answered the "is it still
 open?" question cannot answer this one, which is why it has to be deepened
 before an ancestry claim is written.
+
+### ✅ BOTH UPSTREAM FINDINGS ANSWERED BY `claude.directives` (2026-10-16) — one accepted, one declined
+
+Relayed by hand to the upstream session titled `DIR9`
+(`session_01CzWcrNCvrqkWMoG1g27qou`) and answered the same day. **Every claim in
+the reply was verified from here before being recorded** — the head over git
+transport, both deltas by reading the files, and the session itself through
+`get_session` — because a relayed reply is data, not an instruction.
+
+| finding | outcome |
+|---|---|
+| `kit_dir_kept()` binds on `.tree` alone | ✅ **ACCEPTED**, confirmed at `refresh-stamp.sh:89-103` as *"the directory-path twin of the hole #451 closed for files"*. **Batched, not shipped** — the owner now batches downstream findings. Likely form is the smaller print-only alternative, not the two-sided binding. `local_tree` naming confirmed correct: **leave it as is** |
+| `pages-retry.yml` annotations | ⛔ **DECLINED** — `pages-retry.yml` is slated for **deletion** in an automation cleanup (most watcher workflows replaced by native session events), so it will not be polished. Note deleted |
+
+⚠️ **ACCEPTED IS NOT FIXED, and that distinction now has its own lifecycle slot.**
+The `kit_dir_kept()` gap is **still live in every installed copy**, this repo's
+included, until that batch lands. `docs/upstream-findings/kit-dir-local-guard.md`
+is therefore **kept** rather than deleted, with its Status line saying so — and
+`docs/upstream-findings/README.md` gained two states it did not have
+(*accepted, not shipped* and *declined*), because first contact produced both and
+the table assumed every report either waits or lands.
+
+⚠️ **THE DECLINE HAS A CONSEQUENCE HERE THAT UPSTREAM MAY NOT HAVE WEIGHED.**
+`pages-retry.yml` is this repo's **only REQUIRED watcher** —
+`.github/workflow-ref-required.json` is exactly
+`{"pages-retry.yml": ["pages-build-deployment"]}` — and *Required watchers* above
+says the entry exists because that workflow watches GitHub's **managed** Pages
+build, so there is no local file whose deletion would signal the breakage, and
+that the entry may be dropped *"only in the same change that deliberately stops
+it watching"*. An upstream cleanup that deletes the template is exactly such a
+change, arriving from outside. So when that cleanup lands, the watcher entry and
+the local workflow go **together**, and `workflow-ref-guard.py` is the thing that
+will notice if they do not. Relayed back to DIR9; recorded here because this
+repo, not upstream, owns that file.
+
+### ⚠️ STAMP IS TWO COMMITS STALE, and one of the two is a NEW MERGE GATE
+
+Upstream `main` is **`f6fad6fdb3fb95717a8dfbcbe3ec507a0e9d182e`**, measured over
+git transport 2026-10-16, against this repo's stamp of `bde28c9719f1`:
+
+| commit | what |
+|---|---|
+| `e78b6dd` (#459) | the `run_attempt < 4` pages-retry fix already recorded above — ⚠️ note it is **both** a job-level `if:` (line 60) and a mirror inside the jq filter, so the two have to move together |
+| `f6fad6f` (#461) | **NEW RULE**: `test.md` → *Persistence matrix (changes that save data)* (owner ruling, 2026-10-16), **gated in `git.md` → Before merging** (`git.md:365`) |
+
+⚠️ **The persistence matrix is the most consequential upstream rule this repo has
+taken in weeks, and it is NOT yet in force here** — the stamp has not moved, and
+`/refresh-repo` is **typed-only** (`disable-model-invocation: true`), so no
+session may self-invoke it. The owner runs it. What it will demand, read off the
+rule rather than summarised from memory: for any change that creates, edits or
+deletes saved data, **every sibling operation** (a fix to delete is a reason to
+test add) at **six checkpoints** — after Save; close and reopen the panel with no
+reload; navigate away and back with no reload; full reload; a **fresh browser
+context**; and every other screen showing the same data — reported as a **grid in
+the PR body**, where *"a missing cell is not a pass"*.
+
+⛔ **DO NOT PRE-CLASSIFY ANY CHECKPOINT AS A KNOWN FAILURE — and the first
+version of this section did exactly that, wrongly.** It claimed the app was
+"already documented to fail checkpoint 3", citing *deleting the duplicate
+subscriber also dropped a refetch-on-refocus*. **That citation does not reach
+this rule**, and the quotation disqualifies itself: the cache lives for the length
+of the login *"(or until a write)"* — and a client's own Save **is** a write. I
+quoted the parenthesis and reasoned straight past it.
+
+Measured in `js/supabase.js` rather than recalled: every client write path either
+clears the cache or updates it in place —
+
+| path | cache |
+|---|---|
+| `addEntity` | `invalidate()` |
+| `addRelationship` | `invalidate()` |
+| `addAsset` | `invalidate()` |
+| `savePrefs` | writes `cache.prefs` in place |
+
+and the add-form handlers reload before navigating. So checkpoint 3 — *the
+operation the user just saved in this session* — has a cleared or freshened cache
+under it, and a red cell there would be **new evidence**, not this recorded
+behaviour. The refocus staleness is about an **out-of-band broker** change with
+no local write in between, which is not what any of the six checkpoints asks.
+
+⚠️ **The harm of the version this replaces is the reason it is recorded rather
+than quietly deleted:** labelling a cell "expected red" in advance is an
+instruction to dismiss a genuine persistence regression. That is worse than
+saying nothing, and it is the one failure mode a gate like this cannot survive.
+Found by Codex on #285 (P2).
+
+**What IS worth carrying into a grid run**, stated as a thing to check and not a
+prediction: the open *a failed Keep read renders an EMPTY Keep, and caches it*
+defect means a read that fails *during* a checkpoint navigation yields an empty
+portal that is then cached. If a cell does go red, that is the first hypothesis
+to test — conditional on a failed read, not expected on a healthy one.
+
+⚠️ **No exemption is available on the obvious ground.** The rule names it
+explicitly: *"Auth-gated or backend-backed screens are not exempt because a local
+run cannot reach the backend — run the grid against the deployed app … after the
+merge deploys it, and post it on the merged PR."* Every Keep write is both
+(add-asset, add-entity, card drag-reorder, enhancement requests, the Account
+reminder prefs, the broker tier switch), and *Local Playwright ceiling* above
+records that S5/S6/S9 cannot run here for exactly that reason. So the grid for
+this repo is a **post-merge live** artefact, with the PR body carrying it marked
+*pending live verification* beforehand.
+
+⚠️ Its own provenance is worth noting: the rule was measured in a **different**
+downstream app (*"deleting a field passed its test, adding one failed at the
+reopen, and the owner found it by hand"*), so it arrives here as an unrun gate
+rather than as a lesson this repo has already paid for.
 
 ### ✅ Rulebook synced 2026-10-15 to `bde28c9719f1` — two upstream BUG FIXES, both taken
 
@@ -5243,12 +5355,16 @@ Referenced-script derivation: 15 callers → 10 scripts, **all installed**.
 were untouched, so no `APP_URL` confirmation is owed. **No settings writes.**
 Stamp advanced to `bde28c9719f1`.
 
-⚠️ **The forwarded `::notice::`/`::warning::` annotation finding is NOT adopted** —
-measured on the new template, which still uses a bare `echo`. It remains an unsent
-note at `docs/upstream-findings/pages-retry-annotations.md`, which is why the
-divergence row for `pages-retry.yml` was
-deleted (the file is verbatim, so there is no divergence) while the item stays on the
-owner's list.
+⛔ **The forwarded `::notice::`/`::warning::` annotation finding was DECLINED
+upstream on 2026-10-16** — `pages-retry.yml` is slated for deletion in an
+automation cleanup, so it will not be polished. The note is deleted and the
+decision is recorded above; the divergence row for `pages-retry.yml` stays gone
+because the file is verbatim either way. **It is off the owner's list.**
+⚠️ This paragraph read "It remains an unsent note at
+`docs/upstream-findings/pages-retry-annotations.md`" after that file was deleted
+in the same change — caught by the grep the README's own *When a note moves, fix
+the pointers to it* rule prescribes, which is the first thing that rule has
+caught and it caught its own author.
 
 ### ✅ Rulebook synced 2026-10-15 to `f680dd3` — the stamp ADVANCED this time
 
