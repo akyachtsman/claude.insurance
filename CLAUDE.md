@@ -3868,6 +3868,55 @@ after merging**; and this repo's reviewer habitually lands **minutes after** a
 merge (`#258` was 3 minutes, this was ~5), so "merge now, catch the review
 later" is a real tactic only if the catching is done by hand.
 
+⚠️ **ONE THING IT GETS RIGHT AND ONE IT MISSES — MEASURED 2026-10-16, after a
+first attempt at this paragraph got both backwards.**
+
+**Right: "minutes after" is the correct magnitude.** The verdict lands
+**1m53s-4m22s** after `ready_for_review`, and every merge in the 2026-10-15
+session beat it by **1m51s-4m16s**:
+
+| PR | `ready_for_review` | verdict | merged | verdict lands |
+|---|---|---|---|---|
+| #279 | 19:20:05 | 19:24:14 (4m09s) | 19:20:11 | 4m03s AFTER the merge |
+| #280 | 19:24:36 | 19:26:29 (1m53s) | 19:24:38 | 1m51s after |
+| #281 | 21:13:21 | 21:15:53 (2m32s) | 21:13:42 | 2m11s after |
+| #282 | 21:24:22 | 21:28:44 (4m22s) | 21:24:28 | 4m16s after |
+| #283 | 23:23:50 | 23:27:47 (3m57s) | 23:24:04 | 3m43s after |
+
+**Missed: a DRAFT IS NEVER REVIEWED.** The trigger is `ready_for_review`, not
+opening the PR — stated in Codex's own comment ("Reviews are triggered when you
+open a pull request for review, mark a draft as ready, comment @codex review")
+and confirmed by **#279 sitting as a draft for 12h35m and drawing no review at
+all**. So this repo's convention of opening every PR as a draft means the clock
+does not start until the un-draft, and the wait must come after it.
+
+⛔ **AND HERE IS THE TRAP, WHICH COST THIS PARAGRAPH ONE WRONG VERSION:**
+polling for "has a Codex comment appeared?" returns **true in 9-18 seconds**,
+and that comment is **not the verdict** — it reads `status: "running"`,
+`has_any_findings: null`, and Codex then **UPDATES THE SAME COMMENT** with its
+result. So `created_at` measures the acknowledgement and `updated_at` measures
+the verdict, and the first version of this section published the 9-18s figures
+as the review time and declared the repo's own "minutes after" record wrong. It
+was not wrong. **A comment's existence is not its content.**
+
+✅ **So poll the embedded state, not the comment.** The body carries
+`<!-- codex-review-state:v1 {...} -->`, whose `code_review.status` goes
+`running` → `completed` and whose `has_any_findings` is the verdict. Positive
+control: **#281 reads `has_any_findings: true, has_unresolved_findings: true`**,
+which is the P2 that was genuinely there, while the other four read `false` —
+so the field means what it says.
+
+**The remedy, with the right number in it:**
+
+> **un-draft, poll `codex-review-state:v1` until `status == "completed"`
+> (budget ~5 minutes), read `has_any_findings`, then merge.**
+
+⚠️ The hand-fetch rule above still stays — it is what found #268's four findings
+and #281's P2 on already-merged PRs. But it is a **recovery**, and the gate was
+available the whole time: four of those five merges were a `ready_for_review`
+and a squash within **two to twelve seconds** of each other, which cannot be
+reviewed by anything.
+
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
@@ -4950,7 +4999,13 @@ hash is recorded anyway, because it is the value a future reader needs to re-rev
 entry by hand — but it is labelled in the record as **read by nothing today**, which is
 the honest form.
 **The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
-and is reported there: `.agent-reports/directives-note-kit-dir-local-guard.md`.
+and is written up for upstream — ⚠️ **WRITTEN, NOT YET SENT** — at
+`docs/upstream-findings/kit-dir-local-guard.md`.
+⚠️ This line said "**is reported there**", of a note that had never left this
+repository, and pointed at `.agent-reports/`, which is gitignored and so was not
+in the tree at all. Both halves are the same defect: *a note's existence read as
+its delivery.* Found by Codex on #284 (P2) — correctly, and on the change whose
+whole purpose was making the note findable.
 
 **What upstream did** (`8c1a398`, batch C/S2): `templates/ui-tests/tests/app.spec.js`
 dropped from 2,623 lines to 1,269 by moving its helpers into two new files —
@@ -5018,6 +5073,70 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
+### ⚠️ A REPORT ADDRESSED TO A PEER SESSION HAS NO MAILBOX, AND A GITIGNORED FILE DIES WITH THE SESSION (2026-10-16)
+
+Two upstream reports were written on 2026-10-15 — the `kit_dir_kept()` binding
+gap and the `pages-retry.yml` annotations suggestion — and both sat in
+`.agent-reports/`, which is **gitignored**, addressed to a peer session (`DIR9`)
+that was **not running**. `ListAgents` returns no peers and a `SendMessage` to a
+session that does not exist is refused, so there was nothing to deliver to and
+nothing on disk that would survive the session. A finding carefully measured
+over three rounds had a half-life of one context window.
+
+**Fixed structurally, not by remembering:** they are committed at
+`docs/upstream-findings/`, whose README carries the lifecycle (written → sent →
+deleted on adoption) and the reason the directory is not `.agent-reports/`.
+`raw.githubusercontent.com` and git transport both work from a session
+(measured), so any later session can read them; general HTTPS does not, which is
+why those two are the only channels named.
+
+⚠️ **This is STORAGE, NOT DELIVERY, and the README says so in its own last
+section.** Each note is still owed to `claude.directives`, and this repo's
+sessions cannot open an issue there — `global.md` → *Repository Scope* makes READ
+unrestricted for a public repo and **ACT** hard-limited to this one. So the send
+is the owner's, or a session running in that repository's own scope. Committing
+the note must not be read as closing the item.
+
+⚠️ **BOTH NOTES WERE RE-MEASURED BEFORE PUBLISHING, AND ONE WAS WRONG.** The
+`pages-retry.yml` note quoted `$newest` — the variable name from this repo's
+**pre-adoption** local version — where the template uses `$counting`, and cited
+a blob (`8b903a7`) the file had already moved past twice. A note quoting a name
+the file does not use reads as describing a different file, which is this repo's
+most-repeated defect pointed at somebody else's code. Every quotation now names
+the upstream head it was taken from, and the README makes re-reading the template
+a precondition of sending.
+
+**What the re-measurement established**, against upstream `main` =
+`e78b6dd58796b4aa68056fb99e2416ed8f8d8f88` (git transport, 2026-10-16):
+
+| claim | result |
+|---|---|
+| `kit_dir_kept()` still selects on `.tree` alone | **still open** — and at every cached head from `5342fa9` to `e78b6dd`, so not a transient |
+| `pages-retry.yml` still plain `echo` on the stand-down (line 170) | **still open** |
+| the same file already uses `::error::` on its give-up path (line 183) | **true** — the precedent is in the file, which is a stronger argument than the note originally made |
+
+⚠️ **AND UPSTREAM HAS MOVED PAST THIS REPO'S STAMP AGAIN — by exactly ONE
+commit, `e78b6dd` (#459), within hours of the last of three refreshes.** The
+substantive delta is a **fourth** correction to the `pages-retry.yml`
+obsolescence check (`claude.trading#337`, cited in the template's own comment): a
+newer **failed** run now counts only while `run_attempt < 4`, because a newer
+failure on its last attempt starts no retry, so standing down for it left
+**both** runs unretried. This repo does not have that fix. It is a template
+delta, so it belongs to the next `/refresh-repo` rather than to a hand-edit —
+recorded here so the next session does not have to rediscover that the stamp is
+stale.
+⚠️ **AND THE FIRST VERSION OF THAT SENTENCE HAD THE ORDER WRONG**, written
+minutes after the paragraph above about not quoting what you have not re-read.
+It read `bde28c9719f1` → `f0e2838` → `e78b6dd`, inferring the middle from an
+earlier note in this file that said "upstream having moved to `f0e2838`".
+Measured on the fetched history: the order is `f680dd3` → **`f0e2838` (#457)** →
+**`bde28c9` (#458)** → **`e78b6dd` (#459)**, so `f0e2838` is *older* than this
+repo's stamp and was already taken. Three commits of drift claimed where there
+is one. **An ordering is a measurement, not a recollection** — `git log` settles
+it in one call, and the shallow depth-1 fetch that answered the "is it still
+open?" question cannot answer this one, which is why it has to be deepened
+before an ancestry claim is written.
+
 ### ✅ Rulebook synced 2026-10-15 to `bde28c9719f1` — two upstream BUG FIXES, both taken
 
 Third `/refresh-repo` of the day, `f680dd3` → `bde28c9719f1` (10 files). Unlike the
@@ -5056,6 +5175,55 @@ precondition is present and the fix is taken", not "we were broken". Stating it 
 weaker way on purpose: a success from this workflow is uninformative by upstream's own
 account, so *"our runs went green"* would have been the wrong evidence either way.
 
+✅ **NOW OBSERVED — MEASURED END TO END ON #284, 2026-10-16.** The paragraph above
+is kept because its caution was right; this is the measurement it was waiting for.
+A findings review set the label and a clean verdict cleared it, in one PR, four
+minutes apart:
+
+| time | event | source |
+|---|---|---|
+| 04:56:12 | `codex-flagged` **applied** | `/issues/284/timeline` → `labeled`, by `github-actions[bot]` |
+| 04:59:39 | Codex posts a **NEW issue comment** (id `6208438975`) | `/issues/284/comments` |
+| 04:59:42 | `codex-monitor` run `38853449660`, `event=issue_comment`, **success** | the runs API |
+| 04:59:49 | `codex-flagged` **removed** | `timeline` → `unlabeled`, by `github-actions[bot]` |
+
+And the body is the exact shape that defeated the old match, read byte-for-byte:
+
+```
+<!-- codex-review-receipt:v1 -->
+<blank line>
+Codex Review: Didn't find any major issues. More of your lovely PRs please.
+```
+
+So the strip loop at `codex-monitor.yml:144-151` is what fired, and the removal at
+04:59:49 is the thing the pre-fix version could not do. **The label was genuinely
+set and is genuinely gone** — which is the one evidence shape the caution above
+says is not uninformative, because it is a state change and not a green tick.
+
+⚠️ **Two facts the paragraph above did not have, both needed before this could be
+observed at all:**
+1. **Only the CLEAN path posts a new issue comment.** Stated precisely, because
+   the first version of this line said "a clean verdict is a NEW comment; a
+   findings verdict is an EDIT", which reads as mutually exclusive and is not:
+
+   | verdict | summary comment `6208379760` | a new issue comment | a review |
+   |---|---|---|---|
+   | findings (04:56) | **edited** → `status: completed, has_any_findings: true` | **no** | `pull_request_review.submitted` + inline |
+   | clean (04:59) | **edited** → `status: completed, has_any_findings: false` | **yes** — `6208438975`, the all-clear | no |
+
+   **The summary is edited on BOTH.** What distinguishes them is the new comment,
+   which only the clean path sends — and that is exactly why
+   `issue_comment: [created]` is enough for it (the strip loop's whole reason)
+   while the flagged path has to be caught as `pull_request_review.submitted`.
+   Corroborated by the comment list: #284 holds exactly **two** Codex issue
+   comments across both verdicts, the summary and the all-clear.
+   The workflow's header already asserted this split; this is the first time both
+   halves were seen in one PR.
+2. **A clean verdict needs a PR that was flagged first**, and nothing in the
+   2026-10-15 session produced one — every merge beat its own reviewer (see the
+   `ready_for_review` finding above). The symptom was unobservable for a reason
+   that had nothing to do with the fix.
+
 **Everything else in the delta has no installed location** — `directives/test.md`
 (read live; see Phase 0 below), `plugins/directives-toolkit/**` (delivered by the
 plugin at next session start), and four of upstream's own repo files.
@@ -5077,7 +5245,8 @@ Stamp advanced to `bde28c9719f1`.
 
 ⚠️ **The forwarded `::notice::`/`::warning::` annotation finding is NOT adopted** —
 measured on the new template, which still uses a bare `echo`. It remains an unsent
-note in `.agent-reports/`, which is why the divergence row for `pages-retry.yml` was
+note at `docs/upstream-findings/pages-retry-annotations.md`, which is why the
+divergence row for `pages-retry.yml` was
 deleted (the file is verbatim, so there is no divergence) while the item stays on the
 owner's list.
 
