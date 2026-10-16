@@ -3868,6 +3868,55 @@ after merging**; and this repo's reviewer habitually lands **minutes after** a
 merge (`#258` was 3 minutes, this was ~5), so "merge now, catch the review
 later" is a real tactic only if the catching is done by hand.
 
+⚠️ **ONE THING IT GETS RIGHT AND ONE IT MISSES — MEASURED 2026-10-16, after a
+first attempt at this paragraph got both backwards.**
+
+**Right: "minutes after" is the correct magnitude.** The verdict lands
+**1m53s-4m22s** after `ready_for_review`, and every merge in the 2026-10-15
+session beat it by **1m51s-4m16s**:
+
+| PR | `ready_for_review` | verdict | merged | verdict lands |
+|---|---|---|---|---|
+| #279 | 19:20:05 | 19:24:14 (4m09s) | 19:20:11 | 4m03s AFTER the merge |
+| #280 | 19:24:36 | 19:26:29 (1m53s) | 19:24:38 | 1m51s after |
+| #281 | 21:13:21 | 21:15:53 (2m32s) | 21:13:42 | 2m11s after |
+| #282 | 21:24:22 | 21:28:44 (4m22s) | 21:24:28 | 4m16s after |
+| #283 | 23:23:50 | 23:27:47 (3m57s) | 23:24:04 | 3m43s after |
+
+**Missed: a DRAFT IS NEVER REVIEWED.** The trigger is `ready_for_review`, not
+opening the PR — stated in Codex's own comment ("Reviews are triggered when you
+open a pull request for review, mark a draft as ready, comment @codex review")
+and confirmed by **#279 sitting as a draft for 12h35m and drawing no review at
+all**. So this repo's convention of opening every PR as a draft means the clock
+does not start until the un-draft, and the wait must come after it.
+
+⛔ **AND HERE IS THE TRAP, WHICH COST THIS PARAGRAPH ONE WRONG VERSION:**
+polling for "has a Codex comment appeared?" returns **true in 9-18 seconds**,
+and that comment is **not the verdict** — it reads `status: "running"`,
+`has_any_findings: null`, and Codex then **UPDATES THE SAME COMMENT** with its
+result. So `created_at` measures the acknowledgement and `updated_at` measures
+the verdict, and the first version of this section published the 9-18s figures
+as the review time and declared the repo's own "minutes after" record wrong. It
+was not wrong. **A comment's existence is not its content.**
+
+✅ **So poll the embedded state, not the comment.** The body carries
+`<!-- codex-review-state:v1 {...} -->`, whose `code_review.status` goes
+`running` → `completed` and whose `has_any_findings` is the verdict. Positive
+control: **#281 reads `has_any_findings: true, has_unresolved_findings: true`**,
+which is the P2 that was genuinely there, while the other four read `false` —
+so the field means what it says.
+
+**The remedy, with the right number in it:**
+
+> **un-draft, poll `codex-review-state:v1` until `status == "completed"`
+> (budget ~5 minutes), read `has_any_findings`, then merge.**
+
+⚠️ The hand-fetch rule above still stays — it is what found #268's four findings
+and #281's P2 on already-merged PRs. But it is a **recovery**, and the gate was
+available the whole time: four of those five merges were a `ready_for_review`
+and a squash within **two to twelve seconds** of each other, which cannot be
+reviewed by anything.
+
 ### ⚠️ Recorded — S10 spends real money on every Pages deploy
 
 `qa-live` runs after each Pages deploy with `retries: 1`, and S10 asks a real
