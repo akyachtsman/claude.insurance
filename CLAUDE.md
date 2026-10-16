@@ -5018,6 +5018,70 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
 
+### ⚠️ A REPORT ADDRESSED TO A PEER SESSION HAS NO MAILBOX, AND A GITIGNORED FILE DIES WITH THE SESSION (2026-10-16)
+
+Two upstream reports were written on 2026-10-15 — the `kit_dir_kept()` binding
+gap and the `pages-retry.yml` annotations suggestion — and both sat in
+`.agent-reports/`, which is **gitignored**, addressed to a peer session (`DIR9`)
+that was **not running**. `ListAgents` returns no peers and a `SendMessage` to a
+session that does not exist is refused, so there was nothing to deliver to and
+nothing on disk that would survive the session. A finding carefully measured
+over three rounds had a half-life of one context window.
+
+**Fixed structurally, not by remembering:** they are committed at
+`docs/upstream-findings/`, whose README carries the lifecycle (written → sent →
+deleted on adoption) and the reason the directory is not `.agent-reports/`.
+`raw.githubusercontent.com` and git transport both work from a session
+(measured), so any later session can read them; general HTTPS does not, which is
+why those two are the only channels named.
+
+⚠️ **This is STORAGE, NOT DELIVERY, and the README says so in its own last
+section.** Each note is still owed to `claude.directives`, and this repo's
+sessions cannot open an issue there — `global.md` → *Repository Scope* makes READ
+unrestricted for a public repo and **ACT** hard-limited to this one. So the send
+is the owner's, or a session running in that repository's own scope. Committing
+the note must not be read as closing the item.
+
+⚠️ **BOTH NOTES WERE RE-MEASURED BEFORE PUBLISHING, AND ONE WAS WRONG.** The
+`pages-retry.yml` note quoted `$newest` — the variable name from this repo's
+**pre-adoption** local version — where the template uses `$counting`, and cited
+a blob (`8b903a7`) the file had already moved past twice. A note quoting a name
+the file does not use reads as describing a different file, which is this repo's
+most-repeated defect pointed at somebody else's code. Every quotation now names
+the upstream head it was taken from, and the README makes re-reading the template
+a precondition of sending.
+
+**What the re-measurement established**, against upstream `main` =
+`e78b6dd58796b4aa68056fb99e2416ed8f8d8f88` (git transport, 2026-10-16):
+
+| claim | result |
+|---|---|
+| `kit_dir_kept()` still selects on `.tree` alone | **still open** — and at every cached head from `5342fa9` to `e78b6dd`, so not a transient |
+| `pages-retry.yml` still plain `echo` on the stand-down (line 170) | **still open** |
+| the same file already uses `::error::` on its give-up path (line 183) | **true** — the precedent is in the file, which is a stronger argument than the note originally made |
+
+⚠️ **AND UPSTREAM HAS MOVED PAST THIS REPO'S STAMP AGAIN — by exactly ONE
+commit, `e78b6dd` (#459), within hours of the last of three refreshes.** The
+substantive delta is a **fourth** correction to the `pages-retry.yml`
+obsolescence check (`claude.trading#337`, cited in the template's own comment): a
+newer **failed** run now counts only while `run_attempt < 4`, because a newer
+failure on its last attempt starts no retry, so standing down for it left
+**both** runs unretried. This repo does not have that fix. It is a template
+delta, so it belongs to the next `/refresh-repo` rather than to a hand-edit —
+recorded here so the next session does not have to rediscover that the stamp is
+stale.
+⚠️ **AND THE FIRST VERSION OF THAT SENTENCE HAD THE ORDER WRONG**, written
+minutes after the paragraph above about not quoting what you have not re-read.
+It read `bde28c9719f1` → `f0e2838` → `e78b6dd`, inferring the middle from an
+earlier note in this file that said "upstream having moved to `f0e2838`".
+Measured on the fetched history: the order is `f680dd3` → **`f0e2838` (#457)** →
+**`bde28c9` (#458)** → **`e78b6dd` (#459)**, so `f0e2838` is *older* than this
+repo's stamp and was already taken. Three commits of drift claimed where there
+is one. **An ordering is a measurement, not a recollection** — `git log` settles
+it in one call, and the shallow depth-1 fetch that answered the "is it still
+open?" question cannot answer this one, which is why it has to be deepened
+before an ancestry claim is written.
+
 ### ✅ Rulebook synced 2026-10-15 to `bde28c9719f1` — two upstream BUG FIXES, both taken
 
 Third `/refresh-repo` of the day, `f680dd3` → `bde28c9719f1` (10 files). Unlike the
