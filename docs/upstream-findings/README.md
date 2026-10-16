@@ -68,6 +68,24 @@ those three said the finding **"is reported upstream"**, of a note that had neve
 left the repository. *A note's existence is not its delivery*, which is the same
 mistake as the section below, made by the pointers rather than by the reader.
 
+⚠️ **AND THE SAME RULE APPLIES TO THE STATUS, WHICH THIS SECTION DID NOT SAY —
+so it happened again one PR later.** On 2026-10-16 the notes' statuses moved to
+SENT and **four** records kept asserting the old one: this file's closing section,
+two places in `CLAUDE.md`, and `.claude/directive-sync.json`'s `local_tree_note`.
+The paths were all correct; only the statuses were stale, so a path grep came back
+clean. Codex #285 (P2) named the consequence: an owner or a later refresh
+following any of them **resends an already-accepted report**.
+
+So the check is two greps, not one:
+
+```
+grep -rn '<old path>'   --include=*.md --include=*.json .
+grep -rniE 'not yet sent|still owed|unsent' --include=*.md --include=*.json .
+```
+
+**A status asserted in N places moves in N places.** The canonical note is one of
+them, never all of them.
+
 ## The channel is a human relay, and that is measured
 
 Reaching the upstream session is **not** a `SendMessage` away, and three attempts
@@ -92,8 +110,14 @@ chasing it cost a turn. The cause is in the table above.
 
 ## Not a substitute for sending it
 
-Committing a note is storage, not delivery. Each one is still owed to
-`claude.directives`, and this repository's sessions cannot open an issue there —
-`global.md` → *Repository Scope* makes READ unrestricted for a public repo and
-ACT hard-limited to this one. So the send is the owner's, or a session running
-in that repository's own scope.
+Committing a note is storage, not delivery, and this repository's sessions cannot
+open an issue upstream — `global.md` → *Repository Scope* makes READ unrestricted
+for a public repo and ACT hard-limited to this one. So the send is the owner's, or
+a session running in that repository's own scope.
+
+⚠️ **This section read "each one is still owed" after both had been sent and
+answered.** A note's `**Status:**` line is the canonical record; this paragraph,
+`CLAUDE.md` and `.claude/directive-sync.json` all also assert a status, and all
+three were left behind. **When a status changes, grep for the old status, not only
+for the old path** — see the section above, which had only ever been written about
+paths.

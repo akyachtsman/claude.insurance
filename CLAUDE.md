@@ -4999,8 +4999,11 @@ hash is recorded anyway, because it is the value a future reader needs to re-rev
 entry by hand — but it is labelled in the record as **read by nothing today**, which is
 the honest form.
 **The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
-and is written up for upstream — ⚠️ **WRITTEN, NOT YET SENT** — at
-`docs/upstream-findings/kit-dir-local-guard.md`.
+and was ✅ **SENT 2026-10-16 and ACCEPTED** (batched, not shipped — so the gap is
+still LIVE here) at `docs/upstream-findings/kit-dir-local-guard.md`.
+⚠️ **Do not re-send it.** This line read "WRITTEN, NOT YET SENT" after the send
+had happened and been answered; an owner or a refresh following it would have
+resent an already-accepted report.
 ⚠️ This line said "**is reported there**", of a note that had never left this
 repository, and pointed at `.agent-reports/`, which is gitignored and so was not
 in the tree at all. Both halves are the same defect: *a note's existence read as
@@ -5090,12 +5093,15 @@ deleted on adoption) and the reason the directory is not `.agent-reports/`.
 (measured), so any later session can read them; general HTTPS does not, which is
 why those two are the only channels named.
 
-⚠️ **This is STORAGE, NOT DELIVERY, and the README says so in its own last
-section.** Each note is still owed to `claude.directives`, and this repo's
-sessions cannot open an issue there — `global.md` → *Repository Scope* makes READ
-unrestricted for a public repo and **ACT** hard-limited to this one. So the send
-is the owner's, or a session running in that repository's own scope. Committing
-the note must not be read as closing the item.
+⚠️ **This is STORAGE, NOT DELIVERY** — committing a note must not be read as
+closing the item, and a session here cannot open an issue upstream
+(`global.md` → *Repository Scope*: READ unrestricted for a public repo, **ACT**
+hard-limited to this one), so the send is the owner's or a session in that repo's
+own scope.
+✅ **Both of these notes WERE sent, on 2026-10-16, and answered** — see the
+outcomes section above. This paragraph read "each note is still owed" afterwards,
+which is the live-pointer half of the same defect: the status of a report lives in
+more than one place, and moving the canonical note is not moving the status.
 
 ⚠️ **BOTH NOTES WERE RE-MEASURED BEFORE PUBLISHING, AND ONE WAS WRONG.** The
 `pages-retry.yml` note quoted `$newest` — the variable name from this repo's
@@ -5192,18 +5198,41 @@ reload; navigate away and back with no reload; full reload; a **fresh browser
 context**; and every other screen showing the same data — reported as a **grid in
 the PR body**, where *"a missing cell is not a pass"*.
 
-⛔ **AND THIS APP IS ALREADY DOCUMENTED TO FAIL CHECKPOINT 3.** The rule's third
-checkpoint is "navigate elsewhere in the app and back, with no reload", and
-*deleting the duplicate subscriber also dropped a refetch-on-refocus* above
-records in terms that this app deliberately stopped doing that: *"the cache now
-lives for the length of the login (or until a write) … a broker-written policy
-change shows up after a reload or a local write, not after switching tabs and
-back."* Checkpoint 6 is at risk for the same reason, and the open
-*a failed Keep read renders an EMPTY Keep, and caches it* defect is a second
-route to a stale cell. So the first persistence grid run here is expected to go
-red on a KNOWN, RECORDED behaviour rather than on a new bug — which is the useful
-outcome, and is why this is written down before anyone runs it and reads the red
-as a regression.
+⛔ **DO NOT PRE-CLASSIFY ANY CHECKPOINT AS A KNOWN FAILURE — and the first
+version of this section did exactly that, wrongly.** It claimed the app was
+"already documented to fail checkpoint 3", citing *deleting the duplicate
+subscriber also dropped a refetch-on-refocus*. **That citation does not reach
+this rule**, and the quotation disqualifies itself: the cache lives for the length
+of the login *"(or until a write)"* — and a client's own Save **is** a write. I
+quoted the parenthesis and reasoned straight past it.
+
+Measured in `js/supabase.js` rather than recalled: every client write path either
+clears the cache or updates it in place —
+
+| path | cache |
+|---|---|
+| `addEntity` | `invalidate()` |
+| `addRelationship` | `invalidate()` |
+| `addAsset` | `invalidate()` |
+| `savePrefs` | writes `cache.prefs` in place |
+
+and the add-form handlers reload before navigating. So checkpoint 3 — *the
+operation the user just saved in this session* — has a cleared or freshened cache
+under it, and a red cell there would be **new evidence**, not this recorded
+behaviour. The refocus staleness is about an **out-of-band broker** change with
+no local write in between, which is not what any of the six checkpoints asks.
+
+⚠️ **The harm of the version this replaces is the reason it is recorded rather
+than quietly deleted:** labelling a cell "expected red" in advance is an
+instruction to dismiss a genuine persistence regression. That is worse than
+saying nothing, and it is the one failure mode a gate like this cannot survive.
+Found by Codex on #285 (P2).
+
+**What IS worth carrying into a grid run**, stated as a thing to check and not a
+prediction: the open *a failed Keep read renders an EMPTY Keep, and caches it*
+defect means a read that fails *during* a checkpoint navigation yields an empty
+portal that is then cached. If a cell does go red, that is the first hypothesis
+to test — conditional on a failed read, not expected on a healthy one.
 
 ⚠️ **No exemption is available on the obvious ground.** The rule names it
 explicitly: *"Auth-gated or backend-backed screens are not exempt because a local
