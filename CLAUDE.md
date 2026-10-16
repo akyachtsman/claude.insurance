@@ -5202,11 +5202,23 @@ says is not uninformative, because it is a state change and not a green tick.
 
 ⚠️ **Two facts the paragraph above did not have, both needed before this could be
 observed at all:**
-1. **A clean verdict is a NEW comment; a findings verdict is an EDIT to the running
-   summary.** That is why `issue_comment: [created]` is enough for the clean path
-   (the strip loop's whole reason) while the flagged path arrives as
-   `pull_request_review.submitted`. The workflow's header already asserted this
-   split; this is the first time both halves were seen in one PR.
+1. **Only the CLEAN path posts a new issue comment.** Stated precisely, because
+   the first version of this line said "a clean verdict is a NEW comment; a
+   findings verdict is an EDIT", which reads as mutually exclusive and is not:
+
+   | verdict | summary comment `6208379760` | a new issue comment | a review |
+   |---|---|---|---|
+   | findings (04:56) | **edited** → `status: completed, has_any_findings: true` | **no** | `pull_request_review.submitted` + inline |
+   | clean (04:59) | **edited** → `status: completed, has_any_findings: false` | **yes** — `6208438975`, the all-clear | no |
+
+   **The summary is edited on BOTH.** What distinguishes them is the new comment,
+   which only the clean path sends — and that is exactly why
+   `issue_comment: [created]` is enough for it (the strip loop's whole reason)
+   while the flagged path has to be caught as `pull_request_review.submitted`.
+   Corroborated by the comment list: #284 holds exactly **two** Codex issue
+   comments across both verdicts, the summary and the all-clear.
+   The workflow's header already asserted this split; this is the first time both
+   halves were seen in one PR.
 2. **A clean verdict needs a PR that was flagged first**, and nothing in the
    2026-10-15 session produced one — every merge beat its own reviewer (see the
    `ready_for_review` finding above). The symptom was unobservable for a reason
