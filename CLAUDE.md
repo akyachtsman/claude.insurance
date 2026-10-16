@@ -5175,6 +5175,43 @@ precondition is present and the fix is taken", not "we were broken". Stating it 
 weaker way on purpose: a success from this workflow is uninformative by upstream's own
 account, so *"our runs went green"* would have been the wrong evidence either way.
 
+✅ **NOW OBSERVED — MEASURED END TO END ON #284, 2026-10-16.** The paragraph above
+is kept because its caution was right; this is the measurement it was waiting for.
+A findings review set the label and a clean verdict cleared it, in one PR, four
+minutes apart:
+
+| time | event | source |
+|---|---|---|
+| 04:56:12 | `codex-flagged` **applied** | `/issues/284/timeline` → `labeled`, by `github-actions[bot]` |
+| 04:59:39 | Codex posts a **NEW issue comment** (id `6208438975`) | `/issues/284/comments` |
+| 04:59:42 | `codex-monitor` run `38853449660`, `event=issue_comment`, **success** | the runs API |
+| 04:59:49 | `codex-flagged` **removed** | `timeline` → `unlabeled`, by `github-actions[bot]` |
+
+And the body is the exact shape that defeated the old match, read byte-for-byte:
+
+```
+<!-- codex-review-receipt:v1 -->
+<blank line>
+Codex Review: Didn't find any major issues. More of your lovely PRs please.
+```
+
+So the strip loop at `codex-monitor.yml:144-151` is what fired, and the removal at
+04:59:49 is the thing the pre-fix version could not do. **The label was genuinely
+set and is genuinely gone** — which is the one evidence shape the caution above
+says is not uninformative, because it is a state change and not a green tick.
+
+⚠️ **Two facts the paragraph above did not have, both needed before this could be
+observed at all:**
+1. **A clean verdict is a NEW comment; a findings verdict is an EDIT to the running
+   summary.** That is why `issue_comment: [created]` is enough for the clean path
+   (the strip loop's whole reason) while the flagged path arrives as
+   `pull_request_review.submitted`. The workflow's header already asserted this
+   split; this is the first time both halves were seen in one PR.
+2. **A clean verdict needs a PR that was flagged first**, and nothing in the
+   2026-10-15 session produced one — every merge beat its own reviewer (see the
+   `ready_for_review` finding above). The symptom was unobservable for a reason
+   that had nothing to do with the fix.
+
 **Everything else in the delta has no installed location** — `directives/test.md`
 (read live; see Phase 0 below), `plugins/directives-toolkit/**` (delivered by the
 plugin at next session start), and four of upstream's own repo files.
