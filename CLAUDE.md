@@ -301,8 +301,9 @@ This is the one to follow; the others defer to it.
    `where` field names the stage (`guide`, `records`, `reserve`, `provider`,
    `model`, `settings`, `release`, since 2026-10-14 **`answer`**, and since
    2026-10-19 **`keys`** — which variable supplied each API key, emitted at
-   boot and only when the LEGACY variable did not answer, so a line there
-   means the key-name cutover has happened).
+   boot and gated on `source !== "keyset"`, so a line there means that key is
+   still resolving from the LEGACY variable and SILENCE means the migration is
+   done. ⚠️ Not the other way round: this list said so for one commit.)
 
 ### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
 
@@ -4275,7 +4276,7 @@ returned 16 against those docs, because the singular is a **substring of the
 plural**. A grep that cannot distinguish the wrong name from the right one is not
 a check — the counts have to come from the full name, or from reading the prose.
 
-**What shipped.** `resolveSupabaseKey(legacyRaw, keySetRaw, keyName)` in
+**What shipped.** `resolveSupabaseKey(keySetRaw, legacyRaw, keyName)` in
 `handler.ts`, called twice from `index.ts`. It is **in `handler.ts` on purpose**:
 that file's own header says the logic does not live in `index.ts` because `jsr:`
 and `npm:` specifiers stop Node executing it, and a review's mutation test once
@@ -4321,14 +4322,28 @@ credential against the live gateway is NOT proven** — see point 2 — so the f
 real exercise of it is the cutover itself, which is why the boot log below
 exists.
 
-**A boot log, so the transition cannot be silent.** `where: "keys"` is emitted
-once per isolate and **only when the legacy variable did not answer**, so silence
-is the normal case today and a line means something moved. It carries
-`{which, source}` and **never a key value** — these lines come from inside the
-safety boundary, the same rule as `where: "answer"`, and a pinned test fails on
-any reference to the key. `source` distinguishes `none` (neither variable set)
-from `unreadable` (a key set was present and yielded nothing usable), because
-FR-17 flattens "not configured yet" and "configured wrong" into one notice.
+**A boot log, so being left on the old credential cannot be silent.**
+`where: "keys"` is emitted once per isolate, gated on `source !== "keyset"` —
+i.e. **a line is a DEPRECATION WARNING** saying this key kind is still resolving
+from the legacy variable (or from nothing), and **silence means the key set
+answered and the migration is done.**
+⚠️ **This paragraph said the exact opposite for one commit** — "only when the
+legacy variable did not answer … a line means something moved" — which was true
+of the legacy-first design and inverted by the flip. Codex (#286) named the harm
+precisely: an operator would read a deprecation warning as proof the cutover
+succeeded and leave the function on legacy keys past the deadline, which is the
+failure this whole change exists to prevent. It is now gated by a test rather
+than by proofreading (see below).
+It carries `{which, source, keySetProblem}` and **never a key value** — these
+lines come from inside the safety boundary, the same rule as `where: "answer"`,
+and a pinned test fails on any reference to the key. `keySetProblem`
+distinguishes `absent` (no key of that kind created yet → create one) from
+`unreadable` (one exists and is malformed → fix it), because FR-17 flattens both
+into the same notice.
+⚠️ **The gate is on the DESIRED end state, not the deprecated one.** Keying it on
+`source !== "legacy"` would go quiet for a malformed key set with no legacy
+fallback — the worst state of all — so silence has to mean "clean keyset", never
+merely "not legacy".
 
 ⚠️ **Mutation-tested 9 of 10, with the survivor labelled as a survivor in the
 code.** Caught: the swapped argument order (which inverts the precedence while

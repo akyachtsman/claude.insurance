@@ -599,3 +599,74 @@ test("the key-source log carries a cause, never a key", () => {
   assert.ok(!/\br\.key\b|SERVICE_KEY|ANON_KEY/.test(loop),
     "the key-source log references a key VALUE — log the source, never the key");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLAUDE.md'S CLAIMS ABOUT THE KEY RESOLVER, GATED MECHANICALLY
+//
+// ⚠️ THREE CONSECUTIVE REVIEW ROUNDS ON THIS CHANGE FOUND THE DOCUMENTATION,
+// NOT THE CODE. CLAUDE.md records exactly this for PR #256 (rounds 23-27: ten
+// findings, nine of them a sentence claiming more than it could) and the
+// conclusion it drew — "prose that nothing checks is the least reliable artefact
+// in the repo … the answer that finally worked was to gate the claims
+// mechanically" — was available the whole time and not applied here until the
+// third round. These two assertions are that gate.
+//
+// They check the two claims an operator ACTS on: the signature a maintainer
+// would copy for a new call site, and which way round the boot log reads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const claudeMd = readFileSync(join(here, "../../../CLAUDE.md"), "utf8");
+
+test("CLAUDE.md documents resolveSupabaseKey's REAL parameter order", () => {
+  // Codex #286: the record said `(legacyRaw, keySetRaw, keyName)` after the flip.
+  // A maintainer following it for another call site would try to JSON.parse the
+  // legacy JWT and then use the whole key-set JSON string as the fallback key,
+  // breaking every request whenever both variables exist.
+  const decl = /export function resolveSupabaseKey\(([\s\S]*?)\):/.exec(fnSrc);
+  assert.ok(decl, "resolveSupabaseKey's declaration is no longer parseable here");
+  const real = decl[1]
+    .split(",")
+    .map((p) => (p.split(":")[0] || "").trim())
+    .filter(Boolean);
+  assert.deepEqual(real, ["keySetRaw", "legacyRaw", "keyName"],
+    "the resolver's parameters changed — update this assertion AND CLAUDE.md together");
+
+  const documented = [...claudeMd.matchAll(/`resolveSupabaseKey\(([^`)]*)\)`/g)]
+    .map((m) => m[1].split(",").map((x) => x.trim()).filter(Boolean));
+  assert.ok(documented.length > 0, "CLAUDE.md no longer documents the signature");
+  for (const sig of documented) {
+    assert.deepEqual(sig, real,
+      `CLAUDE.md documents resolveSupabaseKey(${sig.join(", ")}) but the real ` +
+      `order is (${real.join(", ")}) — a maintainer copying it would parse the ` +
+      `legacy JWT as JSON and use the key-set string as a key`);
+  }
+});
+
+test("CLAUDE.md states the boot log's gate the way index.ts actually gates it", () => {
+  // Codex #286: after the flip, CLAUDE.md (in two places) still said a line meant
+  // the cutover had SUCCEEDED. It means the opposite — the key is still resolving
+  // from the deprecated variable. An operator reading it would take a deprecation
+  // warning as proof of migration and sail past the end-2026 deadline, which is
+  // the exact failure this change exists to prevent.
+  const gate = /r\.source\s*!==\s*"([a-z]+)"/.exec(idxSrc);
+  assert.ok(gate, "index.ts no longer gates the key-source log on r.source");
+  const real = gate[1];
+  assert.equal(real, "keyset",
+    "the log gate moved off `keyset` — silence must mean 'the key set answered', " +
+    "never merely 'not legacy', or a malformed key set with no fallback goes quiet");
+
+  // ⚠️ SCOPED TO THE PHRASE THAT MAKES THE CLAIM, not to the whole file. CLAUDE.md
+  // also contains `source !== "legacy"` as the example of what NOT to key on, so a
+  // bare containment check would pass even with the code flipped — vacuous, which
+  // is the defect this file records five times over.
+  const claims = [...claudeMd.matchAll(/gated on `source !== "([a-z]+)"`/g)].map((m) => m[1]);
+  assert.ok(claims.length >= 2,
+    `CLAUDE.md should state the gate where it describes the log and in the ` +
+    `where-stage list; found ${claims.length} statement(s)`);
+  for (const c of claims) {
+    assert.equal(c, real,
+      `CLAUDE.md says the log is gated on source !== "${c}" but index.ts gates ` +
+      `on "${real}" — the two readings are opposites, and the wrong one tells an ` +
+      `operator a deprecation warning is proof of a successful cutover`);
+  }
+});
