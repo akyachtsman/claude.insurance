@@ -492,3 +492,181 @@ test("the provider call carries no hardcoded model literal", () => {
     "model is a literal at the call site — the HELP_MODEL toggle is bypassed");
   assert.ok(/^\s*model,\s*$/m.test(body), "the resolved `model` is not passed to messages.create");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE API KEY FALLBACK'S WIRING IN index.ts
+//
+// ⚠️ A SOURCE SCAN, AND THAT LIMIT IS WHY IT EXISTS — the same reasoning as the
+// model toggle above. handler.test.mjs EXECUTES resolveSupabaseKey and proves
+// every branch; nothing there can see whether index.ts calls it, or with the
+// arguments in the order the precedence depends on. Only a scan can.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("index.ts reads both generations of API key variable", () => {
+  // The new names are PLURAL. A singular spelling reads as absent, which makes
+  // HAS_KEYS false at the cutover — the quiet death this fallback exists to stop.
+  for (const name of [
+    "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY",
+    "SUPABASE_SECRET_KEYS", "SUPABASE_PUBLISHABLE_KEYS",
+  ]) {
+    assert.ok(
+      new RegExp(`Deno\\.env\\.get\\(\\s*"${name}"\\s*\\)`).test(idxSrc),
+      `index.ts does not read ${name}`);
+  }
+  // And not the singular forms, which are not what the platform injects.
+  for (const wrong of ["SUPABASE_SECRET_KEY", "SUPABASE_PUBLISHABLE_KEY"]) {
+    assert.ok(
+      !new RegExp(`Deno\\.env\\.get\\(\\s*"${wrong}"\\s*\\)`).test(idxSrc),
+      `index.ts reads ${wrong}, which the platform does not set — the plural ` +
+      `${wrong}S is the real variable`);
+  }
+});
+
+test("both keys go through resolveSupabaseKey, KEY SET argument FIRST", () => {
+  // ⚠️ THE ARGUMENT ORDER IS THE DECISION, AND THIS IS THE ONLY GATE ON IT.
+  // Swapping the two arguments inverts the precedence and EVERY executed
+  // resolver test still passes, because the resolver itself is unchanged.
+  // It shipped the wrong way round once already (Codex #286, P1): legacy keys
+  // are deactivated rather than deleted, so the legacy variable probably keeps
+  // its rejected value and a legacy-first resolver would never fall through --
+  // leaving the fallback inert and the desk dying quietly on a date anyway.
+  const pairs = [
+    ["SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY"],
+    ["SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY"],
+  ];
+  const calls = [...idxSrc.matchAll(/resolveSupabaseKey\(([\s\S]*?)\)\s*;/g)].map((m) => m[1]);
+  assert.equal(calls.length, 2,
+    `expected exactly 2 resolveSupabaseKey call sites, found ${calls.length}`);
+  for (const [keySet, legacy] of pairs) {
+    const call = calls.find((c) => c.includes(legacy) && c.includes(keySet));
+    assert.ok(call, `no resolveSupabaseKey call pairs ${keySet} with ${legacy}`);
+    assert.ok(call.indexOf(keySet) < call.indexOf(legacy),
+      `${legacy} is passed before ${keySet} -- that inverts the precedence. A ` +
+      `deactivated legacy key is still PRESENT, so legacy-first never falls ` +
+      `through and the fallback is inert; see resolveSupabaseKey in handler.ts`);
+  }
+});
+
+test("the resolver is not bypassed for either key", () => {
+  // A bare `?? ""` read back into SERVICE_KEY/ANON_KEY restores the original
+  // behaviour with the resolver still present and every other assertion green.
+  for (const binding of ["SERVICE_KEY", "ANON_KEY"]) {
+    const decl = new RegExp(`const ${binding}\\s*=\\s*([^;]+);`).exec(idxSrc);
+    assert.ok(decl, `${binding} must be declared at module scope`);
+    assert.ok(!/Deno\.env\.get/.test(decl[1]),
+      `${binding} reads the environment directly, bypassing the fallback — ` +
+      `it must come from a resolveSupabaseKey result`);
+  }
+  // HAS_KEYS must still be what decides, from those two bindings.
+  const at = idxSrc.search(/const HAS_KEYS\s*=/);
+  const hk = idxSrc.slice(at, idxSrc.indexOf(";", at) + 1);
+  for (const binding of ["SERVICE_KEY", "ANON_KEY"]) {
+    assert.ok(hk.includes(binding), `HAS_KEYS no longer depends on ${binding}`);
+  }
+});
+
+test("the key-source log carries a cause, never a key", () => {
+  // These lines are emitted from inside the safety boundary, so the rule is the
+  // same as `where: "answer"`: a cause, never content. A key value in a log is a
+  // credential in a log.
+  // ⚠️ SCOPED TO THE EMITTING LOOP, brace-matched — not a character window. The
+  // first version took 400 chars either side of the marker and FAILED on this
+  // repo's own correct code, because `const SERVICE_KEY = SECRET.key;` sits just
+  // above and legitimately names both a binding and `.key`. A neighbourhood is
+  // not a scope; this file records that defect five times already.
+  const at = idxSrc.indexOf('where: "keys"');
+  assert.ok(at > 0, "the key-source log line is gone");
+  const forAt = idxSrc.lastIndexOf("for (", at);
+  assert.ok(forAt > 0, "the key-source log is not inside a loop any more");
+  let depth = 0, end = -1;
+  for (let i = idxSrc.indexOf("{", forAt); i < idxSrc.length; i++) {
+    if (idxSrc[i] === "{") depth++;
+    else if (idxSrc[i] === "}" && --depth === 0) { end = i + 1; break; }
+  }
+  assert.ok(end > forAt, "could not delimit the key-source loop");
+  const loop = idxSrc.slice(forAt, end);
+  assert.ok(/source/.test(loop), "the log must name which variable answered");
+  assert.ok(/keySetProblem/.test(loop),
+    "the log must distinguish an ABSENT key set from an UNREADABLE one -- " +
+    "\"create a secret key\" and \"fix the malformed dictionary\" are different " +
+    "actions, and FR-17 renders both as the same notice");
+  // Gated on the DESIRED end state, not on the deprecated one: silence must mean
+  // "already on the supported credential". Keying it on !== "legacy" would go
+  // quiet for a malformed key set with no legacy fallback, which is the worst
+  // state of all.
+  assert.ok(/!==\s*"keyset"/.test(loop),
+    "the log must fire whenever the new key set did not answer cleanly");
+  assert.ok(!/\br\.key\b|SERVICE_KEY|ANON_KEY/.test(loop),
+    "the key-source log references a key VALUE — log the source, never the key");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLAUDE.md'S CLAIMS ABOUT THE KEY RESOLVER, GATED MECHANICALLY
+//
+// ⚠️ THREE CONSECUTIVE REVIEW ROUNDS ON THIS CHANGE FOUND THE DOCUMENTATION,
+// NOT THE CODE. CLAUDE.md records exactly this for PR #256 (rounds 23-27: ten
+// findings, nine of them a sentence claiming more than it could) and the
+// conclusion it drew — "prose that nothing checks is the least reliable artefact
+// in the repo … the answer that finally worked was to gate the claims
+// mechanically" — was available the whole time and not applied here until the
+// third round. These two assertions are that gate.
+//
+// They check the two claims an operator ACTS on: the signature a maintainer
+// would copy for a new call site, and which way round the boot log reads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const claudeMd = readFileSync(join(here, "../../../CLAUDE.md"), "utf8");
+
+test("CLAUDE.md documents resolveSupabaseKey's REAL parameter order", () => {
+  // Codex #286: the record said `(legacyRaw, keySetRaw, keyName)` after the flip.
+  // A maintainer following it for another call site would try to JSON.parse the
+  // legacy JWT and then use the whole key-set JSON string as the fallback key,
+  // breaking every request whenever both variables exist.
+  const decl = /export function resolveSupabaseKey\(([\s\S]*?)\):/.exec(fnSrc);
+  assert.ok(decl, "resolveSupabaseKey's declaration is no longer parseable here");
+  const real = decl[1]
+    .split(",")
+    .map((p) => (p.split(":")[0] || "").trim())
+    .filter(Boolean);
+  assert.deepEqual(real, ["keySetRaw", "legacyRaw", "keyName"],
+    "the resolver's parameters changed — update this assertion AND CLAUDE.md together");
+
+  const documented = [...claudeMd.matchAll(/`resolveSupabaseKey\(([^`)]*)\)`/g)]
+    .map((m) => m[1].split(",").map((x) => x.trim()).filter(Boolean));
+  assert.ok(documented.length > 0, "CLAUDE.md no longer documents the signature");
+  for (const sig of documented) {
+    assert.deepEqual(sig, real,
+      `CLAUDE.md documents resolveSupabaseKey(${sig.join(", ")}) but the real ` +
+      `order is (${real.join(", ")}) — a maintainer copying it would parse the ` +
+      `legacy JWT as JSON and use the key-set string as a key`);
+  }
+});
+
+test("CLAUDE.md states the boot log's gate the way index.ts actually gates it", () => {
+  // Codex #286: after the flip, CLAUDE.md (in two places) still said a line meant
+  // the cutover had SUCCEEDED. It means the opposite — the key is still resolving
+  // from the deprecated variable. An operator reading it would take a deprecation
+  // warning as proof of migration and sail past the end-2026 deadline, which is
+  // the exact failure this change exists to prevent.
+  const gate = /r\.source\s*!==\s*"([a-z]+)"/.exec(idxSrc);
+  assert.ok(gate, "index.ts no longer gates the key-source log on r.source");
+  const real = gate[1];
+  assert.equal(real, "keyset",
+    "the log gate moved off `keyset` — silence must mean 'the key set answered', " +
+    "never merely 'not legacy', or a malformed key set with no fallback goes quiet");
+
+  // ⚠️ SCOPED TO THE PHRASE THAT MAKES THE CLAIM, not to the whole file. CLAUDE.md
+  // also contains `source !== "legacy"` as the example of what NOT to key on, so a
+  // bare containment check would pass even with the code flipped — vacuous, which
+  // is the defect this file records five times over.
+  const claims = [...claudeMd.matchAll(/gated on `source !== "([a-z]+)"`/g)].map((m) => m[1]);
+  assert.ok(claims.length >= 2,
+    `CLAUDE.md should state the gate where it describes the log and in the ` +
+    `where-stage list; found ${claims.length} statement(s)`);
+  for (const c of claims) {
+    assert.equal(c, real,
+      `CLAUDE.md says the log is gated on source !== "${c}" but index.ts gates ` +
+      `on "${real}" — the two readings are opposites, and the wrong one tells an ` +
+      `operator a deprecation warning is proof of a successful cutover`);
+  }
+});

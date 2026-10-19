@@ -186,6 +186,127 @@ export function resolveModel(raw: string | null | undefined): { model: string; r
     : { model: DEFAULT_HELP_MODEL, rejected: want };
 }
 
+// ── THE API KEYS, AND THE DATE THE LEGACY ONES STOP BEING ACCEPTED ──────────
+//
+// Supabase is replacing the legacy JWT API keys, and the two generations arrive
+// as DIFFERENT SHAPES of environment variable:
+//
+//   new     SUPABASE_PUBLISHABLE_KEYS / SUPABASE_SECRET_KEYS a JSON dictionary
+//           keyed by key name, e.g. {"default":"sb_secret_..."}
+//   legacy  SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY   a plain string
+//
+// Both read off Supabase's own docs on 2026-10-19 — Edge Functions ->
+// Environment Variables ("Default secrets") and the migrating-to-new-api-keys
+// guide — rather than recalled, because CLAUDE.md said to and because recall
+// would have got it wrong twice over: the new names are PLURAL and their values
+// are not strings. (A grep for the singular name "confirms" the plural one as a
+// substring, so even the check needs care.) That guide also gives the deadline:
+// "The legacy `anon` and `service_role` keys keep working until the end of 2026."
+//
+// ⚠️ WHY THIS IS WORSE THAN AN ORDINARY DEPRECATION. index.ts folds both keys
+// into HAS_KEYS, so if the legacy keys stop answering `hasKeys` goes false and
+// FR-17 renders that as the SAME quiet "not available" notice as an outage, a
+// missing Anthropic key, or an undeployed function. The desk would die on a
+// date, with nothing anywhere going red.
+//
+// ⚠️ THE NEW KEY SET IS PREFERRED AND LEGACY IS THE FALLBACK. The first version
+// of this had it the other way round, on the assumption that the legacy
+// variables would VANISH at the cutover so legacy-first would hand over
+// automatically. Codex (#286, P1) pointed out that this is unverified and
+// probably false, and the docs agree: legacy keys are DEACTIVATED, not deleted —
+// "You can re-activate them should you need to" (Auth → JWT Signing Keys FAQ) —
+// and the API Gateway validates the `apikey` header against the project's key
+// list, so a deactivated key is one that is still present and no longer
+// accepted. On that reading legacy-first never falls through at all, and the
+// whole change would have been inert: exactly the silent death it was written
+// to prevent.
+//
+// What settles the order is that it does not depend on resolving that question:
+//   - keyset-first is correct whether the legacy variable vanishes OR persists
+//     carrying a rejected value;
+//   - legacy-first is correct only in the first case.
+// A design that is right under both readings beats one that needs the right
+// guess, so the ambiguity is routed around rather than argued.
+//
+// ⚠️ AND ONE OF THE ORIGINAL ARGUMENTS FOR LEGACY-FIRST WAS SIMPLY MISREAD. It
+// cited the migration guide's warning that a key sent on `Authorization: Bearer`
+// is parsed as a JWT and rejected, which tells you to set `verify_jwt = false` —
+// a flag supabase/config.toml pins to TRUE here. That passage is about INVOKING
+// an Edge Function with a new-style key, i.e. the platform's inbound gateway
+// check. It says nothing about the outbound PostgREST clients built below, and
+// the browser already calls this very function with `apikey: sb_publishable_...`
+// and a real user JWT in `Authorization` under `verify_jwt: true`, which works.
+//
+// ⚠️ THE PUBLISHABLE HALF IS ALREADY PROVEN AGAINST THIS PROJECT, which is why
+// preferring it is not a leap: js/supabase.js ships `sb_publishable_...` in the
+// browser bundle today and the Keep signs in and reads under RLS with it. The
+// SECRET half is NOT proven — no session can invoke the deployed function
+// (HTTPS egress to the project is blocked) — so the fallback below is what keeps
+// a missing or malformed SUPABASE_SECRET_KEYS from taking the desk down, and the
+// boot log in index.ts is how the state is read back after a deploy.
+
+/** The name Supabase gives the first key of each kind in the new key sets. */
+export const DEFAULT_API_KEY_NAME = "default";
+
+/** Resolve one Supabase API key, preferring the new key set and falling back to
+ *  the legacy variable.
+ *
+ *  `source` is where the key actually came from. `keySetProblem` says why the
+ *  key set was not used — `absent` (unset) or `unreadable` (present but
+ *  yielding nothing usable: malformed JSON, not an object, or no usable entry
+ *  under `keyName`) — and is null only when the key set answered. The two are
+ *  reported separately because index.ts logs on anything other than a clean
+ *  `keyset`, and "no secret key has been created yet" needs a different action
+ *  from "the dictionary is malformed"; FR-17 would flatten both into one notice.
+ *
+ *  ⚠️ A BAD KEY SET NEVER TAKES DOWN A WORKING DEPLOYMENT: it falls through to
+ *  the legacy value if there is one. An empty `key` is the honest last resort,
+ *  not a crash — it makes HAS_KEYS false, which is the guard that stops
+ *  createClient throwing at module scope. */
+export function resolveSupabaseKey(
+  keySetRaw: string | null | undefined,
+  legacyRaw: string | null | undefined,
+  keyName: string = DEFAULT_API_KEY_NAME,
+): {
+  key: string;
+  source: "keyset" | "legacy" | "none";
+  keySetProblem: "absent" | "unreadable" | null;
+} {
+  const raw = (keySetRaw ?? "").trim();
+  const legacy = (legacyRaw ?? "").trim();
+  const fallback = (problem: "absent" | "unreadable") =>
+    legacy
+      ? { key: legacy, source: "legacy" as const, keySetProblem: problem }
+      : { key: "", source: "none" as const, keySetProblem: problem };
+
+  if (!raw) return fallback("absent");
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return fallback("unreadable");
+  }
+  // ⚠️ THE Array CHECK IS BELT, AND IT IS LABELLED AS A SURVIVOR BECAUSE IT IS
+  // ONE. Measured: deleting it fails nothing. Arrays are objects in JS, but JSON
+  // cannot give one a `default` property, so `parsed[keyName]` is undefined and
+  // the typeof check below returns the same answer anyway — that check is what
+  // holds the line. Kept because it states the intent at the point a future
+  // refactor of the value check would need it. The first version of this comment
+  // called it load-bearing while describing, in the same sentence, why it is not:
+  // the comment-overclaims-code defect this repo records more often than any
+  // other, written into the fix for a different one.
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fallback("unreadable");
+  }
+  const value = (parsed as Record<string, unknown>)[keyName];
+  // `typeof`, not truthiness: a non-string (a nested object, a number) would
+  // otherwise reach createClient and throw at module scope — the bare-500
+  // defect, with no CORS headers and no log line, that HAS_KEYS exists to stop.
+  if (typeof value !== "string" || !value.trim()) return fallback("unreadable");
+  return { key: value.trim(), source: "keyset", keySetProblem: null };
+}
+
 // ── THE STORED TIER, AND WHY IT IS READ ON EVERY ASK ─────────────────────────
 //
 // `help_settings` is the broker-facing half of the allow-list above: one row,

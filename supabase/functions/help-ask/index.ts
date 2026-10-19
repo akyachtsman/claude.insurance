@@ -36,12 +36,40 @@ import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
 // surprise. Version VERIFIED against the npm registry on 2026-10-06 (latest
 // 0.131.0) rather than recalled.
 import Anthropic from "npm:@anthropic-ai/sdk@0.131.0";
-import { handle } from "./handler.ts";
+import { handle, resolveSupabaseKey } from "./handler.ts";
 import type { HelpTopic } from "./prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+// New key set FIRST, legacy variable as the fallback. The shapes differ (JSON
+// dictionary vs plain string) and the ordering is a decision with the docs
+// behind it — both are documented at `resolveSupabaseKey` in handler.ts, which
+// is also where the branches are EXECUTED. This file cannot be run by Node, so
+// it reads the environment and nothing else.
+const SECRET = resolveSupabaseKey(
+  Deno.env.get("SUPABASE_SECRET_KEYS"),
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+);
+const PUBLISHABLE = resolveSupabaseKey(
+  Deno.env.get("SUPABASE_PUBLISHABLE_KEYS"),
+  Deno.env.get("SUPABASE_ANON_KEY"),
+);
+const SERVICE_KEY = SECRET.key;
+const ANON_KEY = PUBLISHABLE.key;
+// Once per isolate, and only when the new key set did NOT answer cleanly. It is
+// a DEPRECATION warning now, not a cutover notice: `source: "legacy"` with
+// `keySetProblem: "absent"` means no key of that kind has been created yet, and
+// that is the state to act on BEFORE the end of 2026 — whereas "unreadable"
+// means one exists and is malformed. Silence means the function is already on
+// the supported credential, which is the end state.
+// ⚠️ NEVER the key value: only which variable supplied it. These lines are
+// emitted from inside the safety boundary, like `where: "answer"`.
+for (const [which, r] of [["secret", SECRET], ["publishable", PUBLISHABLE]] as const) {
+  if (r.source !== "keyset") {
+    console.error(JSON.stringify({
+      where: "keys", which, source: r.source, keySetProblem: r.keySetProblem,
+    }));
+  }
+}
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const APP_URL = Deno.env.get("APP_URL") ?? "https://akyachtsman.github.io/claude.insurance";
 // OPTIONAL. Unset runs the default; an unrecognised value falls back to it and

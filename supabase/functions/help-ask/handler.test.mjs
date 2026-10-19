@@ -13,7 +13,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL } from "./handler.ts";
+import {
+  handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL,
+  resolveSupabaseKey, DEFAULT_API_KEY_NAME,
+} from "./handler.ts";
 
 // ── A PostgREST-shaped fake. It records every query it is asked to run, so a
 //    test can assert what was NOT scoped as easily as what came back.
@@ -1366,4 +1369,88 @@ test("the stored tier is read FRESH on every ask, never cached in the isolate", 
   tables.help_settings[0].model = "claude-haiku-5-5";
   const second = await sentModel({ tables });
   assert.equal(second.model, "claude-haiku-5-5", "the tier was cached across asks");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE API KEY RESOLVER (new key set -> legacy variable)
+//
+// EXECUTED, which is the point of it living in handler.ts rather than index.ts.
+// The legacy keys stop being accepted at the end of 2026; index.ts folds both
+// keys into HAS_KEYS, so the failure mode is the desk going quiet on a date
+// with nothing going red. These assertions are what stand behind the claim that
+// the fallback works, since no session can invoke the deployed function.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("the new key set wins over a present legacy variable", () => {
+  // ⚠️ THE ORDERING IS THE WHOLE FINDING (Codex #286 P1). Legacy keys are
+  // DEACTIVATED, not deleted, so the legacy variable probably keeps its now
+  // rejected value -- under legacy-first the fallback would never fire and this
+  // change would be inert. Keyset-first is correct whether the variable vanishes
+  // or persists; legacy-first only in the first case.
+  const r = resolveSupabaseKey('{"default":"sb_secret_new"}', "legacy-jwt-value");
+  assert.equal(r.key, "sb_secret_new");
+  assert.equal(r.source, "keyset");
+  assert.equal(r.keySetProblem, null);
+});
+
+test("the legacy variable answers while no key set exists", () => {
+  // Today's state for any key kind that has not been created yet: nothing
+  // changes, and the boot log says which one is still on the deprecated path.
+  const r = resolveSupabaseKey(undefined, "legacy-jwt-value");
+  assert.equal(r.key, "legacy-jwt-value");
+  assert.equal(r.source, "legacy");
+  assert.equal(r.keySetProblem, "absent");
+});
+
+test("a MALFORMED key set falls back rather than taking the desk down", () => {
+  // The safety property of this direction: preferring the key set must not mean
+  // a typo in it is fatal while a working legacy key sits right there.
+  for (const raw of ['{not json', '"sb_secret_abc"', '["sb_secret_abc"]', "null", "7",
+                     '{"billing":"sb_secret_abc"}', '{"default":"   "}',
+                     '{"default":{"k":"v"}}', '{"default":12345}']) {
+    const r = resolveSupabaseKey(raw, "legacy-jwt-value");
+    assert.equal(r.key, "legacy-jwt-value", `${raw}: must fall back to legacy`);
+    assert.equal(r.source, "legacy", `${raw}: source must say legacy`);
+    assert.equal(r.keySetProblem, "unreadable",
+      `${raw}: must be distinguishable from an absent key set`);
+  }
+});
+
+test("`absent` and `unreadable` stay distinguishable with no legacy either", () => {
+  // "no secret key created yet" needs a different action from "the dictionary is
+  // malformed", and FR-17 renders both as the same notice -- so the log line is
+  // the only place the difference can live.
+  const none = resolveSupabaseKey(undefined, undefined);
+  assert.deepEqual(none, { key: "", source: "none", keySetProblem: "absent" });
+  const bad = resolveSupabaseKey("{not json", "");
+  assert.deepEqual(bad, { key: "", source: "none", keySetProblem: "unreadable" });
+});
+
+test("a non-string `default` never reaches the caller as a key", () => {
+  // The specific harm: index.ts hands this straight to createClient at module
+  // scope, which throws before handle() can reach its hasKeys check -- the bare
+  // 500 with no CORS headers and no log line that HAS_KEYS exists to prevent.
+  const r = resolveSupabaseKey('{"default":{"nested":"x"}}', "");
+  assert.equal(typeof r.key, "string");
+  assert.equal(r.key, "");
+});
+
+test("surrounding whitespace is trimmed off both generations", () => {
+  assert.equal(resolveSupabaseKey('{"default":"  sb_secret_abc  "}', "").key, "sb_secret_abc");
+  assert.equal(resolveSupabaseKey("", "  legacy  ").key, "legacy");
+  // A whitespace-only key set is `absent`, not `unreadable` -- there is nothing
+  // malformed about it, and the action it calls for is "create one".
+  assert.equal(resolveSupabaseKey("   ", "legacy").keySetProblem, "absent");
+});
+
+test("a non-default key name can be read, and names the documented default", () => {
+  // Supabase's guide: every key lives in the same dictionary under its own name,
+  // and the first one is called `default`. Pinned so the constant cannot drift
+  // from the name the platform actually ships.
+  assert.equal(DEFAULT_API_KEY_NAME, "default");
+  const raw = '{"default":"sb_secret_d","billing":"sb_secret_b"}';
+  assert.equal(resolveSupabaseKey(raw, "", "billing").key, "sb_secret_b");
+  assert.equal(resolveSupabaseKey(raw, "").key, "sb_secret_d");
+  // A missing NAMED key falls back like any other unusable key set.
+  assert.equal(resolveSupabaseKey(raw, "legacy", "nope").source, "legacy");
 });

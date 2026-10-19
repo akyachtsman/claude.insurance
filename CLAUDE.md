@@ -299,7 +299,11 @@ This is the one to follow; the others defer to it.
    makes every failure look identical, so this is the only step that proves the
    deploy worked.) If it still shows the notice, read the function logs: the
    `where` field names the stage (`guide`, `records`, `reserve`, `provider`,
-   `model`, `settings`, `release`, and since 2026-10-14 **`answer`**).
+   `model`, `settings`, `release`, since 2026-10-14 **`answer`**, and since
+   2026-10-19 **`keys`** — which variable supplied each API key, emitted at
+   boot and gated on `source !== "keyset"`, so a line there means that key is
+   still resolving from the LEGACY variable and SILENCE means the migration is
+   done. ⚠️ Not the other way round: this list said so for one commit.)
 
 ### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
 
@@ -4244,15 +4248,145 @@ timed Opus 5.5 against this budget. Streaming would remove the cliff entirely an
 is the fix if owner-gate step 8 or early use shows timeouts. Worth watching in the
 function logs for `where: "provider"` with no status.
 
-### ⚠️ Recorded — `help-ask` reads only the LEGACY Supabase key names
+### ✅ CLOSED 2026-10-19 — `help-ask` now falls back from the LEGACY Supabase key names
 
-`index.ts` reads `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. Supabase
-documents the legacy keys as working "until the end of 2026". When they stop,
+Was: `index.ts` reads `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` only,
+Supabase documents those as working "until the end of 2026", and when they stop
 `hasKeys` goes false and FR-17 renders that as the same "not available" notice as
-every other failure — so the feature would die quietly on a date, not on a
-deploy. Worth adding the new names as a fallback before then; not done here
-because the correct new names should be read off Supabase's docs at the time, not
-recalled.
+every other failure — **so the feature would have died quietly on a date, not on
+a deploy.** Nothing in this repo would have gone red.
+
+**The old entry's one instruction was the valuable part, and following it paid
+off twice.** It said the new names *"should be read off Supabase's docs at the
+time, not recalled"*. Read 2026-10-19 (Edge Functions → Environment Variables,
+"Default secrets", and the `migrating-to-new-api-keys` guide), recall would have
+been wrong on **both** axes:
+
+| | recalled | actual |
+|---|---|---|
+| name | `SUPABASE_SECRET_KEY` | **`SUPABASE_SECRET_KEYS`** — plural |
+| value | a plain key string | **a JSON dictionary** keyed by key name, `{"default":"sb_secret_…"}` |
+
+So `Deno.env.get("SUPABASE_SECRET_KEY") ?? ""` — the obvious one-line fallback —
+would have been inert *and* would have looked right. The deadline is confirmed in
+the same guide, verbatim: *"The legacy `anon` and `service_role` keys keep working
+until the end of 2026."*
+⚠️ **And the obvious CHECK is misleading too:** `grep -c SUPABASE_SECRET_KEY`
+returned 16 against those docs, because the singular is a **substring of the
+plural**. A grep that cannot distinguish the wrong name from the right one is not
+a check — the counts have to come from the full name, or from reading the prose.
+
+**What shipped.** `resolveSupabaseKey(keySetRaw, legacyRaw, keyName)` in
+`handler.ts`, called twice from `index.ts`. It is **in `handler.ts` on purpose**:
+that file's own header says the logic does not live in `index.ts` because `jsr:`
+and `npm:` specifiers stop Node executing it, and a review's mutation test once
+showed seven of eight behaviour-breaking edits leaving the whole suite green. A
+JSON parse with six failure shapes is logic, so it sits where it can be run.
+
+⚠️ **THE NEW KEY SET IS PREFERRED AND LEGACY IS THE FALLBACK — and it shipped
+the other way round first, which would have made the whole change INERT.**
+Legacy-first rested on an assumption stated as fact: that the legacy variables
+**vanish** at the cutover, so legacy-first would hand over by itself. Codex
+(#286, P1) said that is unverified and probably false, and the docs agree —
+legacy keys are **deactivated, not deleted** (*"You can re-activate them should
+you need to"*, Auth → JWT Signing Keys FAQ), and the API Gateway validates the
+`apikey` header against the project's key list. A deactivated key is therefore
+one that is **still present and no longer accepted**, so a legacy-first resolver
+never falls through, and the fallback would have been decoration over the exact
+silent death it was written to prevent.
+
+**What settles the order is that it need not resolve that question at all:**
+keyset-first is correct whether the legacy variable vanishes **or** persists
+carrying a rejected value; legacy-first is correct only in the first case. A
+design that is right under both readings beats one that needs the right guess.
+
+⚠️ **One of the original arguments was also simply MISREAD.** It cited the
+migration guide's warning that a key sent on `Authorization: Bearer` is parsed as
+a JWT and rejected — which tells you to set `verify_jwt = false`, the flag
+`config.toml` pins to **true** here. That passage is about **invoking** an Edge
+Function with a new-style key, i.e. the platform's inbound gateway check; it says
+nothing about the function's own outbound PostgREST clients. And the browser
+already calls `help-ask` with `apikey: sb_publishable_…` and a real user JWT in
+`Authorization` under `verify_jwt: true`, which works today. The concern did not
+apply to this architecture, and it was used to justify the wrong ordering.
+
+**A bad key set never takes down a working deployment:** a malformed or absent
+dictionary falls through to the legacy value, so the risk of preferring the new
+one is bounded by the fallback rather than by the guess.
+
+⚠️ **WHAT IS AND IS NOT PROVEN.** The resolver's branches are **executed**
+(`handler.test.mjs`, 12 new assertions: both generations, both empty, the six
+unusable shapes, trimming, a non-`default` name). Its **wiring** is a source scan
+(`contract.test.mjs`), because `index.ts` still cannot be executed. The **new
+credential against the live gateway is NOT proven** — see point 2 — so the first
+real exercise of it is the cutover itself, which is why the boot log below
+exists.
+
+**A boot log, so being left on the old credential cannot be silent.**
+`where: "keys"` is emitted once per isolate, gated on `source !== "keyset"` —
+i.e. **a line is a DEPRECATION WARNING** saying this key kind is still resolving
+from the legacy variable (or from nothing), and **silence means the key set
+answered and the migration is done.**
+⚠️ **This paragraph said the exact opposite for one commit** — "only when the
+legacy variable did not answer … a line means something moved" — which was true
+of the legacy-first design and inverted by the flip. Codex (#286) named the harm
+precisely: an operator would read a deprecation warning as proof the cutover
+succeeded and leave the function on legacy keys past the deadline, which is the
+failure this whole change exists to prevent. It is now gated by a test rather
+than by proofreading (see below).
+It carries `{which, source, keySetProblem}` and **never a key value** — these
+lines come from inside the safety boundary, the same rule as `where: "answer"`,
+and a pinned test fails on any reference to the key. `keySetProblem`
+distinguishes `absent` (no key of that kind created yet → create one) from
+`unreadable` (one exists and is malformed → fix it), because FR-17 flattens both
+into the same notice.
+⚠️ **The gate is on the DESIRED end state, not the deprecated one.** Keying it on
+`source !== "legacy"` would go quiet for a malformed key set with no legacy
+fallback — the worst state of all — so silence has to mean "clean keyset", never
+merely "not legacy".
+
+⚠️ **Mutation-tested 9 of 10, with the survivor labelled as a survivor in the
+code.** Caught: the swapped argument order (which inverts the precedence while
+every executed resolver test still passes — that pin is the only gate on it), the
+singular name, a bypassed resolver, a deleted log, a log carrying the key value,
+keyset-over-legacy inside the resolver, truthiness instead of `typeof`, malformed
+JSON reported as `none`, and a wrong default key name. The **`Array.isArray`
+guard survived** — JSON cannot give an array a `default` property, so the
+`typeof` check already returns `unreadable`. ⚠️ Its first comment called it
+*"load-bearing"* while explaining in the same sentence why it is not: the
+comment-overclaims-code defect, written into the fix for a different one.
+
+✅ **THE BROWSER IS ALREADY MIGRATED, AND I CLAIMED OTHERWISE WITHOUT LOOKING.**
+The first version of this section ended with *"STILL OWED: the browser half —
+`js/supabase.js` ships the legacy `anon` key"*. It does not. `js/supabase.js:21`
+has carried `anonKey: "sb_publishable_…"` — a **new-style publishable key** —
+with the comment *"Publishable key — safe in the browser; RLS is the actual
+guard."* One `sed -n '14,30p' js/supabase.js` would have settled it, and I wrote
+the claim instead. Found by Codex (#286, P2), which called it correctly:
+*"factually stale … creates contradictory operational guidance and can prompt an
+unnecessary credential change."* This is the stale-claim defect this file records
+more than any other, written into the section closing a different one.
+
+⚠️ **AND IT WAS NOT A HARMLESS SLIP — IT WAS LOAD-BEARING FOR THE WRONG ANSWER.**
+The browser running on `sb_publishable_…` against this project, with the Keep
+signing in and reading under RLS, is a **live proof that the new credential works
+here through `supabase-js`**. That is the single best piece of evidence available
+for preferring the new key set, and the first version of this change cited the
+new path's unprovenness as a reason to prefer *legacy*. Getting the browser's
+state wrong removed the strongest argument against the ordering I shipped.
+
+⛔ **WHAT IS GENUINELY STILL OPEN:** whether a **secret** key
+(`sb_secret_…`) exists for this project at all. `get_publishable_keys` returns
+publishable keys only — correctly, since a secret key must not be readable — and
+there is no MCP tool to list Edge Function secrets, so `SUPABASE_SECRET_KEYS`
+could not be checked from here. If it is unset, the resolver falls back to the
+legacy service-role key and the boot log says
+`{"where":"keys","which":"secret","source":"legacy","keySetProblem":"absent"}`.
+**That line is the to-do:** create a secret key in Settings → API Keys before the
+end of 2026. Read it after the next deploy per *HOW TO READ THE EDGE FUNCTION
+LOGS* above — ⚠️ and note that section's own caveat, that nothing has yet
+observed a handler-emitted `function_logs` line, so an absent line is not proof
+of a clean read.
 
 ### ✅ RESOLVED 2026-10-15 — the app bar overflowed 761-1044px, AND there was no nav at all below 760px
 
