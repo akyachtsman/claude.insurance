@@ -299,7 +299,10 @@ This is the one to follow; the others defer to it.
    makes every failure look identical, so this is the only step that proves the
    deploy worked.) If it still shows the notice, read the function logs: the
    `where` field names the stage (`guide`, `records`, `reserve`, `provider`,
-   `model`, `settings`, `release`, and since 2026-10-14 **`answer`**).
+   `model`, `settings`, `release`, since 2026-10-14 **`answer`**, and since
+   2026-10-19 **`keys`** — which variable supplied each API key, emitted at
+   boot and only when the LEGACY variable did not answer, so a line there
+   means the key-name cutover has happened).
 
 ### ⚠️ THE SUPABASE MCP WILL NOT RUN A `DROP` FROM THIS ENVIRONMENT (measured 2026-10-09)
 
@@ -4244,15 +4247,94 @@ timed Opus 5.5 against this budget. Streaming would remove the cliff entirely an
 is the fix if owner-gate step 8 or early use shows timeouts. Worth watching in the
 function logs for `where: "provider"` with no status.
 
-### ⚠️ Recorded — `help-ask` reads only the LEGACY Supabase key names
+### ✅ CLOSED 2026-10-19 — `help-ask` now falls back from the LEGACY Supabase key names
 
-`index.ts` reads `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. Supabase
-documents the legacy keys as working "until the end of 2026". When they stop,
+Was: `index.ts` reads `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` only,
+Supabase documents those as working "until the end of 2026", and when they stop
 `hasKeys` goes false and FR-17 renders that as the same "not available" notice as
-every other failure — so the feature would die quietly on a date, not on a
-deploy. Worth adding the new names as a fallback before then; not done here
-because the correct new names should be read off Supabase's docs at the time, not
-recalled.
+every other failure — **so the feature would have died quietly on a date, not on
+a deploy.** Nothing in this repo would have gone red.
+
+**The old entry's one instruction was the valuable part, and following it paid
+off twice.** It said the new names *"should be read off Supabase's docs at the
+time, not recalled"*. Read 2026-10-19 (Edge Functions → Environment Variables,
+"Default secrets", and the `migrating-to-new-api-keys` guide), recall would have
+been wrong on **both** axes:
+
+| | recalled | actual |
+|---|---|---|
+| name | `SUPABASE_SECRET_KEY` | **`SUPABASE_SECRET_KEYS`** — plural |
+| value | a plain key string | **a JSON dictionary** keyed by key name, `{"default":"sb_secret_…"}` |
+
+So `Deno.env.get("SUPABASE_SECRET_KEY") ?? ""` — the obvious one-line fallback —
+would have been inert *and* would have looked right. The deadline is confirmed in
+the same guide, verbatim: *"The legacy `anon` and `service_role` keys keep working
+until the end of 2026."*
+⚠️ **And the obvious CHECK is misleading too:** `grep -c SUPABASE_SECRET_KEY`
+returned 16 against those docs, because the singular is a **substring of the
+plural**. A grep that cannot distinguish the wrong name from the right one is not
+a check — the counts have to come from the full name, or from reading the prose.
+
+**What shipped.** `resolveSupabaseKey(legacyRaw, keySetRaw, keyName)` in
+`handler.ts`, called twice from `index.ts`. It is **in `handler.ts` on purpose**:
+that file's own header says the logic does not live in `index.ts` because `jsr:`
+and `npm:` specifiers stop Node executing it, and a review's mutation test once
+showed seven of eight behaviour-breaking edits leaving the whole suite green. A
+JSON parse with six failure shapes is logic, so it sits where it can be run.
+
+⚠️ **LEGACY IS PREFERRED AND THE NEW KEY SET IS THE FALLBACK — the ordering is
+the decision, not an accident, and it rests on three measurements:**
+1. **This project ALREADY has a new-style publishable key** named `default`
+   (`sb_publishable_…`, type `publishable`), with the legacy `anon` key still
+   enabled — measured 2026-10-19 via `get_publishable_keys`. So reading the
+   dictionary first would have moved the **live** function onto a different
+   credential *today*, not at the cutover.
+2. **That path cannot be exercised from here.** HTTPS egress to the project is
+   blocked from a session, so no session can invoke the deployed function.
+3. **It collides with a documented interaction.** supabase-js sends the key on
+   `Authorization: Bearer` as well as `apikey`; the migration guide says the
+   platform then tries to parse it as a JWT and rejects the request, and tells
+   you to set `verify_jwt = false` for such functions. `supabase/config.toml`
+   pins that flag to **true** here, deliberately and with its own argument.
+
+Legacy-first therefore changes **nothing today** and survives the cutover
+unattended, which was the whole ask.
+
+⚠️ **WHAT IS AND IS NOT PROVEN.** The resolver's branches are **executed**
+(`handler.test.mjs`, 12 new assertions: both generations, both empty, the six
+unusable shapes, trimming, a non-`default` name). Its **wiring** is a source scan
+(`contract.test.mjs`), because `index.ts` still cannot be executed. The **new
+credential against the live gateway is NOT proven** — see point 2 — so the first
+real exercise of it is the cutover itself, which is why the boot log below
+exists.
+
+**A boot log, so the transition cannot be silent.** `where: "keys"` is emitted
+once per isolate and **only when the legacy variable did not answer**, so silence
+is the normal case today and a line means something moved. It carries
+`{which, source}` and **never a key value** — these lines come from inside the
+safety boundary, the same rule as `where: "answer"`, and a pinned test fails on
+any reference to the key. `source` distinguishes `none` (neither variable set)
+from `unreadable` (a key set was present and yielded nothing usable), because
+FR-17 flattens "not configured yet" and "configured wrong" into one notice.
+
+⚠️ **Mutation-tested 9 of 10, with the survivor labelled as a survivor in the
+code.** Caught: the swapped argument order (which inverts the precedence while
+every executed resolver test still passes — that pin is the only gate on it), the
+singular name, a bypassed resolver, a deleted log, a log carrying the key value,
+keyset-over-legacy inside the resolver, truthiness instead of `typeof`, malformed
+JSON reported as `none`, and a wrong default key name. The **`Array.isArray`
+guard survived** — JSON cannot give an array a `default` property, so the
+`typeof` check already returns `unreadable`. ⚠️ Its first comment called it
+*"load-bearing"* while explaining in the same sentence why it is not: the
+comment-overclaims-code defect, written into the fix for a different one.
+
+⛔ **STILL OWED, and it is not this change:** the **browser** half. `js/supabase.js`
+ships the legacy `anon` key, and the same deadline applies to it. That one is not
+a fallback — a browser reads no Edge Function environment, so it means swapping
+the embedded key to `sb_publishable_…` and re-measuring the Keep's auth and RLS
+reads end to end. Deliberately out of scope here: this change hardens the
+function that would have failed **invisibly**, whereas a browser key that stops
+working fails loudly on the first request.
 
 ### ✅ RESOLVED 2026-10-15 — the app bar overflowed 761-1044px, AND there was no nav at all below 760px
 

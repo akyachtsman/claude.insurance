@@ -186,6 +186,102 @@ export function resolveModel(raw: string | null | undefined): { model: string; r
     : { model: DEFAULT_HELP_MODEL, rejected: want };
 }
 
+// ── THE API KEYS, AND THE DATE THEY STOP BEING INJECTED ──────────────────────
+//
+// Supabase is replacing the legacy JWT API keys, and the two generations arrive
+// as DIFFERENT SHAPES of environment variable:
+//
+//   legacy  SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY   a plain string
+//   new     SUPABASE_PUBLISHABLE_KEYS / SUPABASE_SECRET_KEYS a JSON dictionary
+//           keyed by key name, e.g. {"default":"sb_secret_..."}
+//
+// Both read off Supabase's own docs on 2026-10-19 — Edge Functions ->
+// Environment Variables ("Default secrets") and the migrating-to-new-api-keys
+// guide — rather than recalled, because CLAUDE.md said to and because recall
+// would have got it wrong twice over: the new names are PLURAL and their values
+// are not strings. (A grep for the singular name "confirms" the plural one as a
+// substring, so even the check needs care.) That guide also states the deadline
+// this exists for: "The legacy `anon` and `service_role` keys keep working until
+// the end of 2026."
+//
+// ⚠️ WHY THIS IS WORSE THAN AN ORDINARY DEPRECATION. index.ts folds both keys
+// into HAS_KEYS, so on the day the legacy variables stop being injected
+// `hasKeys` goes false and FR-17 renders that as the SAME quiet "not available"
+// notice as an outage, a missing Anthropic key, or an undeployed function. The
+// desk would die on a date, with nothing anywhere going red.
+//
+// ⚠️ LEGACY IS PREFERRED AND THE NEW KEY SET IS THE FALLBACK. That order IS the
+// decision, so do not "modernise" it without redoing the measurements:
+//   - This project ALREADY has a new-style publishable key named `default`
+//     (measured 2026-10-19 via get_publishable_keys), with the legacy `anon` key
+//     still enabled. So reading the dictionary first would move the LIVE
+//     function onto a different credential today, not at the cutover.
+//   - That path cannot be exercised from here: HTTPS egress to the project is
+//     blocked from a session, so a session cannot invoke the deployed function.
+//   - It also walks into a documented interaction. supabase-js sends the key on
+//     `Authorization: Bearer` as well as `apikey`; the migration guide says the
+//     platform then tries to parse it as a JWT and rejects the request, and tells
+//     you to set `verify_jwt = false` for such functions. supabase/config.toml
+//     pins that flag to TRUE here, deliberately and with its own argument.
+//
+// Legacy-first changes nothing today and survives the cutover unattended, which
+// is the whole ask. What is proven is this resolver's branches, executed in
+// handler.test.mjs. The new credential against the live gateway is NOT proven —
+// see the deploy-time note in CLAUDE.md.
+
+/** The name Supabase gives the first key of each kind in the new key sets. */
+export const DEFAULT_API_KEY_NAME = "default";
+
+/** Resolve one Supabase API key across both generations of environment variable.
+ *
+ *  `source` is reported so index.ts can log a transition ONCE instead of
+ *  switching silently, and so the two failure shapes stay distinguishable:
+ *  `none` means neither variable was set, `unreadable` means a key set WAS
+ *  present and yielded nothing usable (malformed JSON, not an object, or no
+ *  usable entry under `keyName`). That distinction is the difference between
+ *  "not configured yet" and "configured wrong", which FR-17 would otherwise
+ *  flatten into one notice.
+ *
+ *  An empty `key` is the honest outcome, not a crash: it makes HAS_KEYS false,
+ *  which is the guard that keeps createClient from throwing at module scope. */
+export function resolveSupabaseKey(
+  legacyRaw: string | null | undefined,
+  keySetRaw: string | null | undefined,
+  keyName: string = DEFAULT_API_KEY_NAME,
+): { key: string; source: "legacy" | "keyset" | "unreadable" | "none" } {
+  const legacy = (legacyRaw ?? "").trim();
+  if (legacy) return { key: legacy, source: "legacy" };
+
+  const raw = (keySetRaw ?? "").trim();
+  if (!raw) return { key: "", source: "none" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { key: "", source: "unreadable" };
+  }
+  // ⚠️ THE Array CHECK IS BELT, AND IT IS LABELLED AS A SURVIVOR BECAUSE IT IS
+  // ONE. Measured: deleting it fails nothing. Arrays are objects in JS, but JSON
+  // cannot give one a `default` property, so `parsed[keyName]` is undefined and
+  // the typeof check below returns `unreadable` anyway — that check is what
+  // holds the line. Kept because it states the intent at the point a future
+  // refactor of the value check would need it. The first version of this comment
+  // called it load-bearing while describing, in the same sentence, why it is not:
+  // the comment-overclaims-code defect this repo records more often than any
+  // other, written into the fix for a different one.
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { key: "", source: "unreadable" };
+  }
+  const value = (parsed as Record<string, unknown>)[keyName];
+  // `typeof`, not truthiness: a non-string (a nested object, a number) would
+  // otherwise reach createClient and throw at module scope — the bare-500
+  // defect, with no CORS headers and no log line, that HAS_KEYS exists to stop.
+  return typeof value === "string" && value.trim()
+    ? { key: value.trim(), source: "keyset" }
+    : { key: "", source: "unreadable" };
+}
+
 // ── THE STORED TIER, AND WHY IT IS READ ON EVERY ASK ─────────────────────────
 //
 // `help_settings` is the broker-facing half of the allow-list above: one row,

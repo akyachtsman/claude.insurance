@@ -36,12 +36,36 @@ import { createClient } from "jsr:@supabase/supabase-js@2.117.2";
 // surprise. Version VERIFIED against the npm registry on 2026-10-06 (latest
 // 0.131.0) rather than recalled.
 import Anthropic from "npm:@anthropic-ai/sdk@0.131.0";
-import { handle } from "./handler.ts";
+import { handle, resolveSupabaseKey } from "./handler.ts";
 import type { HelpTopic } from "./prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+// Legacy variable first, new key set as the fallback. The shapes differ (plain
+// string vs JSON dictionary) and the ordering is a decision with measurements
+// behind it — both are documented at `resolveSupabaseKey` in handler.ts, which
+// is also where the branches are EXECUTED. This file cannot be run by Node, so
+// it reads the environment and nothing else.
+const SECRET = resolveSupabaseKey(
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  Deno.env.get("SUPABASE_SECRET_KEYS"),
+);
+const PUBLISHABLE = resolveSupabaseKey(
+  Deno.env.get("SUPABASE_ANON_KEY"),
+  Deno.env.get("SUPABASE_PUBLISHABLE_KEYS"),
+);
+const SERVICE_KEY = SECRET.key;
+const ANON_KEY = PUBLISHABLE.key;
+// Once per isolate, and ONLY when the legacy variable did not answer — silence
+// is the normal case today, so a line here means something changed. It is what
+// turns "the desk died on a date" into either "the desk moved to the new key set
+// on this date" or a named configuration failure, instead of FR-17's one notice.
+// ⚠️ NEVER the key value: only which variable supplied it. These lines are
+// emitted from inside the safety boundary, like `where: "answer"`.
+for (const [which, r] of [["secret", SECRET], ["publishable", PUBLISHABLE]] as const) {
+  if (r.source !== "legacy") {
+    console.error(JSON.stringify({ where: "keys", which, source: r.source }));
+  }
+}
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const APP_URL = Deno.env.get("APP_URL") ?? "https://akyachtsman.github.io/claude.insurance";
 // OPTIONAL. Unset runs the default; an unrecognised value falls back to it and

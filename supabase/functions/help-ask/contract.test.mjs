@@ -492,3 +492,98 @@ test("the provider call carries no hardcoded model literal", () => {
     "model is a literal at the call site — the HELP_MODEL toggle is bypassed");
   assert.ok(/^\s*model,\s*$/m.test(body), "the resolved `model` is not passed to messages.create");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE API KEY FALLBACK'S WIRING IN index.ts
+//
+// ⚠️ A SOURCE SCAN, AND THAT LIMIT IS WHY IT EXISTS — the same reasoning as the
+// model toggle above. handler.test.mjs EXECUTES resolveSupabaseKey and proves
+// every branch; nothing there can see whether index.ts calls it, or with the
+// arguments in the order the precedence depends on. Only a scan can.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("index.ts reads both generations of API key variable", () => {
+  // The new names are PLURAL. A singular spelling reads as absent, which makes
+  // HAS_KEYS false at the cutover — the quiet death this fallback exists to stop.
+  for (const name of [
+    "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY",
+    "SUPABASE_SECRET_KEYS", "SUPABASE_PUBLISHABLE_KEYS",
+  ]) {
+    assert.ok(
+      new RegExp(`Deno\\.env\\.get\\(\\s*"${name}"\\s*\\)`).test(idxSrc),
+      `index.ts does not read ${name}`);
+  }
+  // And not the singular forms, which are not what the platform injects.
+  for (const wrong of ["SUPABASE_SECRET_KEY", "SUPABASE_PUBLISHABLE_KEY"]) {
+    assert.ok(
+      !new RegExp(`Deno\\.env\\.get\\(\\s*"${wrong}"\\s*\\)`).test(idxSrc),
+      `index.ts reads ${wrong}, which the platform does not set — the plural ` +
+      `${wrong}S is the real variable`);
+  }
+});
+
+test("both keys go through resolveSupabaseKey, legacy argument FIRST", () => {
+  // ⚠️ THE ARGUMENT ORDER IS THE DECISION. Swapping the two arguments inverts
+  // the precedence — the live function would move onto the new credential
+  // immediately rather than at the cutover — and EVERY executed resolver test
+  // still passes, because the resolver itself is unchanged. This is the only
+  // gate on it.
+  const pairs = [
+    ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS"],
+    ["SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEYS"],
+  ];
+  const calls = [...idxSrc.matchAll(/resolveSupabaseKey\(([\s\S]*?)\)\s*;/g)].map((m) => m[1]);
+  assert.equal(calls.length, 2,
+    `expected exactly 2 resolveSupabaseKey call sites, found ${calls.length}`);
+  for (const [legacy, keySet] of pairs) {
+    const call = calls.find((c) => c.includes(legacy) && c.includes(keySet));
+    assert.ok(call, `no resolveSupabaseKey call pairs ${legacy} with ${keySet}`);
+    assert.ok(call.indexOf(legacy) < call.indexOf(keySet),
+      `${keySet} is passed before ${legacy} — that inverts the precedence and ` +
+      `moves the live function onto the new key set today, which is unproven ` +
+      `against the gateway. Legacy first; see resolveSupabaseKey in handler.ts`);
+  }
+});
+
+test("the resolver is not bypassed for either key", () => {
+  // A bare `?? ""` read back into SERVICE_KEY/ANON_KEY restores the original
+  // behaviour with the resolver still present and every other assertion green.
+  for (const binding of ["SERVICE_KEY", "ANON_KEY"]) {
+    const decl = new RegExp(`const ${binding}\\s*=\\s*([^;]+);`).exec(idxSrc);
+    assert.ok(decl, `${binding} must be declared at module scope`);
+    assert.ok(!/Deno\.env\.get/.test(decl[1]),
+      `${binding} reads the environment directly, bypassing the fallback — ` +
+      `it must come from a resolveSupabaseKey result`);
+  }
+  // HAS_KEYS must still be what decides, from those two bindings.
+  const at = idxSrc.search(/const HAS_KEYS\s*=/);
+  const hk = idxSrc.slice(at, idxSrc.indexOf(";", at) + 1);
+  for (const binding of ["SERVICE_KEY", "ANON_KEY"]) {
+    assert.ok(hk.includes(binding), `HAS_KEYS no longer depends on ${binding}`);
+  }
+});
+
+test("the key-source log carries a cause, never a key", () => {
+  // These lines are emitted from inside the safety boundary, so the rule is the
+  // same as `where: "answer"`: a cause, never content. A key value in a log is a
+  // credential in a log.
+  // ⚠️ SCOPED TO THE EMITTING LOOP, brace-matched — not a character window. The
+  // first version took 400 chars either side of the marker and FAILED on this
+  // repo's own correct code, because `const SERVICE_KEY = SECRET.key;` sits just
+  // above and legitimately names both a binding and `.key`. A neighbourhood is
+  // not a scope; this file records that defect five times already.
+  const at = idxSrc.indexOf('where: "keys"');
+  assert.ok(at > 0, "the key-source log line is gone");
+  const forAt = idxSrc.lastIndexOf("for (", at);
+  assert.ok(forAt > 0, "the key-source log is not inside a loop any more");
+  let depth = 0, end = -1;
+  for (let i = idxSrc.indexOf("{", forAt); i < idxSrc.length; i++) {
+    if (idxSrc[i] === "{") depth++;
+    else if (idxSrc[i] === "}" && --depth === 0) { end = i + 1; break; }
+  }
+  assert.ok(end > forAt, "could not delimit the key-source loop");
+  const loop = idxSrc.slice(forAt, end);
+  assert.ok(/source/.test(loop), "the log must name which variable answered");
+  assert.ok(!/\br\.key\b|SERVICE_KEY|ANON_KEY/.test(loop),
+    "the key-source log references a key VALUE — log the source, never the key");
+});

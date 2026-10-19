@@ -13,7 +13,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL } from "./handler.ts";
+import {
+  handle, resolveModel, HELP_MODELS, DEFAULT_HELP_MODEL,
+  resolveSupabaseKey, DEFAULT_API_KEY_NAME,
+} from "./handler.ts";
 
 // ── A PostgREST-shaped fake. It records every query it is asked to run, so a
 //    test can assert what was NOT scoped as easily as what came back.
@@ -1366,4 +1369,92 @@ test("the stored tier is read FRESH on every ask, never cached in the isolate", 
   tables.help_settings[0].model = "claude-haiku-5-5";
   const second = await sentModel({ tables });
   assert.equal(second.model, "claude-haiku-5-5", "the tier was cached across asks");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE API KEY RESOLVER (legacy variable -> new key set)
+//
+// EXECUTED, which is the point of it living in handler.ts rather than index.ts.
+// The legacy keys stop working at the end of 2026 (Supabase's own migration
+// guide); index.ts folds both keys into HAS_KEYS, so the failure mode is the
+// desk going quiet on a date with nothing going red. These assertions are what
+// stand behind the claim that the fallback works, since the new credential
+// cannot be exercised against the live gateway from a session.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("the legacy variable wins while it is set", () => {
+  // The ORDERING, not just the plumbing. Preferring the key set would move the
+  // live function onto a different credential today — this project already has
+  // a `default` publishable key — and that path is unproven against the gateway.
+  const r = resolveSupabaseKey("legacy-anon-value", '{"default":"sb_publishable_new"}');
+  assert.equal(r.key, "legacy-anon-value");
+  assert.equal(r.source, "legacy");
+});
+
+test("the key set answers once the legacy variable is gone", () => {
+  // The cutover, which is the whole reason this exists.
+  const r = resolveSupabaseKey("", '{"default":"sb_secret_abc"}');
+  assert.equal(r.key, "sb_secret_abc");
+  assert.equal(r.source, "keyset");
+});
+
+test("an undefined legacy variable is the same as an empty one", () => {
+  // Deno.env.get returns undefined, not "", for an unset variable — and the old
+  // code's `?? ""` is gone from index.ts, so the resolver owns this now.
+  const r = resolveSupabaseKey(undefined, '{"default":"sb_secret_abc"}');
+  assert.equal(r.key, "sb_secret_abc");
+  assert.equal(r.source, "keyset");
+});
+
+test("neither set reports `none`, not `unreadable`", () => {
+  // "not configured yet" must stay distinguishable from "configured wrong":
+  // FR-17 renders both as one notice, so the log line is the only difference.
+  for (const [a, b] of [[undefined, undefined], ["", ""], ["   ", "  "]]) {
+    const r = resolveSupabaseKey(a, b);
+    assert.equal(r.key, "");
+    assert.equal(r.source, "none");
+  }
+});
+
+test("a key set that yields nothing usable reports `unreadable`", () => {
+  const cases = {
+    "malformed JSON": "{not json",
+    "a JSON string": '"sb_secret_abc"',
+    "a JSON array": '["sb_secret_abc"]',
+    "null": "null",
+    "a number": "7",
+    "no `default` entry": '{"billing":"sb_secret_abc"}',
+    "a blank `default`": '{"default":"   "}',
+    "a non-string `default`": '{"default":{"key":"sb_secret_abc"}}',
+    "a numeric `default`": '{"default":12345}',
+  };
+  for (const [label, raw] of Object.entries(cases)) {
+    const r = resolveSupabaseKey("", raw);
+    assert.equal(r.key, "", `${label}: must not yield a key`);
+    assert.equal(r.source, "unreadable", `${label}: must be distinguishable from unset`);
+  }
+});
+
+test("a non-string `default` never reaches the caller as a key", () => {
+  // The specific harm: index.ts hands this straight to createClient at module
+  // scope, which throws before handle() can reach its hasKeys check — the bare
+  // 500 with no CORS headers and no log line that HAS_KEYS exists to prevent.
+  const r = resolveSupabaseKey("", '{"default":{"nested":"x"}}');
+  assert.equal(typeof r.key, "string");
+  assert.equal(r.key, "");
+});
+
+test("surrounding whitespace is trimmed off both generations", () => {
+  assert.equal(resolveSupabaseKey("  legacy  ", "").key, "legacy");
+  assert.equal(resolveSupabaseKey("", '{"default":"  sb_secret_abc  "}').key, "sb_secret_abc");
+});
+
+test("a non-default key name can be read, and names the documented default", () => {
+  // Supabase's guide: every key lives in the same dictionary under its own name,
+  // and the first one is called `default`. Pinned so the constant cannot drift
+  // from the name the platform actually ships.
+  assert.equal(DEFAULT_API_KEY_NAME, "default");
+  const raw = '{"default":"sb_secret_d","billing":"sb_secret_b"}';
+  assert.equal(resolveSupabaseKey("", raw, "billing").key, "sb_secret_b");
+  assert.equal(resolveSupabaseKey("", raw).key, "sb_secret_d");
 });
