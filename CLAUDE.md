@@ -4282,23 +4282,36 @@ and `npm:` specifiers stop Node executing it, and a review's mutation test once
 showed seven of eight behaviour-breaking edits leaving the whole suite green. A
 JSON parse with six failure shapes is logic, so it sits where it can be run.
 
-⚠️ **LEGACY IS PREFERRED AND THE NEW KEY SET IS THE FALLBACK — the ordering is
-the decision, not an accident, and it rests on three measurements:**
-1. **This project ALREADY has a new-style publishable key** named `default`
-   (`sb_publishable_…`, type `publishable`), with the legacy `anon` key still
-   enabled — measured 2026-10-19 via `get_publishable_keys`. So reading the
-   dictionary first would have moved the **live** function onto a different
-   credential *today*, not at the cutover.
-2. **That path cannot be exercised from here.** HTTPS egress to the project is
-   blocked from a session, so no session can invoke the deployed function.
-3. **It collides with a documented interaction.** supabase-js sends the key on
-   `Authorization: Bearer` as well as `apikey`; the migration guide says the
-   platform then tries to parse it as a JWT and rejects the request, and tells
-   you to set `verify_jwt = false` for such functions. `supabase/config.toml`
-   pins that flag to **true** here, deliberately and with its own argument.
+⚠️ **THE NEW KEY SET IS PREFERRED AND LEGACY IS THE FALLBACK — and it shipped
+the other way round first, which would have made the whole change INERT.**
+Legacy-first rested on an assumption stated as fact: that the legacy variables
+**vanish** at the cutover, so legacy-first would hand over by itself. Codex
+(#286, P1) said that is unverified and probably false, and the docs agree —
+legacy keys are **deactivated, not deleted** (*"You can re-activate them should
+you need to"*, Auth → JWT Signing Keys FAQ), and the API Gateway validates the
+`apikey` header against the project's key list. A deactivated key is therefore
+one that is **still present and no longer accepted**, so a legacy-first resolver
+never falls through, and the fallback would have been decoration over the exact
+silent death it was written to prevent.
 
-Legacy-first therefore changes **nothing today** and survives the cutover
-unattended, which was the whole ask.
+**What settles the order is that it need not resolve that question at all:**
+keyset-first is correct whether the legacy variable vanishes **or** persists
+carrying a rejected value; legacy-first is correct only in the first case. A
+design that is right under both readings beats one that needs the right guess.
+
+⚠️ **One of the original arguments was also simply MISREAD.** It cited the
+migration guide's warning that a key sent on `Authorization: Bearer` is parsed as
+a JWT and rejected — which tells you to set `verify_jwt = false`, the flag
+`config.toml` pins to **true** here. That passage is about **invoking** an Edge
+Function with a new-style key, i.e. the platform's inbound gateway check; it says
+nothing about the function's own outbound PostgREST clients. And the browser
+already calls `help-ask` with `apikey: sb_publishable_…` and a real user JWT in
+`Authorization` under `verify_jwt: true`, which works today. The concern did not
+apply to this architecture, and it was used to justify the wrong ordering.
+
+**A bad key set never takes down a working deployment:** a malformed or absent
+dictionary falls through to the legacy value, so the risk of preferring the new
+one is bounded by the fallback rather than by the guess.
 
 ⚠️ **WHAT IS AND IS NOT PROVEN.** The resolver's branches are **executed**
 (`handler.test.mjs`, 12 new assertions: both generations, both empty, the six
@@ -4328,13 +4341,37 @@ guard survived** — JSON cannot give an array a `default` property, so the
 *"load-bearing"* while explaining in the same sentence why it is not: the
 comment-overclaims-code defect, written into the fix for a different one.
 
-⛔ **STILL OWED, and it is not this change:** the **browser** half. `js/supabase.js`
-ships the legacy `anon` key, and the same deadline applies to it. That one is not
-a fallback — a browser reads no Edge Function environment, so it means swapping
-the embedded key to `sb_publishable_…` and re-measuring the Keep's auth and RLS
-reads end to end. Deliberately out of scope here: this change hardens the
-function that would have failed **invisibly**, whereas a browser key that stops
-working fails loudly on the first request.
+✅ **THE BROWSER IS ALREADY MIGRATED, AND I CLAIMED OTHERWISE WITHOUT LOOKING.**
+The first version of this section ended with *"STILL OWED: the browser half —
+`js/supabase.js` ships the legacy `anon` key"*. It does not. `js/supabase.js:21`
+has carried `anonKey: "sb_publishable_…"` — a **new-style publishable key** —
+with the comment *"Publishable key — safe in the browser; RLS is the actual
+guard."* One `sed -n '14,30p' js/supabase.js` would have settled it, and I wrote
+the claim instead. Found by Codex (#286, P2), which called it correctly:
+*"factually stale … creates contradictory operational guidance and can prompt an
+unnecessary credential change."* This is the stale-claim defect this file records
+more than any other, written into the section closing a different one.
+
+⚠️ **AND IT WAS NOT A HARMLESS SLIP — IT WAS LOAD-BEARING FOR THE WRONG ANSWER.**
+The browser running on `sb_publishable_…` against this project, with the Keep
+signing in and reading under RLS, is a **live proof that the new credential works
+here through `supabase-js`**. That is the single best piece of evidence available
+for preferring the new key set, and the first version of this change cited the
+new path's unprovenness as a reason to prefer *legacy*. Getting the browser's
+state wrong removed the strongest argument against the ordering I shipped.
+
+⛔ **WHAT IS GENUINELY STILL OPEN:** whether a **secret** key
+(`sb_secret_…`) exists for this project at all. `get_publishable_keys` returns
+publishable keys only — correctly, since a secret key must not be readable — and
+there is no MCP tool to list Edge Function secrets, so `SUPABASE_SECRET_KEYS`
+could not be checked from here. If it is unset, the resolver falls back to the
+legacy service-role key and the boot log says
+`{"where":"keys","which":"secret","source":"legacy","keySetProblem":"absent"}`.
+**That line is the to-do:** create a secret key in Settings → API Keys before the
+end of 2026. Read it after the next deploy per *HOW TO READ THE EDGE FUNCTION
+LOGS* above — ⚠️ and note that section's own caveat, that nothing has yet
+observed a handler-emitted `function_logs` line, so an absent line is not proof
+of a clean read.
 
 ### ✅ RESOLVED 2026-10-15 — the app bar overflowed 761-1044px, AND there was no nav at all below 760px
 

@@ -522,26 +522,28 @@ test("index.ts reads both generations of API key variable", () => {
   }
 });
 
-test("both keys go through resolveSupabaseKey, legacy argument FIRST", () => {
-  // ⚠️ THE ARGUMENT ORDER IS THE DECISION. Swapping the two arguments inverts
-  // the precedence — the live function would move onto the new credential
-  // immediately rather than at the cutover — and EVERY executed resolver test
-  // still passes, because the resolver itself is unchanged. This is the only
-  // gate on it.
+test("both keys go through resolveSupabaseKey, KEY SET argument FIRST", () => {
+  // ⚠️ THE ARGUMENT ORDER IS THE DECISION, AND THIS IS THE ONLY GATE ON IT.
+  // Swapping the two arguments inverts the precedence and EVERY executed
+  // resolver test still passes, because the resolver itself is unchanged.
+  // It shipped the wrong way round once already (Codex #286, P1): legacy keys
+  // are deactivated rather than deleted, so the legacy variable probably keeps
+  // its rejected value and a legacy-first resolver would never fall through --
+  // leaving the fallback inert and the desk dying quietly on a date anyway.
   const pairs = [
-    ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS"],
-    ["SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEYS"],
+    ["SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY"],
+    ["SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY"],
   ];
   const calls = [...idxSrc.matchAll(/resolveSupabaseKey\(([\s\S]*?)\)\s*;/g)].map((m) => m[1]);
   assert.equal(calls.length, 2,
     `expected exactly 2 resolveSupabaseKey call sites, found ${calls.length}`);
-  for (const [legacy, keySet] of pairs) {
+  for (const [keySet, legacy] of pairs) {
     const call = calls.find((c) => c.includes(legacy) && c.includes(keySet));
-    assert.ok(call, `no resolveSupabaseKey call pairs ${legacy} with ${keySet}`);
-    assert.ok(call.indexOf(legacy) < call.indexOf(keySet),
-      `${keySet} is passed before ${legacy} — that inverts the precedence and ` +
-      `moves the live function onto the new key set today, which is unproven ` +
-      `against the gateway. Legacy first; see resolveSupabaseKey in handler.ts`);
+    assert.ok(call, `no resolveSupabaseKey call pairs ${keySet} with ${legacy}`);
+    assert.ok(call.indexOf(keySet) < call.indexOf(legacy),
+      `${legacy} is passed before ${keySet} -- that inverts the precedence. A ` +
+      `deactivated legacy key is still PRESENT, so legacy-first never falls ` +
+      `through and the fallback is inert; see resolveSupabaseKey in handler.ts`);
   }
 });
 
@@ -584,6 +586,16 @@ test("the key-source log carries a cause, never a key", () => {
   assert.ok(end > forAt, "could not delimit the key-source loop");
   const loop = idxSrc.slice(forAt, end);
   assert.ok(/source/.test(loop), "the log must name which variable answered");
+  assert.ok(/keySetProblem/.test(loop),
+    "the log must distinguish an ABSENT key set from an UNREADABLE one -- " +
+    "\"create a secret key\" and \"fix the malformed dictionary\" are different " +
+    "actions, and FR-17 renders both as the same notice");
+  // Gated on the DESIRED end state, not on the deprecated one: silence must mean
+  // "already on the supported credential". Keying it on !== "legacy" would go
+  // quiet for a malformed key set with no legacy fallback, which is the worst
+  // state of all.
+  assert.ok(/!==\s*"keyset"/.test(loop),
+    "the log must fire whenever the new key set did not answer cleanly");
   assert.ok(!/\br\.key\b|SERVICE_KEY|ANON_KEY/.test(loop),
     "the key-source log references a key VALUE — log the source, never the key");
 });
