@@ -65,17 +65,22 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 - `css/` — `tokens.css` (design tokens), `base.css`, `components.css`,
   `forms.css`, `views.css`, `motion.css` (public site) + `keep.css` (portal,
   `k-` prefixed); self-hosted OFL fonts in `css/fonts/`
+- `styles/components.js` — the house page script (`window.House`), verbatim from `claude.directives`, imported by `js/keep/views/shell.js`; today only `House.typeahead` is used, by the app bar search. Not compared by `/refresh-repo` on this unmarked project: re-copy it at each refresh (see *Upstream Divergences*)
 - `docs/data-model.md` — the canonical label/field reference behind the "one
   canonical label" standard above
 - `specs/` — **frozen** point-in-time SDD record for feature 001, not current
   architecture; see `specs/README.md` for its known divergences from the code
 - `scripts/setup-playwright.sh` — local browser setup
 - `learnings.jsonl` — append-only session learnings (`/learn`)
-- `.github/workflows/` — 8 workflows: `qa.yml`, `qa-live.yml`, `qa-response.yml`,
-  `ci-monitor.yml`, `ci-notify.yml`, `codex-monitor.yml`, `pages-monitor.yml`,
-  `pages-retry.yml`. `.github/actions/` holds the shared composite actions
-  (`ui-suite`, `secret-scan`); `.github/scripts/` the guard scripts and
-  `ui-tests/`; `.github/workflow-ref-required.json` the required-watcher list.
+- `.github/workflows/` — 4 workflows: `qa.yml`, `qa-live.yml`, `qa-response.yml`
+  and the project-specific `functions-deploy.yml`. `.github/actions/` holds the
+  shared composite actions (`ui-suite`, `secret-scan`); `.github/scripts/` the
+  guard scripts and `ui-tests/`. ⚠️ The five watcher workflows (`ci-monitor`,
+  `ci-notify`, `codex-monitor`, `pages-monitor`, `pages-retry`), the six Python
+  guards and `.github/workflow-ref-required.json` were **deleted 2026-10-25**
+  because upstream retired them (`claude.directives` #474; native session events
+  replace the watchers). So a failed Pages build is no longer retried
+  automatically, and the `codex-flagged` label is no longer set or cleared.
 - `supabase/migrations/` — applied schema (provisioned): `leads` + `rule_settings` (public/anon side) and `profiles` (+ `reminder_email`/`reminder_schedule` prefs) + `entities` (kinds: `personal`/`business`/`trust`/`person`) + `entity_relationships` (directed owner/trustee links between a client's entities) + `assets` + `policies` (the Keep, auth-keyed) + **`help_queries`** (feature 003's throttle log, applied 2026-10-09 — server-only: `authenticated` holds *nothing* on it, `service_role` holds `select, insert, delete` by explicit grant). RLS on every table, default-deny. ⚠️ Three migrations landed 2026-10-09 and the two security ones are recorded under *Project-Specific Security Constraints* below rather than here: `20261005120000_enhancement_request_stage_guard` (staff may no longer set any request status from any status) and `20261005120100_profiles_role_not_self_assignable` (`authenticated` UPDATE on `profiles` narrowed to `reminder_email, reminder_schedule`; INSERT revoked). ⚠️ A fifth migration landed 2026-10-14: `20261014001500_help_settings` — a
   **singleton** row holding the Help desk's model tier, broker-readable and
   broker-writable (`authenticated` holds `SELECT` + `UPDATE (model)` only;
@@ -403,28 +408,10 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
 | Unit tests | `node --test $(find js supabase/functions -name '*.test.mjs')` |
 | Contrast guardrail | `node .github/scripts/check-contrast.js` |
-| Job bounds guard | `python3 .github/scripts/check-job-bounds.py` |
-| Workflow reference guard | `python3 .github/scripts/workflow-ref-guard.py` |
 | Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
 | Keep back-route classification | `node .github/scripts/check-keep-back-routes.mjs` |
-| Python compiles clean | `python3 .github/scripts/check-py-warnings.py` |
-| ui-suite env parity | `python3 .github/scripts/check-ui-suite-env.py --kit-dir .github/scripts/ui-tests` |
-| Workflow/action YAML as GitHub reads it | `python3 .github/scripts/check-yaml-anchors.py` |
-
-**Required watchers (`.github/workflow-ref-required.json`).** The guard checks
-two different things and only that file supplies the second: rule 1 is that
-every `workflow_run` name **resolves**; rule 2 is that a **required** watcher
-never goes **missing**. Without an entry, a refresh can delete a `workflow_run`
-trigger outright — or repoint it at some other real workflow — and the guard
-stays green, because nothing dangles. `pages-retry.yml` is registered against
-`pages-build-deployment`: it watches GitHub's **managed** Pages build, so there
-is no local file whose deletion would signal the breakage. Drop the entry only
-in the same change that deliberately stops it watching. The other watchers are
-not registered — doing so asserts their current lists are invariants, a broader
-claim than has been established. **The file holds no comments; JSON has none,
-and a `_comment` key is read as a workflow filename and fails the guard.**
 
 **Local Playwright ceiling — MEASURED 2026-10-06, replacing a wrong record.**
 The previous version of this section said *"the webkit profiles do not run at
@@ -4898,6 +4885,11 @@ invoking agents (the ui-tester stops and asks if this table is missing).
 | S28 | A cancelled policy is never shown as active (offline harness, **runs locally**) | **Four** seeded policies — in force, **cancelled with a FUTURE renewal date**, status never recorded, and a status that is neither affirmative nor terminal (`pending`), which must render **verbatim and NEUTRAL** rather than as ended cover. Dates come from `dayOffset()`, and the scenario asserts its own **precondition** (the cancelled policy's renewal date is still in the future) so it fails by name instead of quietly ceasing to test anything. It also checks the **landing page's** "Active policies" and "Lapsed" tiles, and that the Policies tile's subtitle never calls a dated policy "undated". On `#/keep/insurance` the cancelled row's `.k-exp` reads "Cancelled" and **not** "Active", the no-status row reads "Status not on file" and not "Active", the in-force one still reads "Active · renews", and the **Active tile counts 1, not 3**. Then the policy detail page (`.k-pg dt:text-is("Status") + dd` and `.k-phead .k-exp`), the **asset** page's `.k-pcard`, and the **landing** page's two at-a-glance counters — **six** readers of one fact, in three files. ⚠️ The future renewal date is deliberate: with a past one the date logic alone renders "Expired" and the scenario passes against unfixed code. ⚠️ It exists because **four view mutations survived 392 green unit tests**, two of them reverting a call site to `expiryBadge(policy.renewalInDays)` — the original bug, in one character | Any reader shows a cancelled or status-less policy as active, the Active tile counts policies that are not in force, or a call site is reverted to the bare renewal date |
 | S29 | The Keep's primary nav survives every width, and the bar never overflows (offline harness, **runs locally**) | At 1280px `.k-nav` is visible and `.k-pop--nav` hidden; across **19 widths — 320, 360, 382, 386, 390, 414, 480, 481, 500, 520, 560, 561, 600, 760, 761, 810, 900, 1024, 1129** — that inverts, with `scrollWidth <= clientWidth`, the logo at its natural width, no 44px control shrunk, and **the wordmark never truncated** at each. ⚠️ Both sides of every media-query boundary are sampled, because #275's defect lived entirely between 480 and 600 and both endpoints were clean. ⚠️ The wordmark check is the one that catches it: a shrinkable wordmark turns an overflow into an ellipsis, which every `scrollWidth` assertion reports as a pass. The band **resizes rather than re-navigating** (media queries re-evaluate on resize; 19 `goto`s cost ~17s against a 30s per-test budget), and the menu INTERACTION — opens, panel on-screen, hrefs **EQUAL AS A SET** to the strip's, Escape closes, `aria-expanded` tracks — runs at one width per layout regime (360, 481, 810, 1129). 1129/1130 are asserted as a **pair**. A menu link navigates, and **no app-bar `<use href>` resolves to nothing**. ⚠️ 382 is in the list deliberately: at 385 the wordmark's shortfall is 1px and the tolerance absorbs it, so the mutation reverting that breakpoint survived a band that sampled 385/386 | Any width shows both navs or neither, the Keep scrolls sideways, the wordmark ellipsises, the logo or a touch target is crushed, the compact menu's destinations drift from the strip's, Escape stops closing it, or an app-bar icon names no sprite symbol |
 | S30 | The brand sacrifice is app-bar only, and menu panels respect their real top (offline harness, **runs locally**) | Signed OUT **in a fresh context** (`localStorage` is shared, so a second page on the seeded context is already signed in and renders the home view — the first version failed with "the login card did not mount", which reads as an app defect), the login card keeps its `.k-abrand .k-tag` badge at 390, 481, 810, 1129 and 1280: the sacrifice order belongs to the app bar, and an unscoped `.k-tag { display: none }` stripped the badge from the authentication screen at every width 320-1044. Then at 740×320 with the chrome enlarged to 2x, the open panel's bottom stays within the viewport and no destination is stranded after scrolling it — `calc(100vh - 124px)` subtracts an ASSUMED top and measured 39px past the viewport. ⚠️ Split out of S29 because that test hit 17-22s against a 30s per-test timeout and a comment-only control mutation "failed" on a timeout. Then at chrome **40/38 and 48/46** the applied bound must not exceed the measured room — `Math.max(120, room)` defeated its own bound below 120px, measured 27px past with "Documents" stranded, and **the 32/30 sample above passed throughout because its real room is 125px**, four pixels outside the failing regime. Each scale asserts an **armed precondition** (room is positive, and under 120) so it fails by name rather than quietly ceasing to test the clamp. Then a menu opened at 740x900 and resized to 740x300 must be **re-measured, not left frozen** (788px stale, 38px past, "Documents" stranded) and must **stay open** — a mobile URL-bar show/hide fires `resize`. Then crossing the breakpoint while open **closes** the popover and clears `aria-expanded`. ⚠️ Both of the latter poll for a settled state rather than sleeping: a flat wait made the resize block flaky on webkit, failing as "destinations unreachable" when only the panel's scroll had not landed | The login card loses its badge at any width, an enlarged ribbon or text size pushes a menu panel past the viewport and strands its last link, a bound measured at open time survives a viewport change, or a popover the breakpoint hid is left open |
+| S31 | The home command box's type-ahead list fits the iPhone screen (offline harness, **runs locally**) | Type into `.k-cmd__in` on `#/keep`; `.k-cmd__panel` opens with ≥3 rows and `fitProblems()` (`tests/lib/fit.js`, upstream verbatim) returns nothing, at the project's own size and again at **320px tall**, the nearest a runner gets to the on-screen keyboard. The field's font is ≥16px. ⚠️ Called with a 10s cap, not fit.js's 2s: one check measured 22-2545ms on headless WebKit before upstream #476 capped the frame wait | The list is cut off, runs past the visible screen, cannot be scrolled, a finger cannot scroll it, or the field zooms the page on focus |
+| S32 | The app bar search's type-ahead list fits the iPhone screen (offline harness, **runs locally**) | As S31 for `.k-search__in` → `.k-search__panel` on `#/keep/list`. ⚠️ **It found a real defect on its first run:** on a phone the list hung from the search box's right edge at up to 358px wide, and that box is not at the screen edge, so the list started at x=-78 and the start of every result was off the screen (iphone and mobile-chrome). The list is now the house type-ahead list (S35), placed by `House.fit`, which keeps it 8px inside the visible screen and bounds its height to `visualViewport`; it replaced the local `placeSearchPanel()` that first fixed this. Mutation-tested: mounting the list inside `.k-bar` again fails this scenario, because the bar's `backdrop-filter` makes it the containing block for the fixed list | The search results start or end off the visible screen, or the field is under 16px |
+| S33 | The Relationships map does not trap a finger (offline harness, **runs locally**) | On `#/keep/entities`, the computed `touch-action` of `.k-relmap` and every ancestor includes `pan-y` and `pinch-zoom`. It was `none` until 2026-10-25, on a box 70vh tall, so a finger on it could neither scroll nor zoom the page. ⚠️ One `pageerror` is allowed, by exact string and on WebKit only: `ResizeObserver loop completed with undelivered notifications.`, which the map raises on every WebKit load and did with the ORIGINAL CSS too — open, not fixed here | Any `touch-action` on the chain leaves out pan-y or pinch-zoom |
+| S34 | Every app-bar pop-over a button opens fits the iPhone screen (offline harness, **runs locally**) | Upstream gives this to DISMISS, which this repo does not carry (*Upstream Divergences*). Discovers every visible `.k-bar .k-pop > button`, opens each, runs `fitProblems()` on its `.k-menu`, and checks Escape closes it, at the project's size and at 320px tall; a floor on the count stops it passing on nothing found. ⚠️ At these sizes the menus are held by `.k-menu`'s CSS `dvh` fallback, so deleting the JS bound SURVIVES S34 — S30 is what covers `boundMenu` for menus | A menu runs past the screen, is cut off or cannot be scrolled by finger, or Escape stops closing it |
+| S35 | The app bar search is the house type-ahead list (offline harness, **runs locally**) | On `#/keep/list`: `.k-search__in` is a `combobox` with `aria-controls` naming `.k-search__panel` (a `listbox`), every row is a `.list-option` with `role=option` and no Tab stop, and the list sits 8px below the field (or above it). The first option is active on open; ↓ moves to the second; ↑ from the first wraps to the last; Esc closes the list and keeps focus in the field; ↓ reopens it; Enter goes to the active option's `href` and clears the field; a Ctrl/Cmd-click leaves this tab where it is (the house script picks on any click, so the page stops a modified one in the capture phase; Codex #287); a tap on an option goes to its `href`. Mutation-tested 4 of 4: the list mounted back inside `.k-bar`, a pick that does not navigate, rows without `.list-option`, and the modified-click stop removed | The field loses its combobox roles, a key does nothing, a pick does not navigate, a Ctrl/Cmd-click moves the current tab, or the list floats away from its field |
 ### ⚠️ THE REPOSITORY IS PUBLIC, AND `.claude/settings.json` WAS WRITTEN AS IF IT WERE NOT (measured 2026-10-15)
 
 Measured during `/refresh-repo`, from `GET /repos/akyachtsman/claude.insurance`:
@@ -5203,9 +5195,9 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
 | `check-contrast.js` carries two project-specific `.k-ilink` pairs | ⚠️ **The ORIGINAL divergence is resolved and a DIFFERENT one now stands in its place — do not read the old row's "delete after one more sync" as applying to this file any more.** Upstream adopted `css/tokens.css` as a default and takes `--tokens <file>`, so that half is gone. What makes the local copy `CUSTOM` at `8c1a398` is two added pairs: `accent-hover / bg` and `accent-hover / accent-light`. `.k-ilink` is 14px/700 body text, so it answers to AA and not AA_LARGE, and it renders on the page background and on the accent tint, never on surface — checking only `accent / surface` (4.65) passed while these two measured **4.26** and **4.03**, and one of them is the Help desk's broker hand-off, i.e. the remedy the whole fact/advice boundary routes a client to. `design.md` → *Accessibility* asks each project to read the pair list against its own token roles and to derive pairs from its own components, so this is the directive being followed. The file is otherwise verbatim; upstream's template did not change at this head. |
+| `styles/components.js` (the house page script) on a project NOT marked `house_style` | Taken verbatim at `f667e89` on the owner's instruction, for `House.typeahead` on the app bar search. `/refresh-repo` does not compare `styles/` on an unmarked project, so it will not report this file as stale. **Re-copy it from `templates/styles/components.js` at every refresh** and re-run S32 and S35, until the project moves to the house style with `/design-intake` and the drift script takes it over. Never edit it here. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
-| `qa.yml` `UI_PATHS` uses `css/` | Upstream's breadth, this repo's directory names. The **previous local regex matched only `index.html`**, so a PR touching nothing but `js/` or `css/` set `ui=false` and skipped the browser job entirely — on an app that is almost entirely `js/` and `css/`. Fixed by adopting upstream's shape. |
-| `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* lists it among the **8 unconditional** workflows; this repo has the other 7 plus `pages-retry.yml`. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about, and `workflow-ref-guard` stays green because nothing references it — exactly the blind spot that guard cannot see. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
+| `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* listed it among the unconditional workflows when this row was written (2026-10-05); re-read that section before acting on it, since upstream retired most watcher workflows on 2026-10-25. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
 | `renderWitness` extended to S5–S10 | Upstream's fixture ships on its own four scenarios (NAV/CTRL/ENTRY/DISMISS), which this repo deliberately does not carry — so adopting it verbatim would have left **every** scenario here witness-less and the viewport gate reporting SCHEDULED-only forever. Upstream's own rule is "EVERY scenario below requests `renderWitness` AND calls `renderWitness();` as its first statement", so extending it to S5–S10 is following that rule, not diverging from it. Measured 2026-10-06: `disposition: RENDERED laptop,tablet,phone`. |
 | S9 keeps its own auth assertions | S9 reads the prefilled password back before overwriting, and asserts the form *was* prefilled. The generic kit has no notion of "the form already holds a working credential" and fills destructively — an upstream gap this project's login proves. S9 is the reference implementation; do not replace it with the generic verifier. |
@@ -5382,6 +5374,90 @@ this repo is a **post-merge live** artefact, with the PR body carrying it marked
 downstream app (*"deleting a field passed its test, adding one failed at the
 reopen, and the owner found it by hand"*), so it arrives here as an unrun gate
 rather than as a lesson this repo has already paid for.
+
+### ✅ Rulebook synced 2026-10-25 to `f667e89` — the house page script, and the search list on it
+
+Second refresh the same day, on the owner's own ask in the project thread.
+`d23c822` → `f667e89` is two commits: #472 (the house page script,
+`templates/styles/components.js`, called as `House.*`) and #478
+(`House.typeahead`, the type-ahead list's keyboard). The first refresh of the day
+said main was still `d23c822`; it had read the scratch checkout before those two
+merged, which is why the owner had to say so.
+
+**What the scripts found:** no installed template changed (`refresh-drift.sh`:
+11 compared, 9 match, 2 CUSTOM, both still recorded in `refresh_kept`, 0 STALE),
+no broken references, no new variables or secrets. The only new file that could
+apply is the house script, and the drift script does not compare it here,
+because this project is **not marked** `house_style`.
+
+**What was taken anyway, on the owner's instruction:** `styles/components.js`,
+**verbatim** (blob `ff36bcc0`, the template at `f667e89`), and the app bar search
+moved onto `House.typeahead`. `js/keep/views/shell.js` imports it for its
+`window.House` side effect, which puts it on the module graph, so it is in
+`index.html`'s MODULES and cache-busted with the rest. Its global listeners are
+inert here today: no element in the app carries `aria-disabled`, `.menu-btn`,
+`.segmented`, `[data-icon]` or `.th-sort`, so `House.init` binds nothing and the
+`aria-disabled` guard never fires.
+⚠️ **NOTHING KEEPS IT CURRENT.** `/refresh-repo` compares `styles/` only on a
+marked project, and marking this one would also require the house
+`components.css` verbatim and `tokens.css` with every house token name, which is
+the `/design-intake` move, not a refresh. So until that move, **each refresh must
+re-copy `templates/styles/components.js` by hand** and re-run S32 and S35. See the
+*Upstream Divergences* row.
+⚠️ **The search list hangs from `.k-page`, not from `.k-bar`.** The house list is
+`position: fixed` and placed in viewport coordinates, and the bar's
+`backdrop-filter` makes the bar the containing block for a fixed child, so
+inside it the list landed offset by the bar's own position. S35 asserts the list
+sits against its field for exactly this reason; `fitProblems` alone passed it.
+⚠️ **The search no longer says "No matches for …".** The house list closes when
+it has nothing to pick (design.md §16). The home command box keeps its own list
+and its empty message; moving it onto `House.typeahead` too is the obvious
+follow-up.
+
+### ✅ Rulebook synced 2026-10-25 to `d23c822` — the iPhone ruling and the watcher retirement
+
+Run by hand from the plugin scripts in a checkout of `claude.directives`, on the
+owner's written instruction in the project thread (the `directives-toolkit`
+plugin was not attached to that session). It went in two halves, because the
+session's permission classifier first refused the CI half (`[CI Bypass]` for the
+deletions, `[Modify Shared Resources]` for the template copies). The owner then
+approved that half in the thread, and the second attempt went through. Upstream
+had moved from `83597ff` to `d23c822` in between, so the delta and drift were
+re-run against `d23c822` before anything was taken.
+
+**What was taken:**
+
+| drift line | files |
+|---|---|
+| `RETIRED` — deleted | `ci-monitor.yml`, `ci-notify.yml`, `codex-monitor.yml`, `pages-monitor.yml`, `pages-retry.yml`; `check-job-bounds.py`, `check-py-warnings.py`, `check-ui-suite-env.py`, `check-yaml-anchors.py`, `gh_yaml.py`, `workflow-ref-guard.py`, `.github/workflow-ref-required.json`, and their `qa.yml` steps |
+| `STALE` — template taken | `qa-live.yml`, `qa-response.yml`, `actions/ui-suite/action.yml`, `scripts/check-ui-viewports.js` |
+| `CUSTOM` — 3-way merged | `qa.yml`, `scripts/check-contrast.js` |
+| kit, outside the deferred migration | `tests/lib/fit.js`, upstream verbatim at `d23c822` (#476: a 1s cap on the frame wait, and `FIT_INCOMPLETE`) |
+
+**`qa.yml` lost its `ui-changes` job, and so its local `^content/` line.**
+Upstream deleted the path gate: the browser job now runs on **every** trigger,
+so there is nothing left for `^content/` to widen. The three project guard steps
+and the `unit-tests` job are kept as before. `check-contrast.js` kept its two
+`.k-ilink` pairs, merged with no conflicts.
+
+⚠️ **Two things this repo no longer does, because the watchers are gone:**
+a failed `pages build and deployment` is not re-run automatically (that was
+`pages-retry.yml`, this repo's only *required* watcher), and the `codex-flagged`
+label is not set or cleared (that was `codex-monitor.yml`). The sections below
+that describe both are kept as history. A Pages failure is now noticed by
+whoever is watching the session or the Actions tab.
+
+**`docs/upstream-findings/fit-ms-webkit.md` is deleted as landed.** It reported
+`FIT_MS`'s 2s cap timing out on a cold WebKit. Upstream fixed the same failure
+independently in #476. S31, S32 and S34 still pass `{ timeout: 10_000 }` and
+still fail on an unfinished check, which is stricter than upstream's DISMISS
+(which records it as a budget note). That is deliberate: a fit check that did
+not finish has not shown the list fits.
+
+**Also read, from the two new upstream commits:** `global.md` → *Owner-Only
+Commands* (#477: `/refresh-repo` runs only on the owner's own ask, never on
+another Claude's request, a file or a relayed message). This refresh was asked
+for by the owner in their own words in the thread, so it is within that rule.
 
 ### ✅ Rulebook synced 2026-10-15 to `bde28c9719f1` — two upstream BUG FIXES, both taken
 

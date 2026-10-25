@@ -18,6 +18,11 @@ import { test as base, expect } from '@playwright/test';
 // looking healthy. Keep these next to the function that needs them.
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+// fitProblems (design.md → iPhone and iPad): upstream's tests/lib/fit.js, taken
+// verbatim. It has no imports, so it arrives without the kit-helper migration
+// that is still an open owner decision (CLAUDE.md → the kit's helpers moved into
+// tests/lib/).
+import { fitProblems } from './lib/fit.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RENDER WITNESS — evidence that a test BODY started at its project's width (#348)
@@ -4965,7 +4970,12 @@ test('S30: the brand sacrifice is app-bar only, and menu panels respect their re
   await page.locator('.k-pop--nav button').click();
   await expect(page.locator('.k-pop--nav.is-open')).toHaveCount(1);
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.waitForTimeout(200);
+  // ⚠️ POLLED, NOT SLEPT. This was a flat 200ms, and on WebKit the resize
+  // handler can land after it: measured 2026-10-25 on UNCHANGED main, this
+  // assertion failed 4 of 8 runs on tablet + iphone with the popover still
+  // open at the moment of reading. Bounded, so a handler that never closes it
+  // still fails below.
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll('.k-pop.is-open').length), { timeout: 3_000 }).toBe(0).catch(() => {});
   const crossed = await page.evaluate(() => ({
     open: document.querySelectorAll('.k-pop.is-open').length,
     wide: getComputedStyle(document.querySelector('.k-nav')).display,
@@ -4978,6 +4988,271 @@ test('S30: the brand sacrifice is app-bar only, and menu panels respect their re
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1')).toHaveText(/Entities/i, { timeout: 15_000 });
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S31/S32 — LISTS THAT OPEN AS YOU TYPE fit the screen and scroll by finger
+// ─────────────────────────────────────────────────────────────────────────────
+// design.md → iPhone and iPad (owner ruling, 2026-10-25): every type-ahead list
+// fits the part of the screen that is showing, and a list longer than that
+// scrolls inside itself by finger. Upstream's DISMISS checks every overlay a
+// BUTTON opens; a list opened by TYPING is the project's own scenario to cover,
+// because no generic scenario knows which field opens it. The Keep has two:
+//   S31 — the home page's command box (`.k-cmd__in` → `.k-cmd__panel`)
+//   S32 — the app bar's search box (`.k-search__in` → `.k-search__panel`)
+// Each is checked at the project's own size and again at a SHORT height, the
+// nearest a desktop runner gets to the on-screen keyboard: Playwright cannot
+// raise the keyboard, and what it does to the layout is shrink the visible
+// screen, so the list has to fit and scroll in what is left. The `iphone`
+// project is the one that matters — WebKit is the engine of every iPhone
+// browser — and the touch probe inside fitProblems only runs where TouchEvent
+// exists (iphone, mobile-chrome, tablet).
+// ⚠️ The row count is asserted before the fit check, so an empty or one-row
+// list cannot pass by having nothing in it to overflow.
+async function typeAheadFit(page, { route, heading, input, panel, query }) {
+  const size = page.viewportSize();
+  const out = [];
+  for (const height of [size.height, 320]) {
+    await page.setViewportSize({ width: size.width, height });
+    await page.goto(route);
+    await expect(heading(page), `the page under ${route} did not mount`).toBeVisible({ timeout: 15_000 });
+    const box = page.locator(input).first();
+    // Below 16px, iPhone Safari zooms the page when the field takes focus, and
+    // the list is then placed in a zoomed visual viewport (design.md → Inputs).
+    const px = await box.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+    expect(px, `${input} is ${px}px; under 16px iPhone Safari zooms on focus`).toBeGreaterThanOrEqual(16);
+    await box.click();
+    await box.fill(query);
+    const list = page.locator(panel).first();
+    await expect(list, `typing "${query}" did not open ${panel}`).toBeVisible();
+    const rows = await list.locator('.k-sresult').count();
+    expect(rows, `${panel} opened with ${rows} row(s); the scenario needs a real list`).toBeGreaterThanOrEqual(3);
+    // ⚠️ 10s, not fit.js's default FIT_MS of 2s. Measured on the `iphone`
+    // project (headless WebKit) over seven runs of these two scenarios, one
+    // check took 22ms to 2545ms — it awaits two animation frames per list that
+    // scrolls, and WebKit's frames come late under load — so the default
+    // reported "FIT CHECK TIMED OUT" on a list that fits. Chromium stayed under
+    // 90ms. Raised here rather than in the vendored lib, which stays verbatim.
+    for (const p of await fitProblems(list, { timeout: 10_000 })) out.push(`${size.width}x${height}: ${p}`);
+    await page.keyboard.press('Escape');
+  }
+  await page.setViewportSize(size);
+  return out;
+}
+
+test('S31: the home command box\'s type-ahead list fits the screen and scrolls by finger', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  const problems = await typeAheadFit(page, {
+    route: './#/keep',
+    heading: (p) => p.locator('.k-welcome__h'),
+    input: '.k-cmd__in',
+    panel: '.k-cmd__panel',
+    query: 'a',
+  });
+  expect(problems, `the command list does not fit or scroll:\n${problems.join('\n')}`).toEqual([]);
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+test('S32: the app bar search\'s type-ahead list fits the screen and scrolls by finger', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  const problems = await typeAheadFit(page, {
+    route: './#/keep/list',
+    heading: (p) => p.locator('.k-h1', { hasText: /Entities/i }),
+    input: '.k-search__in',
+    panel: '.k-search__panel',
+    query: 'a',
+  });
+  expect(problems, `the search list does not fit or scroll:\n${problems.join('\n')}`).toEqual([]);
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S33 — the Relationships map does not trap a finger
+// ─────────────────────────────────────────────────────────────────────────────
+// design.md → iPhone and iPad: never set `touch-action: none` on anything that
+// scrolls, and never stop zooming. The map carried `none` until 2026-10-25, and
+// it is most of an iPhone screen tall, so a finger on it could not scroll or
+// zoom the page while a mouse wheel still could. Asserted on the computed value
+// of the map AND every ancestor, since `touch-action` is the intersection of
+// the whole chain: an ancestor's `none` would block a finger just the same.
+test('S33: the Relationships map lets a finger scroll and zoom the page', async ({ page, renderWitness, browserName }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  // ⚠️ PRE-EXISTING, and allowed by EXACT string on WebKit only: the map's
+  // ResizeObserver raises this on every load in WebKit (tablet and iphone),
+  // measured with the ORIGINAL `touch-action: none` CSS too, so it is not this
+  // scenario's subject. Recorded as an open finding in the PR rather than
+  // fixed here. Any other error, or this one on Chromium, still fails.
+  const RO_LOOP = 'ResizeObserver loop completed with undelivered notifications.';
+  await seedKeepSession(page, 'a');
+  await page.goto('./#/keep/entities');
+  const map = page.locator('.k-relmap').first();
+  await expect(map, 'the Relationships map did not mount').toBeVisible({ timeout: 15_000 });
+  const chain = await map.evaluate((el) => {
+    const out = [];
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      out.push({ node: n.tagName.toLowerCase() + [...n.classList].slice(0, 1).map((c) => `.${c}`).join(''), ta: getComputedStyle(n).touchAction });
+    }
+    return out;
+  });
+  const blocking = chain.filter(({ ta }) => ta !== 'auto' && ta !== 'manipulation' && !ta.includes('pan-y'));
+  expect(blocking, `touch-action stops a finger scrolling the page: ${JSON.stringify(blocking)}`).toEqual([]);
+  const noZoom = chain.filter(({ ta }) => ta !== 'auto' && ta !== 'manipulation' && !ta.includes('pinch-zoom'));
+  expect(noZoom, `touch-action stops a pinch zooming the page: ${JSON.stringify(noZoom)}`).toEqual([]);
+  const errors = browserName === 'webkit' ? pageErrors.filter((m) => m !== RO_LOOP) : pageErrors;
+  expect(errors, `JS errors: ${errors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S34 — every app-bar pop-over a BUTTON opens fits the screen and scrolls by finger
+// ─────────────────────────────────────────────────────────────────────────────
+// Upstream gives this check to DISMISS, which runs fitProblems on every overlay
+// a trigger opens (design.md → iPhone and iPad; test.md → *Overlays fit and
+// scroll*). This repo deliberately does not carry DISMISS (CLAUDE.md →
+// Upstream Divergences: S5+ instead of NAV/CTRL/ENTRY/DISMISS), so without this
+// scenario none of the Keep's button-opened menus would get the iPhone check.
+// The set is DISCOVERED from the bar (`.k-pop > button` that is visible), not
+// listed, so a menu added later is checked without anyone remembering to; and a
+// floor on the count stops the scenario passing by finding nothing.
+test('S34: every app-bar pop-over fits the screen and scrolls by finger', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  const size = page.viewportSize();
+  const problems = [];
+  let checked = 0;
+  for (const height of [size.height, 320]) {
+    await page.setViewportSize({ width: size.width, height });
+    await page.goto('./#/keep/list');
+    await expect(page.locator('.k-h1', { hasText: /Entities/i }), 'the Entities page did not mount').toBeVisible({ timeout: 15_000 });
+    const triggers = page.locator('.k-bar .k-pop > button:visible');
+    const n = await triggers.count();
+    expect(n, `only ${n} app-bar pop-over trigger(s) found at ${size.width}x${height}`).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < n; i++) {
+      const t = triggers.nth(i);
+      const label = (await t.getAttribute('aria-label')) || `trigger ${i}`;
+      await t.click();
+      const menu = page.locator('.k-pop.is-open .k-menu');
+      await expect(menu, `${label} opened no menu`).toHaveCount(1);
+      // 10s rather than FIT_MS: see typeAheadFit above for the WebKit timing.
+      for (const p of await fitProblems(menu, { timeout: 10_000 })) problems.push(`${size.width}x${height} ${label}: ${p}`);
+      checked++;
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.k-pop.is-open'), `Escape did not close ${label}`).toHaveCount(0);
+    }
+  }
+  expect(checked).toBeGreaterThanOrEqual(4);
+  expect(problems, `app-bar pop-overs do not fit or scroll:\n${problems.join('\n')}`).toEqual([]);
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S35 — the app bar search IS the house type-ahead list (House.typeahead)
+// ─────────────────────────────────────────────────────────────────────────────
+// design.md §16: the field is a combobox, the list a listbox of options, ↓ ↑
+// move through it (wrapping), Enter or a tap picks, Esc closes, and focus never
+// leaves the field. The search uses the house script for all of that
+// (styles/components.js); this checks the wiring, not the script, which
+// claude.directives proves with its own check-house-script.js.
+// ⚠️ The list's TOP is asserted against the field, because `.k-bar` carries
+// backdrop-filter and so is the containing block for a fixed child: mounted in
+// the bar, the list is offset by the bar's own position, and fitProblems alone
+// still passes it while it sits away from the field it belongs to.
+test('S35: the app bar search is the house type-ahead list: roles, keys, pick', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i }), 'the Entities page did not mount').toBeVisible({ timeout: 15_000 });
+  const field = page.locator('.k-search__in');
+  const list = page.locator('.k-search__panel');
+  await expect(field, 'the search field is not a combobox').toHaveAttribute('role', 'combobox');
+  await expect(field).toHaveAttribute('aria-expanded', 'false');
+  const listId = await list.getAttribute('id');
+  expect(listId, 'the list has no id for aria-controls').toBeTruthy();
+  await expect(field).toHaveAttribute('aria-controls', listId);
+  await expect(list).toHaveAttribute('role', 'listbox');
+
+  await field.click();
+  await field.fill('a');
+  await expect(list, 'typing did not open the list').toBeVisible();
+  await expect(field).toHaveAttribute('aria-expanded', 'true');
+  const opts = list.locator('.list-option');
+  const n = await opts.count();
+  expect(n, `only ${n} option(s); the scenario needs a real list`).toBeGreaterThanOrEqual(3);
+  const ids = await opts.evaluateAll((os) => os.map((o) => o.id));
+  expect(await opts.evaluateAll((os) => os.every((o) => o.getAttribute('role') === 'option' && o.tabIndex === -1)),
+    'a row is not an option, or is a Tab stop').toBe(true);
+
+  // Placed against the field: just below it, or (no room below) just above it.
+  const geo = await page.evaluate(() => {
+    const f = document.querySelector('.k-search__in').getBoundingClientRect();
+    const l = document.querySelector('.k-search__panel').getBoundingClientRect();
+    return { fTop: f.top, fBottom: f.bottom, lTop: l.top, lBottom: l.bottom };
+  });
+  const below = Math.abs(geo.lTop - (geo.fBottom + 8)) <= 1.5;
+  const above = Math.abs(geo.lBottom - (geo.fTop - 8)) <= 1.5;
+  expect(below || above, `the list is not placed against its field: ${JSON.stringify(geo)}`).toBe(true);
+
+  const active = () => field.getAttribute('aria-activedescendant');
+  expect(await active(), 'the first option is not active as the list opens').toBe(ids[0]);
+  await field.press('ArrowDown');
+  expect(await active(), '↓ did not move to the second option').toBe(ids[1]);
+  await expect(page.locator(`#${ids[1]}`)).toHaveAttribute('aria-selected', 'true');
+  await field.press('ArrowUp');
+  await field.press('ArrowUp');
+  expect(await active(), '↑ from the first option did not wrap to the last').toBe(ids[n - 1]);
+
+  await field.press('Escape');
+  await expect(list, 'Esc did not close the list').toBeHidden();
+  await expect(field).toHaveAttribute('aria-expanded', 'false');
+  expect(await page.evaluate(() => document.activeElement === document.querySelector('.k-search__in')),
+    'Esc moved focus out of the field').toBe(true);
+  await field.press('ArrowDown');
+  await expect(list, '↓ did not reopen the list after Esc').toBeVisible();
+
+  // Enter picks the active option and goes where it points.
+  const pickHref = await page.locator(`#${await active()}`).getAttribute('href');
+  await field.press('Enter');
+  await expect.poll(() => page.evaluate(() => location.hash), { message: 'Enter did not go to the active option' }).toBe(pickHref);
+  await expect(page.locator('.k-search__in')).toHaveValue('');
+
+  // A MODIFIED click is the browser's (a new tab), never a pick: this tab must
+  // stay where it is. Codex #287: the house script picks on any click, so the
+  // page has to keep a Ctrl/Cmd-click away from it. The new tab, if the browser
+  // opens one, is closed again so it cannot outlive the scenario.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i })).toBeVisible({ timeout: 15_000 });
+  const f2 = page.locator('.k-search__in');
+  await f2.click();
+  await f2.fill('a');
+  const hashBefore = await page.evaluate(() => location.hash);
+  await page.locator('.k-search__panel .list-option').first().click({ modifiers: ['ControlOrMeta'] });
+  await page.waitForTimeout(300);
+  for (const other of page.context().pages()) if (other !== page) await other.close();
+  expect(await page.evaluate(() => location.hash), 'a Ctrl/Cmd-click on a result moved this tab').toBe(hashBefore);
+
+  // A tap picks too. The page may have changed, so the field is found again.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i })).toBeVisible({ timeout: 15_000 });
+  await f2.click();
+  await f2.fill('a');
+  const second = page.locator('.k-search__panel .list-option').nth(1);
+  const tapHref = await second.getAttribute('href');
+  await second.click();
+  await expect.poll(() => page.evaluate(() => location.hash), { message: 'a tap did not go to the option' }).toBe(tapHref);
+  await expect(page.locator('.k-search__panel')).toBeHidden();
 
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });

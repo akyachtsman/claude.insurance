@@ -164,6 +164,9 @@
           // trigger in js/vendor/README.md exists precisely so security updates
           // reach people. An update nobody receives is not an update.
           "js/vendor/supabase-js.js",
+          // The house page script (claude.directives, verbatim), imported by
+          // js/keep/views/shell.js for its window.House side effect.
+          "styles/components.js",
         ];
         var base = new URL(".", document.baseURI).href;
         var supportsImportMap = HTMLScriptElement.supports && HTMLScriptElement.supports("importmap");

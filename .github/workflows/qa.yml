@@ -3,15 +3,13 @@
 # actions from templates/actions/ into .github/actions/ (secret-scan, ui-suite).
 #
 # Jobs:
-#   static-checks — secret scan (composite), contrast guardrail, and the
-#                   workflow-ref, job-bounds, Python-compile, ui-suite env and
-#                   YAML-anchor guards; the blocking gate, runs on every trigger.
-#   ui-changes    — diffs the PR against its base and decides whether the
-#                   browser job is needed. Non-PR events (push to main)
-#                   always run UI tests.
+#   static-checks — secret scan (composite) and contrast guardrail; the
+#                   blocking gate, runs on every trigger.
 #   ui-tests      — Playwright against a local server via the ui-suite
-#                   composite. BLOCKING by default for the static/no-backend
-#                   tier (the suite runs fully against the bundled http-server);
+#                   composite, on every trigger (skipped with a notice only
+#                   while the repo has no index.html yet and no build).
+#                   BLOCKING by default for the static/no-backend tier (the
+#                   suite runs fully against the bundled http-server);
 #                   set advisory-run: 'true' only as an explicit, temporary
 #                   opt-out — and flip it back once the blocking issue is fixed.
 #
@@ -20,13 +18,12 @@
 #     for a login that needs a credential from outside. Which gates need which,
 #     and when to leave both unset: docs/standards/cicd-setup.md -> Step 5.
 #   - Set UI_TESTS_DIR below to the path of your Playwright test directory
-#   - Adjust the UI_PATHS regex in the ui-changes job to your project layout
 #   - A project with the CI-build opt-in (global.md -> Hosting & Deployment)
 #     sets BUILD_CMD and SITE_DIR below to the SAME values as its
-#     pages-deploy.yml, and BUILD_PATHS to its build inputs (required with a
-#     build: the change detection refuses to run without it). The browser job
-#     then runs the build and serves SITE_DIR, so it tests what is deployed,
-#     and a change to a build input alone still runs it. Without the opt-in
+#     pages-deploy.yml, and BUILD_PATHS to its build inputs (read by the
+#     toolkit's Pages edit reminder, not by this workflow). The browser job
+#     then runs the build and serves SITE_DIR, so it tests what is deployed.
+#     Without the opt-in
 #     leave all three as shipped: no build, the repo root is served. It serves
 #     the tree UNFILTERED (dotfiles and deny-listed paths included), so it
 #     tests the site's behaviour, not what pages-deploy.yml leaves out; it does
@@ -62,9 +59,10 @@ env:
   # SITE_DIR; empty BUILD_CMD means no build and SITE_DIR stays '.'.
   BUILD_CMD: ''
   SITE_DIR: '.'
-  # Extended regex of the build INPUTS, matched against the PR file list beside
-  # UI_PATHS, e.g. '^src/|^package(-lock)?\.json$|^tsconfig\.json$|^tailwind\.config\.'.
-  # Empty: nothing beyond UI_PATHS.
+  # Extended regex of the build INPUTS, e.g.
+  # '^src/|^package(-lock)?\.json$|^tsconfig\.json$|^tailwind\.config\.'.
+  # Not read by this workflow: the toolkit's Pages edit reminder reads it to
+  # know which edits change the deployed site. Empty: no build.
   BUILD_PATHS: ''
 
 jobs:
@@ -136,60 +134,6 @@ jobs:
         # could not make. Mutation-tested on all four cases.
         run: node .github/scripts/check-keep-back-routes.mjs
 
-
-
-      # The four Python guards below that read YAML (workflow-ref-guard,
-      # check-job-bounds, check-ui-suite-env, check-yaml-anchors) import
-      # .github/scripts/gh_yaml.py, which reads it as GitHub does (YAML 1.2),
-      # so install it beside them.
-      - name: Workflow cross-reference guard
-        # Every `workflow_run.workflows:` entry must name a real workflow. GitHub
-        # raises no error when one does not — the watcher simply never fires.
-        run: python3 .github/scripts/workflow-ref-guard.py
-
-      - name: Job bounds guard
-        # ENFORCED: every job bounded, none >= 360, ui-suite callers >= 120.
-        # Without this step the 120 below is a NUMBER IN A COMMENT: an edit back
-        # to 40 passes CI and then cancels healthy cold runs, which read as
-        # inconclusive rather than red, so nobody chases them.
-        # ADVISORY: the direct-`playwright install` floor of 30 prints and never
-        # fails the build — identifying a playwright invocation inside a `run:`
-        # block means parsing bash, and the heuristic is not sound enough to gate
-        # on (rule 3 in the script header). Do not read a green run as proof that
-        # floor was met. Scans .github/workflows; it skips templates/workflows,
-        # which only claude.directives has, and says so.
-        run: python3 .github/scripts/check-job-bounds.py
-
-      - name: Tracked Python compiles without warnings
-        # A `\` in a plain (non-raw) docstring is invisible on 3.11, a
-        # SyntaxWarning on 3.12, and a SyntaxError on 3.15 — at which point the
-        # guard carrying it stops running and stops checking. This compiles every
-        # tracked .py with warnings promoted to errors, so the class cannot come
-        # back silently on a future interpreter. Cheap: no imports, no execution.
-        run: python3 .github/scripts/check-py-warnings.py
-
-      - name: ui-suite composite env parity
-        # The composite's viewport checks IMPORT the Playwright config, so a
-        # variable added to its run step and not to the check steps makes the
-        # check read a DIFFERENT config from the one the suite runs: green check,
-        # different run. This compares the steps, and checks every process.env
-        # read in the kit is wired from an input. A variable that needs no input
-        # (set outside the composite, by a self-hosted runner say, or never set
-        # in CI because its reader handles unset) goes in
-        # .github/ui-suite-env-exempt.json as {"NAME": "why it needs none"}, never
-        # in the script, so the next template refresh keeps it. --kit-dir is the
-        # same UI_TESTS_DIR the ui-suite runs: a moved kit left the guard scanning
-        # the default (Codex, #395).
-        run: python3 .github/scripts/check-ui-suite-env.py --kit-dir "$UI_TESTS_DIR"
-
-      - name: Workflow and action YAML parses as GitHub parses it
-        # PyYAML accepts what GitHub refuses: an anchor or alias in an action's
-        # action.yml (the runner: "Anchors are not currently supported";
-        # workflows may use them) and a merge key (`<<`) anywhere. A composite
-        # is read only by a job that uses it, and fails there; this reads every
-        # workflow and every .github/actions/**/action.yml on every trigger and
-        # names the file and line instead.
-        run: python3 .github/scripts/check-yaml-anchors.py
   # PROJECT-SPECIFIC — no upstream equivalent; /refresh-repo must DIFF, not drop.
   # Pure-logic unit tests (node:test) plus HTML validation. Neither needs a
   # browser or a backend, so this is a deterministic blocking gate that answers
@@ -246,143 +190,12 @@ jobs:
           npm_config_legacy_peer_deps: 'true'
         run: npx --yes html-validate@11.5.6 index.html
 
-  ui-changes:
-    name: Detect UI-relevant changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      ui: ${{ steps.diff.outputs.ui }}
-
-    steps:
-      - name: Checkout (full history for base diff)
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      # Deploy parity that must not depend on the diff: the browser job is
-      # skipped on a PR touching no UI path, but a symlink added anywhere in
-      # an unbuilt site (notes.md, a .png) still fails pages-deploy.yml. So
-      # without a build the symlink check runs here, on every PR; with one,
-      # the browser job checks the built output (it always runs then).
-      - name: Symlinks in the unbuilt site
-        if: env.BUILD_CMD == ''
-        run: |
-          src="${SITE_DIR%/}"; [ -n "$src" ] || src="."
-          [ -d "$src" ] || exit 0
-          deploy=0; [ -f .github/workflows/pages-deploy.yml ] && deploy=1
-          # Resolve the root BEFORE entering it: a SITE_DIR that links outside
-          # the repository is what pages-deploy.yml refuses, and following it
-          # would scan runner files instead. An in-repository link is fine.
-          ws=$(realpath -e .)
-          real=$(realpath -e -- "$src")
-          case "$real/" in
-            "$ws"/*) ;;
-            *) if [ "$deploy" = 1 ]; then
-                 echo "::error::SITE_DIR=$SITE_DIR resolves to $real, outside the repository; pages-deploy.yml refuses it."
-                 exit 1
-               fi
-               echo "::warning::SITE_DIR=$SITE_DIR resolves to $real, outside the repository; not scanned."
-               exit 0 ;;
-          esac
-          # Scanned from inside, so the excluded names apply only BELOW the root.
-          links=$(cd "$real" && find . \( -name .git -o -name .github -o -name node_modules \) -prune -o -type l -printf '%P -> %l\n')
-          if [ -n "$links" ] && [ "$deploy" = 1 ]; then
-            echo "::error::symlinks in the site, which pages-deploy.yml refuses; replace them with real files:"
-            printf '%s\n' "$links"
-            exit 1
-          elif [ -n "$links" ]; then
-            echo "::warning::symlinks in the site; pages-deploy.yml (Actions-source) refuses them: $(printf '%s; ' "$links")"
-          fi
-
-      - name: Diff against PR base
-        id: diff
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          # Per-project: paths whose changes warrant a browser run. Matches any
-          # .css, .js or .mjs file by extension, wherever it lives, plus js/ and
-          # styles/ (a source-only change must not skip the browser job): a
-          # css/app.css or a root-level app.js is a layout the kit supports
-          # (check-contrast.js looks in css/ by default), and a matcher listing
-          # only js/ and styles/ let such a PR set ui=false (audit, 2026-10-06).
-          # .github/actions/ is included so changes to the composites are
-          # exercised pre-merge.
-          # ANY deployed .html is an entry point, nested ones included: APP_PAGES
-          # advertises paths like vendor/console.html, and a matcher anchored to
-          # root-level files let a PR touching only that page set ui=false and
-          # skip the very ENTRY gate the page exists for.
-          # ADD the directories your app FETCHES AT RUNTIME: a data file the page
-          # renders (content/*.json that builds a form or a list, say) changes what
-          # the browser shows without touching a source file, so a PR touching
-          # only it sets ui=false (claude.insurance, 2026-10-15: `^content/`). The
-          # name is per-project, so the template cannot list it.
-          #
-          # LOCAL ADDITION, which is the instruction above applied here: ^content/.
-          # Upstream's extension arms already cover this repo's css/ and js/, so
-          # that one directory is the whole of the local delta. content/help-guide.json
-          # seeds the Help desk's chips and its credited-source links, and
-          # content/questionnaire.json builds the whole qualify flow. styles/ is
-          # kept as shipped: it costs nothing here.
-          UI_PATHS: '(\.(html|css|m?js)$|^js/|^styles/|^content/|^\.github/actions/|^\.github/scripts/ui-tests/|^\.github/workflows/qa\.yml$)'
-        run: |
-          # A build whose inputs are not listed would let a source-only PR skip
-          # the browser job: refuse the configuration rather than guess.
-          # Normalised as pages-deploy.yml does: '' and '/' mean the repo root.
-          src="${SITE_DIR%/}"; [ -n "$src" ] || src="."
-          if [ -n "$BUILD_CMD" ] && [ -z "${BUILD_PATHS//[[:space:]]/}" ]; then
-            echo "::error::BUILD_CMD is set but BUILD_PATHS is empty: list the build inputs (workflow env) so a change to them runs the UI suite."
-            exit 1
-          fi
-          # This job gates the LOCAL suite, which serves SITE_DIR as static
-          # files, so it needs a static entry point. Enabling it for a repo with
-          # no index.html would hand Playwright a directory listing to assert
-          # against — a green run that never loaded an application. With a
-          # build, SITE_DIR does not exist yet: the browser job checks its
-          # index.html after building, and refuses there instead.
-          if [ -z "$BUILD_CMD" ] && [ ! -f "$src/index.html" ]; then
-            echo "ui=false" >> "$GITHUB_OUTPUT"
-            echo "No index.html yet — skipping browser job."
-            exit 0
-          fi
-          # Non-PR events (push to main) always run UI tests unconditionally.
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "ui=true" >> "$GITHUB_OUTPUT"
-            echo "Non-PR event — UI tests run unconditionally."
-            exit 0
-          fi
-          # Capture the diff FIRST and fail loudly if git could not produce it.
-          # Piping straight into grep hides the failure: `-e` is suspended inside
-          # an `if` condition and there is no pipefail here, so an unresolvable
-          # BASE_SHA (shallow fetch, force-push, fork PR) makes git error, grep
-          # see nothing, and the job report "No UI-relevant changes" — silently
-          # skipping the browser tests on a PR that may be entirely UI.
-          if ! files=$(git diff --name-only "$BASE_SHA"...HEAD); then
-            echo "::error::could not diff $BASE_SHA...HEAD — refusing to guess whether UI tests are needed."
-            exit 1
-          fi
-          pattern="$UI_PATHS"
-          [ -n "${BUILD_PATHS//[[:space:]]/}" ] && pattern="${pattern}|${BUILD_PATHS}"
-          # grep exits 2 on a malformed pattern; inside an `if` that read as
-          # "no match" and skipped the suite. Only 0 and 1 are answers.
-          rc=0
-          printf '%s\n' "$files" | grep -qE -- "$pattern" || rc=$?
-          case "$rc" in
-            0) echo "ui=true" >> "$GITHUB_OUTPUT"
-               echo "UI-relevant changes detected." ;;
-            1) echo "ui=false" >> "$GITHUB_OUTPUT"
-               echo "No UI-relevant changes — skipping browser job." ;;
-            *) echo "::error::UI_PATHS/BUILD_PATHS is not a valid extended regex (grep exit $rc): fix the pattern."
-               exit 1 ;;
-          esac
-
   ui-tests:
     name: UI Tests (local server)
-    needs: [static-checks, ui-changes]
-    if: needs.ui-changes.outputs.ui == 'true'
+    needs: [static-checks]
     runs-on: ubuntu-latest
-    # 120 is the fleet FLOOR for a ui-suite caller — UI_SUITE_FLOOR in check-job-bounds.py,
-    # which enforces it. Set HIGHER if your suite needs it, never lower, and raise it BEFORE
-    # adding projects. Why 120 (measurements, arithmetic, what it does NOT cover): the
+    # 120 is the fleet FLOOR for a ui-suite caller. Set HIGHER if your suite
+    # needs it, never lower, and raise it BEFORE adding projects. Why 120 (measurements, arithmetic, what it does NOT cover): the
     # CALLER BOUND section of .github/actions/ui-suite/action.yml's header.
     timeout-minutes: 120
 
@@ -414,11 +227,18 @@ jobs:
       # build implies it (the opt-in is Actions-source); otherwise the repo is
       # branch-source, where the managed build publishes links differently, so
       # it only warns. Also exports the normalised directory ('' and '/'
-      # mean the repo root) to serve, as a step output.
+      # mean the repo root) to serve, as a step output. With no build and no
+      # index.html yet (a fresh repo) there is nothing to load: it skips the
+      # suite with a notice rather than hand Playwright a directory listing.
       - name: Check the site directory
         id: site
         run: |
           src="${SITE_DIR%/}"; [ -n "$src" ] || src="."
+          if [ -z "$BUILD_CMD" ] && [ ! -f "$src/index.html" ]; then
+            echo "::notice::No index.html yet — skipping the browser suite."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ ! -f "$src/index.html" ]; then
             echo "::error::$src/index.html is missing: nothing for the suite to load."
             exit 1
@@ -450,6 +270,7 @@ jobs:
       # (TEST_AUTH_CREDENTIAL empty and the login form ships none), and
       # qa-live.yml stays the live gate.
       - uses: ./.github/actions/ui-suite
+        if: steps.site.outputs.skip != 'true'
         with:
           tests-dir: ${{ env.UI_TESTS_DIR }}
           app-url: http://localhost:8080
