@@ -229,12 +229,21 @@ function ribbon() {
 // Kept because that is a property of the CSS rather than of this function — a
 // panel ever positioned in flow would make the measurement self-referential,
 // and the failure then would be a bound that creeps on every resize.
+//
+// The bottom is the VISIBLE screen's, `window.visualViewport`, not
+// `innerHeight` (design.md → iPhone and iPad, owner ruling 2026-10-25): on a
+// phone the on-screen keyboard shrinks the visual viewport and leaves the
+// layout viewport alone, so a bound taken from `innerHeight` runs the panel's
+// end under the keyboard. The same helper bounds the app-bar search's
+// type-ahead list, and both are re-bounded when the visual viewport changes.
 function boundMenu(panel) {
   if (!panel) return;
   panel.style.maxHeight = "";
   const top = panel.getBoundingClientRect().top;
+  const vv = window.visualViewport;
+  const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
   // 12px of breathing room so the last item is not flush to the edge.
-  const room = Math.max(0, Math.round(window.innerHeight - top - 12));
+  const room = Math.max(0, Math.round(bottom - top - 12));
   panel.style.maxHeight = `${room}px`;
 }
 
@@ -293,12 +302,22 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
   // A panel whose own popover has been hidden by a breakpoint (the compact nav
   // above 1129px) cannot be interacted with, so it is closed instead: leaving
   // it `.is-open` would have it reappear already open on the way back down.
-  window.addEventListener("resize", () => {
+  const rebound = () => {
     document.querySelectorAll(".k-pop.is-open").forEach((p) => {
       if (!p.offsetParent && getComputedStyle(p).position !== "fixed") closeKeepMenus();
       else boundMenu(p.querySelector(".k-menu"));
     });
-  });
+    document.querySelectorAll(".k-search.is-open .k-search__panel").forEach(placeSearchPanel);
+  };
+  // On the next frame, not in the event: WebKit can deliver `resize` before
+  // the new width's media queries have laid out, so the breakpoint test above
+  // still saw the hidden popover as visible and left it open (S30 failed 4 of
+  // 8 on tablet + iphone on unchanged main, 2026-10-25).
+  const later = () => requestAnimationFrame(rebound);
+  window.addEventListener("resize", later);
+  // The on-screen keyboard resizes the VISUAL viewport only, so `resize` on
+  // window does not fire for it in iPhone Safari.
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", later);
 }
 
 // ── Search / command dropdowns ───────────────────────────────────────────────
@@ -316,6 +335,30 @@ function resultRow(r, tag) {
 }
 
 const RECORD_TAGS = { entity: "Entity", asset: "Asset", policy: "Policy", document: "Document" };
+
+// Fit the app-bar search's type-ahead list to the VISIBLE screen (design.md →
+// iPhone and iPad). Its CSS hangs it from the search box's right edge at up to
+// 380px wide, and on a phone that box is not at the screen's right edge: the
+// account menu sits beyond it. Measured at 390x664 the list ran from x=-78, so
+// its left 78px — the start of every result's name — was off the screen with
+// nothing able to bring it back (fitProblems, S32). So the list keeps its right
+// anchor while there is room and slides right when there is not, never closer
+// than 12px to either edge. Vertically it is bounded like a menu: it hangs from
+// the sticky app bar, so scrolling the page cannot bring its end into view.
+function placeSearchPanel(panel) {
+  if (!panel) return;
+  panel.style.right = "";
+  panel.style.width = "";
+  const vv = window.visualViewport;
+  const left = vv ? vv.offsetLeft : 0;
+  const width = vv ? vv.width : window.innerWidth;
+  const anchor = panel.parentElement.getBoundingClientRect().right;
+  const w = Math.min(panel.getBoundingClientRect().width, width - 24);
+  const x = Math.max(left + 12, Math.min(anchor - w, left + width - 12 - w));
+  panel.style.width = `${Math.round(w)}px`;
+  panel.style.right = `${Math.round(anchor - (x + w))}px`;
+  boundMenu(panel);
+}
 
 // Top-nav search box: searches the user's records and surfaces matching actions.
 function searchBox() {
@@ -343,6 +386,7 @@ function searchBox() {
       panel.appendChild(el("div", { class: "k-search__empty", text: `No matches for “${q}”.` }));
     }
     wrap.classList.add("is-open");
+    placeSearchPanel(panel);
   }
 
   input.addEventListener("input", render);
