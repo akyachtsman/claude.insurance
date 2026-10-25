@@ -395,6 +395,13 @@ function searchBox() {
   });
   // A tap is a pick too, and the row's own link then goes to the same hash,
   // which the router does not see as a second change.
+  // A MODIFIED click (Ctrl/Cmd/Shift/Alt: a new tab or window) is not a pick:
+  // it is stopped here, in the capture phase, before the house script's own
+  // click listener on the list can treat it as one and move this tab too. The
+  // link's native default still runs, so the browser opens it where asked.
+  panel.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) e.stopPropagation();
+  }, true);
   return wrap;
 }
 

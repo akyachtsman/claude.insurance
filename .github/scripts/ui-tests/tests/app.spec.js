@@ -5228,10 +5228,24 @@ test('S35: the app bar search is the house type-ahead list: roles, keys, pick', 
   await expect.poll(() => page.evaluate(() => location.hash), { message: 'Enter did not go to the active option' }).toBe(pickHref);
   await expect(page.locator('.k-search__in')).toHaveValue('');
 
-  // A tap picks too. The page may have changed, so the field is found again.
+  // A MODIFIED click is the browser's (a new tab), never a pick: this tab must
+  // stay where it is. Codex #287: the house script picks on any click, so the
+  // page has to keep a Ctrl/Cmd-click away from it. The new tab, if the browser
+  // opens one, is closed again so it cannot outlive the scenario.
   await page.goto('./#/keep/list');
   await expect(page.locator('.k-h1', { hasText: /Entities/i })).toBeVisible({ timeout: 15_000 });
   const f2 = page.locator('.k-search__in');
+  await f2.click();
+  await f2.fill('a');
+  const hashBefore = await page.evaluate(() => location.hash);
+  await page.locator('.k-search__panel .list-option').first().click({ modifiers: ['ControlOrMeta'] });
+  await page.waitForTimeout(300);
+  for (const other of page.context().pages()) if (other !== page) await other.close();
+  expect(await page.evaluate(() => location.hash), 'a Ctrl/Cmd-click on a result moved this tab').toBe(hashBefore);
+
+  // A tap picks too. The page may have changed, so the field is found again.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i })).toBeVisible({ timeout: 15_000 });
   await f2.click();
   await f2.fill('a');
   const second = page.locator('.k-search__panel .list-option').nth(1);
