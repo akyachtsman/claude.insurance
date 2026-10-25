@@ -15,7 +15,7 @@ node_modules/
 .github/scripts/ui-tests/playwright-report/
 .agent-reports/
 
-# Python bytecode from the CI guard scripts (check-job-bounds.py, workflow-ref-guard.py)
+# Python bytecode. The Python CI guards were retired 2026-10-25; kept for local tools.
 __pycache__/
 *.pyc
 
