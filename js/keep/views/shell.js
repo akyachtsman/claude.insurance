@@ -16,6 +16,12 @@ import { buildPdf, docLines, docName } from "../logic/docfile.js";
 import { REQUEST_STAGES, stageInfo } from "../logic/requests.js";
 import { entityColorSuffix as colorSuffix, entityAvatarIcon } from "../logic/entity-display.js";
 import { getUser, getEntities, getEntity, getPrefs, savePrefs, signOut } from "../../supabase.js";
+// The house page script (claude.directives templates/styles/components.js,
+// verbatim — never edit it here). It is a classic IIFE that sets window.House;
+// importing it for its side effect puts it on the module graph, so it loads
+// before anything below calls House.typeahead and is cache-busted with the
+// rest of MODULES in index.html.
+import "../../../styles/components.js";
 
 // Broker of record (demo). Single source for the name shown across the portal;
 // policy-level agent comes from the policy record itself.
@@ -234,8 +240,9 @@ function ribbon() {
 // `innerHeight` (design.md → iPhone and iPad, owner ruling 2026-10-25): on a
 // phone the on-screen keyboard shrinks the visual viewport and leaves the
 // layout viewport alone, so a bound taken from `innerHeight` runs the panel's
-// end under the keyboard. The same helper bounds the app-bar search's
-// type-ahead list, and both are re-bounded when the visual viewport changes.
+// end under the keyboard. Menus are re-bounded when the visual viewport
+// changes. (The app-bar search's list is placed by House.typeahead's own fit,
+// which reads the visual viewport the same way.)
 function boundMenu(panel) {
   if (!panel) return;
   panel.style.maxHeight = "";
@@ -265,15 +272,15 @@ function closeKeepMenus() {
     if (m) m.style.maxHeight = "";
   });
 }
-// Close any open search/command dropdowns (the nav search and the landing box).
+// Close the landing command box's dropdown. (The app-bar search is the house
+// type-ahead list, which closes itself on Esc and on a press outside.)
 function closeKeepSearch() {
-  document.querySelectorAll(".k-search.is-open, .k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
+  document.querySelectorAll(".k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
 }
 if (typeof document !== "undefined" && !document.__keepMenusInit) {
   document.__keepMenusInit = true;
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".k-pop")) closeKeepMenus();
-    if (!e.target.closest(".k-search")) document.querySelectorAll(".k-search.is-open").forEach((s) => s.classList.remove("is-open"));
     if (!e.target.closest(".k-cmd")) document.querySelectorAll(".k-cmd.is-open").forEach((s) => s.classList.remove("is-open"));
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeKeepMenus(); closeKeepSearch(); } });
@@ -307,7 +314,6 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
       if (!p.offsetParent && getComputedStyle(p).position !== "fixed") closeKeepMenus();
       else boundMenu(p.querySelector(".k-menu"));
     });
-    document.querySelectorAll(".k-search.is-open .k-search__panel").forEach(placeSearchPanel);
   };
   // On the next frame, not in the event: WebKit can deliver `resize` before
   // the new width's media queries have laid out, so the breakpoint test above
@@ -323,8 +329,10 @@ if (typeof document !== "undefined" && !document.__keepMenusInit) {
 // ── Search / command dropdowns ───────────────────────────────────────────────
 // One row in a results dropdown (records or actions). Anchors carry the href so
 // navigation works natively; the parent clears + closes on click.
-function resultRow(r, tag) {
-  return el("a", { class: "k-sresult", attrs: { href: r.href } }, [
+// `option` makes it a row of the house type-ahead list (`.list-option`, not a
+// Tab stop: focus stays in the field and ↓ ↑ move through the rows).
+function resultRow(r, tag, { option = false } = {}) {
+  return el("a", { class: option ? "k-sresult list-option" : "k-sresult", attrs: option ? { href: r.href, tabindex: "-1" } : { href: r.href } }, [
     el("span", { class: "k-sresult__ic" }, [icon(r.icon, { size: 16 })]),
     el("div", { class: "k-sresult__main" }, [
       el("div", { class: "k-sresult__t", text: r.label }),
@@ -336,65 +344,57 @@ function resultRow(r, tag) {
 
 const RECORD_TAGS = { entity: "Entity", asset: "Asset", policy: "Policy", document: "Document" };
 
-// Fit the app-bar search's type-ahead list to the VISIBLE screen (design.md →
-// iPhone and iPad). Its CSS hangs it from the search box's right edge at up to
-// 380px wide, and on a phone that box is not at the screen's right edge: the
-// account menu sits beyond it. Measured at 390x664 the list ran from x=-78, so
-// its left 78px — the start of every result's name — was off the screen with
-// nothing able to bring it back (fitProblems, S32). So the list keeps its right
-// anchor while there is room and slides right when there is not, never closer
-// than 12px to either edge. Vertically it is bounded like a menu: it hangs from
-// the sticky app bar, so scrolling the page cannot bring its end into view.
-function placeSearchPanel(panel) {
-  if (!panel) return;
-  panel.style.right = "";
-  panel.style.width = "";
-  const vv = window.visualViewport;
-  const left = vv ? vv.offsetLeft : 0;
-  const width = vv ? vv.width : window.innerWidth;
-  const anchor = panel.parentElement.getBoundingClientRect().right;
-  const w = Math.min(panel.getBoundingClientRect().width, width - 24);
-  const x = Math.max(left + 12, Math.min(anchor - w, left + width - 12 - w));
-  panel.style.width = `${Math.round(w)}px`;
-  panel.style.right = `${Math.round(anchor - (x + w))}px`;
-  boundMenu(panel);
-}
-
 // Top-nav search box: searches the user's records and surfaces matching actions.
+// It is the HOUSE type-ahead list (design.md §16, House.typeahead): this page
+// fills the list as the text changes, and the house script owns the rest — the
+// combobox/listbox/option roles, opening it under the field, ↓ ↑ through the
+// rows, Enter or a tap to pick, Esc or a press outside to close, and placing it
+// inside the VISIBLE screen (above the iPhone keyboard when below has no room).
+// It replaced this file's own placeSearchPanel(), which S32 had caught hanging
+// the list off the left of a phone screen.
+// ⚠️ The house list CLOSES when it has no choices, so the old "No matches for …"
+// line is gone: a list with nothing to pick is not shown (design.md §16).
 function searchBox() {
   const input = el("input", { class: "k-search__in", attrs: { type: "search", placeholder: "Search entities, policies, documents…", "aria-label": "Search the Keep", autocomplete: "off" } });
-  const panel = el("div", { class: "k-search__panel" });
+  const panel = el("div", { class: "k-search__panel list-pop" });
   const wrap = el("div", { class: "k-search" }, [el("span", { class: "k-search__ic" }, [icon("search", { size: 18 })]), input, panel]);
-  let firstHref = null;
+  // Bound once, here: the roles and listeners belong to these two nodes for as
+  // long as the app bar exists. A missing house script is a load failure the
+  // page should show, not a search box that silently does nothing.
+  window.House.typeahead(input, panel);
 
+  // The page owns the words: refill on every change, empty when there is no
+  // query. The house script watches the list and opens, moves or closes it.
   function render() {
     const q = input.value.trim();
-    panel.replaceChildren();
-    firstHref = null;
-    if (!q) { wrap.classList.remove("is-open"); return; }
+    if (!q) { panel.replaceChildren(); return; }
+    const rows = [];
     const records = searchRecords(q, getEntities(), 6);
     const actions = matchActions(q, 4);
     if (records.length) {
-      panel.appendChild(el("div", { class: "k-search__lbl", text: "Your records" }));
-      records.forEach((r) => { if (!firstHref) firstHref = r.href; panel.appendChild(resultRow(r, RECORD_TAGS[r.type] || "")); });
+      rows.push(el("div", { class: "k-search__lbl list-head", text: "Your records" }));
+      records.forEach((r) => rows.push(resultRow(r, RECORD_TAGS[r.type] || "", { option: true })));
     }
     if (actions.length) {
-      panel.appendChild(el("div", { class: "k-search__lbl", text: "Actions" }));
-      actions.forEach((a) => { if (!firstHref) firstHref = a.href; panel.appendChild(resultRow(a, "Action")); });
+      rows.push(el("div", { class: "k-search__lbl list-head", text: "Actions" }));
+      actions.forEach((a) => rows.push(resultRow(a, "Action", { option: true })));
     }
-    if (!records.length && !actions.length) {
-      panel.appendChild(el("div", { class: "k-search__empty", text: `No matches for “${q}”.` }));
-    }
-    wrap.classList.add("is-open");
-    placeSearchPanel(panel);
+    panel.replaceChildren(...rows);
   }
 
   input.addEventListener("input", render);
   input.addEventListener("focus", () => { if (input.value.trim()) render(); });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); if (firstHref) { go(firstHref); input.value = ""; wrap.classList.remove("is-open"); input.blur(); } }
+  // A pick (Enter on the active row, or a tap) navigates; the list has already
+  // closed. The field is cleared and released so the bar returns to rest.
+  input.addEventListener("house:pick", (e) => {
+    const href = e.detail.option.getAttribute("href");
+    input.value = "";
+    panel.replaceChildren();
+    input.blur();
+    if (href) go(href);
   });
-  panel.addEventListener("click", (e) => { if (e.target.closest("a")) { input.value = ""; wrap.classList.remove("is-open"); } });
+  // A tap is a pick too, and the row's own link then goes to the same hash,
+  // which the router does not see as a second change.
   return wrap;
 }
 
@@ -584,7 +584,14 @@ function appBar(active) {
 
 function page(active, contentChildren, opts = {}) {
   const wrapClass = `k-wrap${opts.narrow ? " k-wrap--narrow" : opts.mid ? " k-wrap--mid" : opts.split ? " k-wrap--split" : ""}`;
-  return el("div", { class: `k-page k-page--${active}` }, [ribbon(), appBar(active), el("div", { class: wrapClass }, contentChildren)]);
+  const bar = appBar(active);
+  // The search's house list is `position: fixed` and placed in viewport
+  // coordinates by House.fit, but `.k-bar` carries `backdrop-filter`, which
+  // makes it the containing block for fixed descendants: inside the bar the
+  // list would land offset by the bar's own position. So it hangs from the
+  // page instead, beside the bar, and goes with the page on the next route.
+  const list = bar.querySelector(".k-search__panel");
+  return el("div", { class: `k-page k-page--${active}` }, [ribbon(), bar, el("div", { class: wrapClass }, contentChildren), list]);
 }
 
 // Friendly labels for the Keep's static routes (dynamic entity/asset routes

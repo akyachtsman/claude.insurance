@@ -5155,3 +5155,90 @@ test('S34: every app-bar pop-over fits the screen and scrolls by finger', async 
   expect(problems, `app-bar pop-overs do not fit or scroll:\n${problems.join('\n')}`).toEqual([]);
   expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S35 — the app bar search IS the house type-ahead list (House.typeahead)
+// ─────────────────────────────────────────────────────────────────────────────
+// design.md §16: the field is a combobox, the list a listbox of options, ↓ ↑
+// move through it (wrapping), Enter or a tap picks, Esc closes, and focus never
+// leaves the field. The search uses the house script for all of that
+// (styles/components.js); this checks the wiring, not the script, which
+// claude.directives proves with its own check-house-script.js.
+// ⚠️ The list's TOP is asserted against the field, because `.k-bar` carries
+// backdrop-filter and so is the containing block for a fixed child: mounted in
+// the bar, the list is offset by the bar's own position, and fitProblems alone
+// still passes it while it sits away from the field it belongs to.
+test('S35: the app bar search is the house type-ahead list: roles, keys, pick', async ({ page, renderWitness }) => {
+  renderWitness();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+  await seedKeepSession(page, 'a');
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i }), 'the Entities page did not mount').toBeVisible({ timeout: 15_000 });
+  const field = page.locator('.k-search__in');
+  const list = page.locator('.k-search__panel');
+  await expect(field, 'the search field is not a combobox').toHaveAttribute('role', 'combobox');
+  await expect(field).toHaveAttribute('aria-expanded', 'false');
+  const listId = await list.getAttribute('id');
+  expect(listId, 'the list has no id for aria-controls').toBeTruthy();
+  await expect(field).toHaveAttribute('aria-controls', listId);
+  await expect(list).toHaveAttribute('role', 'listbox');
+
+  await field.click();
+  await field.fill('a');
+  await expect(list, 'typing did not open the list').toBeVisible();
+  await expect(field).toHaveAttribute('aria-expanded', 'true');
+  const opts = list.locator('.list-option');
+  const n = await opts.count();
+  expect(n, `only ${n} option(s); the scenario needs a real list`).toBeGreaterThanOrEqual(3);
+  const ids = await opts.evaluateAll((os) => os.map((o) => o.id));
+  expect(await opts.evaluateAll((os) => os.every((o) => o.getAttribute('role') === 'option' && o.tabIndex === -1)),
+    'a row is not an option, or is a Tab stop').toBe(true);
+
+  // Placed against the field: just below it, or (no room below) just above it.
+  const geo = await page.evaluate(() => {
+    const f = document.querySelector('.k-search__in').getBoundingClientRect();
+    const l = document.querySelector('.k-search__panel').getBoundingClientRect();
+    return { fTop: f.top, fBottom: f.bottom, lTop: l.top, lBottom: l.bottom };
+  });
+  const below = Math.abs(geo.lTop - (geo.fBottom + 8)) <= 1.5;
+  const above = Math.abs(geo.lBottom - (geo.fTop - 8)) <= 1.5;
+  expect(below || above, `the list is not placed against its field: ${JSON.stringify(geo)}`).toBe(true);
+
+  const active = () => field.getAttribute('aria-activedescendant');
+  expect(await active(), 'the first option is not active as the list opens').toBe(ids[0]);
+  await field.press('ArrowDown');
+  expect(await active(), '↓ did not move to the second option').toBe(ids[1]);
+  await expect(page.locator(`#${ids[1]}`)).toHaveAttribute('aria-selected', 'true');
+  await field.press('ArrowUp');
+  await field.press('ArrowUp');
+  expect(await active(), '↑ from the first option did not wrap to the last').toBe(ids[n - 1]);
+
+  await field.press('Escape');
+  await expect(list, 'Esc did not close the list').toBeHidden();
+  await expect(field).toHaveAttribute('aria-expanded', 'false');
+  expect(await page.evaluate(() => document.activeElement === document.querySelector('.k-search__in')),
+    'Esc moved focus out of the field').toBe(true);
+  await field.press('ArrowDown');
+  await expect(list, '↓ did not reopen the list after Esc').toBeVisible();
+
+  // Enter picks the active option and goes where it points.
+  const pickHref = await page.locator(`#${await active()}`).getAttribute('href');
+  await field.press('Enter');
+  await expect.poll(() => page.evaluate(() => location.hash), { message: 'Enter did not go to the active option' }).toBe(pickHref);
+  await expect(page.locator('.k-search__in')).toHaveValue('');
+
+  // A tap picks too. The page may have changed, so the field is found again.
+  await page.goto('./#/keep/list');
+  await expect(page.locator('.k-h1', { hasText: /Entities/i })).toBeVisible({ timeout: 15_000 });
+  const f2 = page.locator('.k-search__in');
+  await f2.click();
+  await f2.fill('a');
+  const second = page.locator('.k-search__panel .list-option').nth(1);
+  const tapHref = await second.getAttribute('href');
+  await second.click();
+  await expect.poll(() => page.evaluate(() => location.hash), { message: 'a tap did not go to the option' }).toBe(tapHref);
+  await expect(page.locator('.k-search__panel')).toBeHidden();
+
+  expect(pageErrors, `JS errors: ${pageErrors.join('; ')}`).toHaveLength(0);
+});

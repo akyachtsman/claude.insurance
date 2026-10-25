@@ -751,8 +751,14 @@ a.k-rb:hover { transform: translateX(2px); box-shadow: var(--shadow-sm); color: 
 .k-search__in { width: 240px; min-height: 44px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 0 16px 0 42px; font: 600 16px var(--font-sans); color: var(--color-text-primary); background: var(--color-bg); }
 .k-search__in::placeholder { color: var(--color-text-secondary); }
 .k-search__in:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); background: var(--color-surface); }
-.k-search__panel { position: absolute; top: calc(100% + 10px); right: 0; width: 380px; max-width: calc(100vw - 32px); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: var(--space-2); z-index: 90; display: none; max-height: 72vh; max-height: 72dvh; overflow-y: auto; overscroll-behavior: contain; }
-.k-search.is-open .k-search__panel { display: block; }
+/* The house type-ahead list (House.typeahead, styles/components.js): the house
+   script shows and hides it with `hidden` and places it with `position: fixed`
+   in VISUAL-viewport coordinates, below the field or above it when below has no
+   room. It is mounted on `.k-page`, not inside `.k-bar`: the bar's
+   backdrop-filter would be the containing block for a fixed child. */
+.k-search__panel { position: fixed; top: 0; left: 0; width: 380px; max-width: calc(100vw - 16px); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); padding: var(--space-2); z-index: 90; max-height: 72vh; max-height: 72dvh; overflow-y: auto; overscroll-behavior: contain; }
+.k-search__panel .k-sresult[aria-selected="true"] { background: var(--color-accent-light); }
+.k-search__panel .k-sresult[aria-selected="true"] .k-sresult__ic { color: var(--color-accent); }
 .k-search__lbl { font: 800 11px var(--font-sans); text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-secondary); padding: 9px 12px 4px; }
 .k-search__empty { padding: 12px; font: 600 14px var(--font-sans); color: var(--color-text-secondary); }
 
