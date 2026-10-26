@@ -408,7 +408,6 @@ also work, and is the escape hatch if a pre-merge proof is ever required.)
 | Validate workflow YAML | `python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/qa.yml'))"` |
 | Unit tests | `node --test $(find js supabase/functions -name '*.test.mjs')` |
 | Contrast guardrail | `node .github/scripts/check-contrast.js` |
-| Viewport classes guard | `node .github/scripts/check-ui-viewports.js --tests-dir .github/scripts/ui-tests` |
 | Asset manifest guard | `node .github/scripts/check-asset-manifest.js` |
 | Undefined-call guard | `node .github/scripts/check-undefined-calls.js` |
 | Keep back-route classification | `node .github/scripts/check-keep-back-routes.mjs` |
