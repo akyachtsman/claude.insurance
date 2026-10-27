@@ -73,8 +73,10 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
 - `scripts/setup-playwright.sh` — local browser setup
 - `learnings.jsonl` — append-only session learnings (`/learn`)
 - `.github/workflows/` — 4 workflows: `qa.yml`, `qa-live.yml`, `qa-response.yml`
-  and the project-specific `functions-deploy.yml`. `.github/actions/` holds the
-  shared composite actions (`ui-suite`, `secret-scan`); `.github/scripts/` the
+  and the project-specific `functions-deploy.yml`. The first three are callers
+  of `claude.directives`' shared workflows, which read their composites
+  (`ui-suite`, `secret-scan`, `web-guards`) from that repo at the called commit,
+  so there is no `.github/actions/` here; `.github/scripts/` holds the project
   guard scripts and `ui-tests/`. ⚠️ The five watcher workflows (`ci-monitor`,
   `ci-notify`, `codex-monitor`, `pages-monitor`, `pages-retry`), the six Python
   guards and `.github/workflow-ref-required.json` were **deleted 2026-10-25**
@@ -5168,6 +5170,10 @@ the honest form.
 **The enforcement gap is upstream's** (`kit_dir_kept` wants `check()`'s `local` guard)
 and was ✅ **SENT 2026-10-16 and ACCEPTED** (batched, not shipped — so the gap is
 still LIVE here) at `docs/upstream-findings/kit-dir-local-guard.md`.
+✅ **LANDED 2026-10-27 in `claude.directives` #492**: `kit_dir_kept()` now requires
+`.local` to equal the installed directory's tree. The record was re-keyed from
+`local_tree` to `local` at the refresh to `d32a9d0`, and the note was deleted as
+landed. An edit under `tests/` now re-asks.
 ⚠️ **Do not re-send it.** This line read "WRITTEN, NOT YET SENT" after the send
 had happened and been answered; an owner or a refresh following it would have
 resent an already-accepted report.
@@ -5325,8 +5331,9 @@ transport, both deltas by reading the files, and the session itself through
 
 ⚠️ **ACCEPTED IS NOT FIXED, and that distinction now has its own lifecycle slot.**
 The `kit_dir_kept()` gap is **still live in every installed copy**, this repo's
-included, until that batch lands. `docs/upstream-findings/kit-dir-local-guard.md`
-is therefore **kept** rather than deleted, with its Status line saying so — and
+included, until that batch lands (✅ it landed in #492, 2026-10-27, and the note
+is deleted). `docs/upstream-findings/kit-dir-local-guard.md` was
+therefore **kept** until then rather than deleted, with its Status line saying so — and
 `docs/upstream-findings/README.md` gained two states it did not have
 (*accepted, not shipped* and *declined*), because first contact produced both and
 the table assumed every report either waits or lands.

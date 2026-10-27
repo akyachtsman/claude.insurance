@@ -6,6 +6,8 @@
 # docs/internal/shared-workflows.md.
 #
 # Pinned to an exact claude.directives commit, not a tag (owner, 2026-10-25).
+# Moved 2026-10-27 to d32a9d0, v1.1.0's commit, which adds the web guards
+# (claude.directives #493). qa-live.yml and qa-response.yml stay on 55af14e.
 # Rollback is reverting the pilot PR, which restores the full copy.
 #
 # Settings the old copy kept in `env:` (UI_TESTS_DIR, BUILD_CMD, SITE_DIR) are
@@ -164,7 +166,7 @@ jobs:
 
   qa:
     needs: [project-guards, unit-tests]
-    uses: akyachtsman/claude.directives/.github/workflows/shared-qa.yml@55af14e497d7490b7b0d83cf0528f33659df9b41
+    uses: akyachtsman/claude.directives/.github/workflows/shared-qa.yml@d32a9d0cb6f17b77c3771503ec0bfe95931c9043
     with:
       # Path to the directory containing playwright.config.js and package.json
       tests-dir: .github/scripts/ui-tests
