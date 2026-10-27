@@ -857,6 +857,48 @@ profile**, never by listing a directory.
   ⚠️ List-level visibility is not permission to read. No byte was read from the other three.
   **Before production: split into per-project Supabase accounts/orgs.** Note the deploy token created 2026-10-14 is the counter-example worth copying — scoped to one project and one capability (see *DEPLOY PROVENANCE*).
 - **Operating rule — single-project scope:** from this repo's sessions, only ever touch the `insurance` project (`bdsegmjcgfmgzuxwiplj`). **Never** read from or write to `apfp` (`qnjrwbgxywkdfbfuzwas`). (Best enforced by adding `--project-ref=bdsegmjcgfmgzuxwiplj` to the Supabase MCP config in the web environment.)
+- **Secret columns (`data.md` → *Secret Columns*) — audited 2026-10-27, nothing
+  exposed, two owner-only residuals ACCEPTED below.** Run against the live
+  project as real role sessions (`set local role` + `request.jwt.claims`,
+  inside `begin; … rollback;`), not read off the migrations.
+  **Check 1 — the secret columns.** No column in `public` is a password,
+  outside-service login, API key, token or PIN (`vault.secrets` is empty, there
+  are no storage buckets, and the Edge Function keys are platform secrets, not
+  rows). Two hold an account identifier:
+
+  | column | holds | secret? |
+  |---|---|---|
+  | `policies.interests` (jsonb) | a mortgagee's **"Loan number"** row | **yes** — names a financial account |
+  | `policies.number` | the carrier's policy number | borderline — printed on every policy document; treated as one |
+
+  Reviewed and not secret: `policies.details` (a VIN, visible on the vehicle),
+  `leads.contact_*` (PII, and `anon` holds INSERT only, nobody holds SELECT),
+  and `auth.users.encrypted_password` (Supabase-managed; `anon` and
+  `authenticated` get 42501 on `auth.users`, measured).
+  **Check 2 — every reader, lowest role first** (measured, both columns):
+
+  | caller | `policies` rows |
+  |---|---|
+  | `anon` | 42501 |
+  | `authenticated`, no `profiles` row | 0 |
+  | broker | **0** |
+  | underwriter | **0** |
+  | the owning client | 7 (1 with a loan number) |
+
+  No view exists in `public`. Every SECURITY DEFINER function's EXECUTE is
+  `postgres` or `service_role` only, and none reads `policies`. `help-ask` reads
+  as the caller under RLS and sends `number` (documented above) but not
+  `interests`. So no role but the owner reads either column, and a household is
+  one login: there is **no lower role inside the tenant** to lock them from.
+  **Check 3 — NOT applied, accepted:** both are guarded by the row policy
+  `policies select own` alone, with no column grant and no definer reader. A
+  column revoke here would also break the Keep outright, since `loadTree` reads
+  `policies` with `select("*")` and PostgREST refuses the whole read on one
+  revoked column. **Revisit trigger:** any new SELECT policy on `policies` for a
+  staff role, any second login on one client's records, or a new column holding
+  a credential. Any of those makes check 3 a merge blocker, not a residual.
+  **Check 4:** no "readable by all, tighten later" deferral exists in
+  `supabase/`, `js/supabase.js` or the Edge Functions (searched).
 
 ### ✅ CLOSED 2026-10-15 — THE PORTAL COULD NOT HAVE INVITED ITS FIRST CLIENT
 
