@@ -901,6 +901,42 @@ profile**, never by listing a directory.
   a credential. Any of those makes check 3 a merge blocker, not a residual.
   **Check 4:** no "readable by all, tighten later" deferral exists in
   `supabase/`, `js/supabase.js` or the Edge Functions (searched).
+- **Supabase Defaults (`data.md` → *Supabase Defaults*) — audited 2026-10-29
+  against the live project (Postgres 17.6, Pro plan).**
+  **Check 1 — default table grants: FOUND, fixed by
+  `migrations/20261029231313_revoke_unused_table_privileges.sql`, applied 2026-10-29.** All 9
+  data tables in `public` gave `anon` and `authenticated` TRUNCATE,
+  REFERENCES, TRIGGER and MAINTAIN, and `postgres`'s default privileges handed
+  the same four to every future table. TRUNCATE skips RLS. The sharpest case
+  was `help_queries`: TRUNCATE there would empty the Help desk's throttle log
+  and reset both spend caps. ⚠️ So "`authenticated` holds *nothing* on
+  `help_queries`" (Application Architecture, above) was true of the DATA
+  privileges only until this migration. `data.md` → *MCP Configuration* sends
+  TRUNCATE-bearing SQL to the SQL Editor from a thread; the owner authorized
+  the connector instead, and `apply_migration` returned success with no
+  approval question, so the version matches `list_migrations`. Both of the
+  section's check queries are in the migration's footer and returned no rows
+  after the apply.
+  ⚠️ **Residual, not fixable from `postgres`:** `supabase_admin` holds its own
+  default privileges in `public` granting both roles everything, on tables
+  *it* creates. No table in `public` is owned by `supabase_admin` (measured),
+  and every migration here runs as `postgres`, so they reach nothing today.
+  `privilege.test.mjs` treats a REVOKE-only `ALTER DEFAULT PRIVILEGES` as
+  benign (it can only narrow) and still fails closed on any that grants.
+  **Check 2 — pg_net: N/A.** Not installed (`list_extensions`, 2026-10-29),
+  and neither are `pg_cron` or `pg_graphql`. If pg_net is ever enabled, record
+  `net.http_request_queue`'s unrevocable PUBLIC grant here as an accepted risk
+  with its three rules: never expose `net`, `extensions`, `cron` or `vault`
+  through the Data API; never enable `pg_graphql` without re-running this
+  audit; never write a function in an exposed schema that reads `net.*`.
+  **Check 3 — leaked-password protection: OFF, owner action.** The Keep uses
+  Supabase Auth passwords and the org is on the Pro plan, so it applies and
+  the plan has it; the security advisor flags it (`auth_leaked_password_protection`).
+  It is a Dashboard Auth setting (the advisor links
+  `supabase.com/docs/guides/auth/password-security`), and no session tool can
+  set it. Like public sign-up and custom SMTP, it is
+  project configuration: nothing in this repo fails if it is off, and
+  `get_advisors` is the one session-side reading of it.
 
 ### ✅ CLOSED 2026-10-15 — THE PORTAL COULD NOT HAVE INVITED ITS FIRST CLIENT
 

@@ -1,0 +1,67 @@
+-- Revoke the table privileges the browser roles never use
+-- (data.md -> Supabase Defaults, check 1).
+--
+-- Supabase's default privileges give `anon` and `authenticated` TRUNCATE,
+-- REFERENCES, TRIGGER and (on Postgres 17) MAINTAIN on every table created in
+-- `public`. No path in this app uses any of them: PostgREST cannot send them,
+-- every table here is owned by `postgres`, and only the owner creates
+-- triggers, foreign keys or runs maintenance. TRUNCATE is the one that
+-- matters, because it empties a table WITHOUT consulting row-level security.
+-- A correct policy does not cover it.
+--
+-- Measured before this migration (2026-10-29, live project, Postgres 17.6):
+--   * all 9 of these tables gave both roles all four privileges, granted by
+--     `postgres`: leads, rule_settings, profiles, entities, assets, policies,
+--     entity_relationships, enhancement_requests, help_queries.
+--   * `help_queries` is the sharpest: CLAUDE.md says `authenticated` holds
+--     "nothing" on it, which was true of the DATA privileges only. TRUNCATE on
+--     it would empty the Help desk's throttle log and reset both spend caps.
+--   * help_settings and enhancement_notifications were already clean.
+--   * postgres's default privileges in `public` still handed all four to both
+--     roles for every FUTURE table.
+--
+-- ✅ APPLIED 2026-10-29 through the Supabase connector (`apply_migration`),
+-- on the owner's explicit authorization in the project thread, as version
+-- 20261029231313 (matches `list_migrations`). data.md -> MCP Configuration
+-- says SQL containing TRUNCATE goes through the SQL Editor from a thread,
+-- because the connector's approval question cannot show there; this call
+-- returned success without one. Measured after apply: both checks below
+-- return no rows, and a real `authenticated` client session still reads its
+-- own entities and policies.
+--
+-- NOT COVERED, and not coverable from `postgres`: `supabase_admin` also holds
+-- default privileges in `public` that grant both roles everything, on tables
+-- `supabase_admin` creates. `postgres` is not a member of that role and cannot
+-- alter them. No table in `public` is owned by `supabase_admin` today
+-- (measured), and every migration here runs as `postgres`, so they reach
+-- nothing.
+--
+-- INVERSE (restores the Supabase defaults exactly):
+--   grant truncate, references, trigger, maintain on all tables in schema public to anon, authenticated;
+--   alter default privileges for role postgres in schema public
+--     grant truncate, references, trigger, maintain on tables to anon, authenticated;
+
+revoke truncate, references, trigger, maintain on all tables in schema public from anon, authenticated;
+
+alter default privileges for role postgres in schema public
+  revoke truncate, references, trigger, maintain on tables from anon, authenticated;
+
+-- CHECKS (data.md -> Supabase Defaults). Both must return no rows.
+--
+-- 1. Existing tables:
+--   select c.oid::regclass as object, r.role, p.priv
+--   from pg_class c
+--   cross join (values ('anon'), ('authenticated')) r(role)
+--   cross join (values ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) p(priv)
+--   where c.relnamespace = 'public'::regnamespace
+--     and c.relkind in ('r', 'p', 'v', 'm', 'f')
+--     and has_table_privilege(r.role, c.oid, p.priv);
+--
+-- 2. The defaults future tables get:
+--   select a.grantee::regrole as role, a.privilege_type
+--   from pg_default_acl d, aclexplode(d.defaclacl) a
+--   where d.defaclrole = 'postgres'::regrole
+--     and d.defaclnamespace = 'public'::regnamespace
+--     and d.defaclobjtype = 'r'
+--     and a.grantee in ('anon'::regrole, 'authenticated'::regrole)
+--     and a.privilege_type in ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN');
