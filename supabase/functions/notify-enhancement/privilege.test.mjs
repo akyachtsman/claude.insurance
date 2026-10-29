@@ -1243,7 +1243,7 @@ const MODELLED_STATEMENT = /^(?:grant|revoke)\b/i;
 // `ALTER DEFAULT PRIVILEGES … REVOKE …` with no GRANT anywhere in it can only
 // take privileges AWAY from objects created later, so it cannot widen what a
 // client holds. It is the second half of data.md -> Supabase Defaults check 1
-// (migration 20261029230000). Any GRANT in the statement, including `REVOKE
+// (migration 20261029231313). Any GRANT in the statement, including `REVOKE
 // GRANT OPTION FOR`, keeps the fail-closed "default-privileges" finding: the
 // test is for the narrowing shape only, not for the word `revoke`.
 function defaultPrivilegesRevokeOnly(head) {

@@ -904,18 +904,19 @@ profile**, never by listing a directory.
 - **Supabase Defaults (`data.md` → *Supabase Defaults*) — audited 2026-10-29
   against the live project (Postgres 17.6, Pro plan).**
   **Check 1 — default table grants: FOUND, fixed by
-  `migrations/20261029230000_revoke_unused_table_privileges.sql`.** All 9
+  `migrations/20261029231313_revoke_unused_table_privileges.sql`, applied 2026-10-29.** All 9
   data tables in `public` gave `anon` and `authenticated` TRUNCATE,
   REFERENCES, TRIGGER and MAINTAIN, and `postgres`'s default privileges handed
   the same four to every future table. TRUNCATE skips RLS. The sharpest case
   was `help_queries`: TRUNCATE there would empty the Help desk's throttle log
   and reset both spend caps. ⚠️ So "`authenticated` holds *nothing* on
   `help_queries`" (Application Architecture, above) was true of the DATA
-  privileges only until this migration. It goes through the SQL Editor because
-  it contains TRUNCATE (`data.md` → *MCP Configuration*), and its
-  `schema_migrations` row is written afterwards with a plain INSERT, so
-  `list_migrations` still matches the directory. Both of the section's check
-  queries are in the migration's footer and must return no rows.
+  privileges only until this migration. `data.md` → *MCP Configuration* sends
+  TRUNCATE-bearing SQL to the SQL Editor from a thread; the owner authorized
+  the connector instead, and `apply_migration` returned success with no
+  approval question, so the version matches `list_migrations`. Both of the
+  section's check queries are in the migration's footer and returned no rows
+  after the apply.
   ⚠️ **Residual, not fixable from `postgres`:** `supabase_admin` holds its own
   default privileges in `public` granting both roles everything, on tables
   *it* creates. No table in `public` is owned by `supabase_admin` (measured),

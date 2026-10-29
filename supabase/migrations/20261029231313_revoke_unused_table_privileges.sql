@@ -20,13 +20,14 @@
 --   * postgres's default privileges in `public` still handed all four to both
 --     roles for every FUTURE table.
 --
--- ⚠️ THIS FILE CONTAINS TRUNCATE, so from a project thread it is applied by
--- pasting it unchanged into the Supabase SQL Editor (data.md -> MCP
--- Configuration). The connector's approval question cannot show in a thread.
--- The SQL Editor does not record a migration, so the
--- `supabase_migrations.schema_migrations` row for this version is written
--- afterwards with a plain INSERT, which keeps `list_migrations` matching this
--- directory.
+-- ✅ APPLIED 2026-10-29 through the Supabase connector (`apply_migration`),
+-- on the owner's explicit authorization in the project thread, as version
+-- 20261029231313 (matches `list_migrations`). data.md -> MCP Configuration
+-- says SQL containing TRUNCATE goes through the SQL Editor from a thread,
+-- because the connector's approval question cannot show there; this call
+-- returned success without one. Measured after apply: both checks below
+-- return no rows, and a real `authenticated` client session still reads its
+-- own entities and policies.
 --
 -- NOT COVERED, and not coverable from `postgres`: `supabase_admin` also holds
 -- default privileges in `public` that grant both roles everything, on tables
