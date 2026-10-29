@@ -1240,12 +1240,24 @@ const MODELLED_STATEMENT = /^(?:grant|revoke)\b/i;
 // called this function with RAW SQL and the sweep calls it with the blanked
 // scan. **A pin that feeds the classifier different input than its caller does
 // is not a pin**; same family as the concatenated-files lesson in CLAUDE.md.
+// `ALTER DEFAULT PRIVILEGES … REVOKE …` with no GRANT anywhere in it can only
+// take privileges AWAY from objects created later, so it cannot widen what a
+// client holds. It is the second half of data.md -> Supabase Defaults check 1
+// (migration 20261029230000). Any GRANT in the statement, including `REVOKE
+// GRANT OPTION FOR`, keeps the fail-closed "default-privileges" finding: the
+// test is for the narrowing shape only, not for the word `revoke`.
+function defaultPrivilegesRevokeOnly(head) {
+  return /^alter\s+default\s+privileges\b/i.test(head) &&
+    /\brevoke\b/i.test(head) && !/\bgrant\b/i.test(head);
+}
+
 function statementKind(head, text = head) {
   if (MODELLED_STATEMENT.test(head)) return "modelled";
   if (/^alter\s+(?:table|view|sequence|type|function|schema|materialized\s+view)[\s\S]*\bowner\s+to\b/i.test(head)) {
     return "owner";
   }
   if (/\bforce\s+row\s+level\s+security\b/i.test(head)) return "force-rls";
+  if (defaultPrivilegesRevokeOnly(head)) return "benign";
   if (/^alter\s+default\s+privileges\b/i.test(head)) return "default-privileges";
   if (/^alter\s+table\s+[\w.]+\s+rename\b/i.test(head)) return "rename";
   if (/^(?:create|alter)\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i.test(head)) {
@@ -1292,6 +1304,10 @@ function aclStatements(sql) {
       continue;
     }
     if (!/\b(grant|revoke)\b/i.test(head)) continue;
+    // A revoke-only default-privileges statement narrows FUTURE objects; the
+    // replays below model existing tables and routines, so it has nothing to
+    // contribute to them and cannot open anything (see statementKind).
+    if (defaultPrivilegesRevokeOnly(head)) continue;
     // A grant that is not the statement's own verb is something this parser
     // does not model: `alter default privileges ... grant ...`, or a grant
     // built inside a dollar-quoted body or an EXECUTE string. Reported so the
@@ -2057,6 +2073,8 @@ test("every STATEMENT in every migration is a kind this suite has reasoned about
     ["ALTER TABLE public.x OWNER TO authenticated", "owner"],
     ["alter table public.x force row level security", "force-rls"],
     ["alter default privileges in schema public grant insert on tables to anon", "default-privileges"],
+    ["alter default privileges for role postgres in schema public revoke truncate, references, trigger, maintain on tables from anon, authenticated", "benign"],
+    ["alter default privileges in schema public revoke grant option for insert on tables from anon", "default-privileges"],
     ["grant insert on public.x to anon", "modelled"],
     ["revoke all on public.x from anon", "modelled"],
     ["alter table public.x enable row level security", "benign"],
