@@ -174,7 +174,7 @@ jobs:
       build-cmd: ''
       site-dir: '.'
       # This project's own copy, with its two added .k-ilink pairs. Tokens are
-      # css/tokens.css, the script's default, so no --tokens is needed.
+      # styles/tokens.css, the script's default, so no --tokens is needed.
       contrast-script: .github/scripts/check-contrast.js
       contrast-args: ''
       # Blocking: the suite runs fully against the bundled local server.

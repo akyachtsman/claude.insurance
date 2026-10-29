@@ -73,7 +73,7 @@ function needCard(n, coverage) {
     el("div", { class: "need__head" }, [
       iconBadge(coverageIcon(n.id)),
       el("h3", { class: "need__title", text: n.title }),
-      el("span", { class: `tag tag-${n.priority}`, text: n.priority === "high" ? "Essential" : "Recommended" }),
+      el("span", { class: `legacy-tag tag-${n.priority}`, text: n.priority === "high" ? "Essential" : "Recommended" }),
     ]),
     el("p", { class: "why", text: n.why }),
     found ? el("a", { class: "need__link", attrs: { href: `#/coverage/${n.id}` } }, [
@@ -100,7 +100,7 @@ function nextSteps() {
           "A licensed broker reviews your summary and reaches out to talk options — no pressure, " +
           "no obligation, and your details are never sold." }),
       ]),
-      ctaLink("Back to coverage guide", "#/", { variant: "btn-secondary", noArrow: true }),
+      ctaLink("Back to coverage guide", "#/", { variant: "legacy-btn-secondary", noArrow: true }),
     ]),
   ]);
 }
@@ -141,7 +141,7 @@ function renderEmpty() {
     el("h1", { class: "placeholder__title", text: "No summary yet" }),
     el("p", { text: "Answer a few quick questions and we'll build your personalized coverage summary here." }),
     el("div", { class: "btn-row is-center" }, [
-      ctaLink("Find what coverage I need", "#/qualify", { variant: "btn-primary" }),
+      ctaLink("Find what coverage I need", "#/qualify", { variant: "legacy-btn-primary" }),
     ]),
   ]));
 }

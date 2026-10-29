@@ -25,7 +25,7 @@ export function sectionHead({ eyebrow: eb, ebIcon, title, lede, center } = {}) {
 // Primary CTA anchor with a trailing arrow.
 export function ctaLink(text, href, opts = {}) {
   return el("a", {
-    class: `btn ${opts.variant || "btn-primary"}${opts.size ? " " + opts.size : ""}`,
+    class: `legacy-btn ${opts.variant || "legacy-btn-primary"}${opts.size ? " " + opts.size : ""}`,
     attrs: { href },
   }, [el("span", { text }), opts.noArrow ? null : icon("arrow-right", { size: 20 })]);
 }
@@ -59,7 +59,7 @@ export function ctaBand({ title, body, cta, href }) {
 }
 
 // Hero palette — single source of truth for the inline-SVG composition. These
-// mirror the harbor tokens in css/tokens.css (e.g. ACCENT = --color-accent,
+// mirror the harbor tokens in styles/tokens.css (e.g. ACCENT = --color-accent,
 // SURFACE = --color-surface), duplicated here because CSS var() does not resolve
 // in SVG presentation attributes; GLOW/SKY are the brighter gradient-only tints.
 const HERO = {

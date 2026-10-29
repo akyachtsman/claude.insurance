@@ -1,15 +1,12 @@
 /* tokens.css — design system tokens.
    Identity: "Direction C" (Soft consumer) — set via data-theme="harbor" on <html>.
    Quicksand (display) + Nunito (body), blue accent, soft tints, large radii.
-   Shadows are theme-independent. Self-hosted fonts (OFL) live in css/fonts/. */
-
-/* ── Self-hosted fonts (no network at runtime) ──────────────────────────────── */
-@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/quicksand-600.woff2") format("woff2"); }
-@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/quicksand-700.woff2") format("woff2"); }
-@font-face { font-family: "Nunito"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/nunito-400.woff2") format("woff2"); }
-@font-face { font-family: "Nunito"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/nunito-600.woff2") format("woff2"); }
-@font-face { font-family: "Nunito"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/nunito-700.woff2") format("woff2"); }
-@font-face { font-family: "Nunito"; font-style: normal; font-weight: 800; font-display: swap; src: url("fonts/nunito-800.woff2") format("woff2"); }
+   Shadows are theme-independent.
+   This project is on the HOUSE style (design.md, owner rulings 2026-10-19) with
+   its OWN palette and fonts by owner ruling (2026-10-29, CLAUDE.md -> Design
+   Theme): the house token NAMES are all declared here, the values are this
+   palette's. Moved from css/tokens.css on 2026-10-29. The @font-face rules
+   live in css/fonts.css, beside the font files their url()s name. */
 
 :root {
   /* Larger, softer radii for the rounded "Soft consumer" language. */
@@ -82,7 +79,7 @@
   --color-text-secondary: #55607F;
   --color-accent: #2F6AF6;
   --color-accent-hover: #1F52D6;
-  /* Text/icons ON an accent fill. Codifies the #fff that .btn-primary already
+  /* Text/icons ON an accent fill. Codifies the #fff that .legacy-btn-primary already
      hardcoded, so the contrast guardrail measures the pair that actually
      renders rather than a literal it cannot see. */
   --color-on-accent: #FFFFFF;
@@ -101,4 +98,34 @@
      for individual entity icons. ~10:1 on white, meets WCAG AA for label text. */
   --color-company: #800020;
   --color-company-bg: #F3E1E5;
+
+  /* ── House token names (design.md -> Tokens & components), added 2026-10-29
+     for the house-style move. Each takes a value in THIS palette where one
+     passes; where the palette has none that does, the house value. Nothing on
+     the current screens reads them yet, so adding them changes nothing visible.
+     The ok/warn/gap colours above are NOT reused for the status pairs: as pill
+     text on their own tints they measure 3.75, 3.88 and 4.15, under 4.5:1. */
+  /* A control's edge: 3:1 against the surface (3.63) and the page (3.32),
+     WCAG 1.4.11. --color-border above is for edges nothing depends on. */
+  --color-border-input: #7A86A6;
+  --color-danger-hover: #A51F3B;  /* --color-on-danger on it: 7.35 */
+  --color-on-danger: #FFFFFF;     /* on --color-danger: 5.61 */
+  /* Status pairs (§14), pill text on pill background, each at least 4.5:1. */
+  --color-success: #166534;  --color-success-bg: #DCFCE7;  /* 6.49, house */
+  --color-warning: #92400E;  --color-warning-bg: #FEF3C7;  /* 6.37, house */
+  --color-danger-bg: #FDECEA;                              /* --color-danger on it: 4.91 */
+  --color-neutral: #55607F;  --color-neutral-bg: #EEF2FA;  /* 5.56, this palette */
+  --color-info: #1F52D6;     --color-info-bg: #E7EFFE;     /* 5.62, accent-hover on accent-light */
+  --color-expired: #6B21A8;  --color-expired-bg: #F3E8FF;  /* 7.39, house */
+  --color-backdrop: rgba(27, 37, 64, 0.45);  /* the dim behind a dialog: text-primary */
+
+  --font-xs: 12px;
+  /* target sizes — design.md -> Cross-platform & responsive */
+  --size-target-min: 44px;
+  --size-check-min: 24px;
+  --size-input-min: 48px;
+  --font-input-min: 16px;  /* never below 16px: prevents iOS zoom on focus */
+
+  /* layers — design.md §10 */
+  --z-popover: 100; --z-dialog: 200; --z-toast: 300;
 }

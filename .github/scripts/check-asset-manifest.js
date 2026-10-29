@@ -6,7 +6,9 @@
  * WHY THIS EXISTS. index.html carries three lists that nothing validated:
  *   1. MODULES  — every js/**\/*.js on the import graph, used to build the
  *                 cache-busting import map
- *   2. SHEETS   — every css/*.css, injected with ?v=
+ *   2. SHEETS   — every css/*.css and styles/*.css, injected with ?v=
+ *                 (styles/ holds the house tokens.css, components.css and
+ *                 legacy.css since the house-style move, 2026-10-29)
  *   3. <noscript> <link>s — the same stylesheets again, by hand
  *
  * An omission from MODULES is SILENT: the module still loads, it just resolves
@@ -89,20 +91,24 @@ for (const f of mjsInGraph) {
 }
 
 // ── stylesheets: disk <-> SHEETS <-> <noscript>, all three ──────────────────
-const cssDir = path.join(ROOT, "css");
-const onDisk = fs.existsSync(cssDir)
-  ? fs.readdirSync(cssDir).filter((f) => f.endsWith(".css")).map((f) => "css/" + f).sort()
-  : die(2, "CANNOT CHECK — css/ not found");
+// Both directories, and each must exist: a missing one is "cannot check", never
+// an empty list that every SHEETS entry then trivially matches.
+const CSS_DIRS = ["styles", "css"];
+const onDisk = CSS_DIRS.flatMap((d) => {
+  const abs = path.join(ROOT, d);
+  if (!fs.existsSync(abs)) die(2, `CANNOT CHECK — ${d}/ not found`);
+  return fs.readdirSync(abs).filter((f) => f.endsWith(".css")).map((f) => `${d}/${f}`);
+}).sort();
 
 for (const f of onDisk) {
-  if (!sheets.includes(f)) problems.push(`SHEETS is missing "${f}" (present in css/) — it would never load.`);
+  if (!sheets.includes(f)) problems.push(`SHEETS is missing "${f}" (present on disk) — it would never load.`);
   if (!noscriptSheets.includes(f)) problems.push(`<noscript> is missing a link for "${f}" — no-JS visitors lose it.`);
 }
 for (const f of sheets) {
-  if (!onDisk.includes(f)) problems.push(`SHEETS lists "${f}", which does not exist in css/.`);
+  if (!onDisk.includes(f)) problems.push(`SHEETS lists "${f}", which does not exist on disk.`);
 }
 for (const f of noscriptSheets) {
-  if (!onDisk.includes(f)) problems.push(`<noscript> links "${f}", which does not exist in css/.`);
+  if (!onDisk.includes(f)) problems.push(`<noscript> links "${f}", which does not exist on disk.`);
 }
 if (sheets.join("|") !== noscriptSheets.join("|")) {
   problems.push(`SHEETS and <noscript> disagree on order/content:\n    SHEETS:    ${sheets.join(", ")}\n    <noscript>: ${noscriptSheets.join(", ")}`);
@@ -111,8 +117,8 @@ if (sheets.join("|") !== noscriptSheets.join("|")) {
 if (problems.length) {
   console.error("check-asset-manifest: FAIL\n");
   for (const p of problems) console.error("  - " + p);
-  console.error(`\n  (${graphJs.length} modules on the import graph from ${ENTRY}; ${onDisk.length} stylesheets in css/)`);
+  console.error(`\n  (${graphJs.length} modules on the import graph from ${ENTRY}; ${onDisk.length} stylesheets in styles/ and css/)`);
   process.exit(1);
 }
-console.log(`check-asset-manifest: OK — ${graphJs.length} graph modules all cache-busted, ${onDisk.length} stylesheets consistent across SHEETS, <noscript> and css/.`);
+console.log(`check-asset-manifest: OK — ${graphJs.length} graph modules all cache-busted, ${onDisk.length} stylesheets consistent across SHEETS, <noscript>, styles/ and css/.`);
 console.log("        checks the import graph reached from " + ENTRY + ", not a glob: a module nothing imports is not demanded, and one that is imported cannot be forgotten.");
