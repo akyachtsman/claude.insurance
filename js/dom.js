@@ -17,7 +17,12 @@ export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+// Every screen's root passes through here, so this is where each one is marked
+// `legacy-screen`: the house-style move (design.md, step 1 of 3, 2026-10-29)
+// holds the old look back under that class in styles/legacy.css. A screen moved
+// onto the house components in step 2 stops taking the class.
 export function mount(node) {
+  node.classList.add("legacy-screen");
   const app = document.getElementById("app");
   clear(app);
   app.appendChild(node);

@@ -16,11 +16,29 @@ https://raw.githubusercontent.com/akyachtsman/claude.directives/main/directives/
 - **Branch policy:** Develop on a `claude/<name>` feature branch; PRs target `main`
 
 ## Design Theme
-Project identity is **"Direction C" (Soft consumer)** — Quicksand (display) +
-Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii. Self-hosted OFL fonts in
-`css/fonts/`. Set via `data-theme="harbor"` on root `<html>`; tokens in
-`css/tokens.css`. Marketing site and the Keep portal share this one identity.
-- **Design Theme:** `harbor` (Direction C — blue/soft)
+This project is on the **house style** (`design.md`, owner rulings 2026-10-19:
+one house style for every project, its components, words, icons and patterns).
+`.claude/directive-sync.json` carries `"house_style": true`, so `/refresh-repo`
+keeps `styles/components.css` and `styles/components.js` verbatim and checks
+`styles/tokens.css` by token name.
+
+**Palette ruling (owner, 2026-10-29): this project keeps its own colours and
+fonts** — "Direction C" (Soft consumer): Quicksand (display) + Nunito (body),
+blue accent (`--color-accent: #2F6AF6`), soft tints, large radii. So
+`design.md` → *Import a palette* (1b) applies: `styles/tokens.css` declares
+every house token name with this palette's values, never the house's, and a
+refresh never resets them. Where the palette had no value that passes for a new
+house name (the success, warning and expired status pairs), the house value is
+used; the old `--color-ok/-warn/-gap` are not reused, because they fail 4.5:1
+as pill text. Set via `data-theme="harbor"` on root `<html>`. Self-hosted OFL
+fonts in `css/fonts/`, declared in `css/fonts.css`. Marketing site and the Keep
+share this one identity.
+- **Design Theme:** `harbor` (Direction C — blue/soft), house components
+- **The move is in three steps** (`/design-intake` 1c). Step 1 (2026-10-29,
+  no visible change) installed the house files and renamed the 7 colliding
+  classes to `legacy-*`; every screen is still on its own look under
+  `legacy-screen`, and `DESIGN-GAPS.md` lists them. Step 2 moves screens one
+  PR at a time; step 3 deletes `styles/legacy.css`.
 
 ## Application Architecture
 - `index.html` — app shell; sets `data-theme="harbor"`, loads `js/main.js` (ES module)
@@ -62,10 +80,22 @@ Nunito (body), blue accent (`--color-accent: #2F6AF6`), soft tints, large radii.
   for the prompt, so chips, prompt and credits cannot drift apart. Every topic's
   `route` must resolve to a real `case` in `dispatchKeep`; all 15 were checked
   against `js/main.js` when it was written)
-- `css/` — `tokens.css` (design tokens), `base.css`, `components.css`,
-  `forms.css`, `views.css`, `motion.css` (public site) + `keep.css` (portal,
-  `k-` prefixed); self-hosted OFL fonts in `css/fonts/`
-- `styles/components.js` — the house page script (`window.House`), verbatim from `claude.directives`, imported by `js/keep/views/shell.js`; today only `House.typeahead` is used, by the app bar search. Not compared by `/refresh-repo` on this unmarked project: re-copy it at each refresh (see *Upstream Divergences*)
+- `styles/` — the house files: `tokens.css` (this palette's values for every
+  house token name, plus the project's own tokens; moved from `css/tokens.css`
+  2026-10-29), `components.css` (house, verbatim) and `components.js` (the house
+  page script, `window.House`, verbatim; imported by `js/keep/views/shell.js`,
+  only `House.typeahead` used so far). Plus `legacy.css`, the project's: three
+  pins that hold the house page base back on screens not moved yet (scoped
+  under `.legacy-screen`), deleted at step 3.
+- `css/` — the project's own sheets: `fonts.css` (the six `@font-face` rules,
+  kept beside `css/fonts/` so their relative URLs resolve), `base.css`,
+  `components.css`, `forms.css`, `views.css`, `motion.css` (public site) +
+  `keep.css` (portal, `k-` prefixed).
+  **Load order is load-bearing** (`SHEETS` in `index.html`, its `<noscript>`
+  copy, and `check-asset-manifest.js` which checks both against `styles/` and
+  `css/`): `styles/tokens.css`, `css/fonts.css`, `styles/components.css`,
+  `styles/legacy.css`, then `css/*`. The house file comes before the project's
+  sheets so the project's rules win where they overlap it.
 - `docs/data-model.md` — the canonical label/field reference behind the "one
   canonical label" standard above
 - `specs/` — **frozen** point-in-time SDD record for feature 001, not current
@@ -4872,7 +4902,7 @@ Read by `ui-tester` and the Playwright kit at runtime — fill in before invokin
 | Keep credential (valid) | `user` / `keep-demo-2026` (client view, prefilled) · `broker` / `keep-demo-2026` (broker view) · `underwriter` / `keep-demo-2026`. Bare username → `<name>@example.com`. ⚠️ **The broker and underwriter logins returned HTTP 500 until 2026-10-09** (NULL GoTrue token columns — see the Backend section). All three verified 200 on that date. This row is **agent input**, so a credential listed here that cannot sign in becomes a test that can never pass. |
 | Keep credential (invalid) | any other password → `.k-error` on the login form |
 | Primary nav button | `Find what coverage I need` |
-| Primary content selector | `.coverage-card` (`.card` is dead CSS — no JS or HTML emits it; only `.card-grid` is used) |
+| Primary content selector | `.coverage-card` (`.legacy-card`, renamed from `.card` on 2026-10-29, is dead CSS — no JS or HTML emits it; only `.card-grid` is used. `.card` is now the HOUSE card, which no screen uses yet) |
 | Nav cards | `['Residential','Commercial']` (hub coverage sections) |
 | Playwright test directory | `.github/scripts/ui-tests` |
 | Key selectors | home: `.hero h1` · choice steps: `.choices .choice` · contact: `#contact-name` (built as `contact-${f.id}` from `content/questionnaire.json` — grep for the literal finds nothing) · summary: `.need`, `.disclaimer` · error: `.error` · Keep: `.k-authcard` (login card), `.k-error` (login failure), `.k-welcome__h` (signed-in home heading — **not** `.k-h1`, which is on the inner pages only), help desk: `.k-help__input` (ask box), `.k-help__a` (answer), `.k-help__notice` (unavailable), `.k-help__ai` (the AI-generated label — present in BOTH states, and on an ANSWER it also names the model: *"… by Anthropic (Sonnet) from this app's help guide …"*). ⚠️ **`.k-help__tier` NO LONGER EXISTS** — it was a broker-only "Answered by …" line until 2026-10-14, when the model was folded into `.k-help__ai` for every caller; its CSS rule went too, so a selector on it now matches nothing (the `.card` failure this table already records), app bar nav: `.k-nav` (the wide strip, visible **only above 1129px** — the figure was 1044 until 2026-10-15, when `scrollWidth` was found to under-report the bar's intrinsic need), `.k-pop--nav` (the compact control that replaces it at or below 1129px; trigger `.k-pop--nav button`, panel `.k-pop--nav .k-menu`, open state `.k-pop--nav.is-open`). ⚠️ **The two are exact inverses**, so a Keep nav assertion written against `.k-nav` matches nothing on the `tablet` (810px), `mobile-chrome` (393px) and `iphone` (390px) projects — only `desktop` is above the breakpoint. That is three of four projects silently matching nothing, the `.card` failure this table already records, model tier control: `.k-tier` (absent entirely for a client), `.k-tier__opt` (three), `.k-tier__opt.is-on` (the stored tier — **none** while it is unread), `.k-tier__status`. ⚠️ Target an option by its `<b>` label, not by the button's text: `hasText: 'Opus'` matches TWO buttons because Sonnet's blurb reads "Half the cost of Opus", and the strict-mode violation surfaces as a click TIMEOUT that reads like an app hang |
@@ -5242,7 +5272,6 @@ breaks this repo; each is listed so the next session diffs rather than "fixes".
 | `TEST_AUTH_EMAIL` **must stay unset** | The Keep's login ships **both fields prefilled**. #309's identifier ladder matches accessible names `/email\|user\|login/`, and our field is labelled "Username" — setting the secret would overwrite the working prefilled value and break a login that otherwise succeeds. Password-only is correct here. |
 | S2/S3 navigate to `#/keep/login` | Upstream's S2 loads `./`, which here is **public marketing with no gate** — `detectAndAuth` returns `'none'` and every auth assertion goes vacuous. Upstream cannot know this route, and its own S2 failure text prescribes exactly this fix ("point this scenario at the login route"). Since this repo supplies a credential, upstream's S2 verbatim would now **throw** here. |
 | `check-contrast.js` carries two project-specific `.k-ilink` pairs | ⚠️ **The ORIGINAL divergence is resolved and a DIFFERENT one now stands in its place — do not read the old row's "delete after one more sync" as applying to this file any more.** Upstream adopted `css/tokens.css` as a default and takes `--tokens <file>`, so that half is gone. What makes the local copy `CUSTOM` at `8c1a398` is two added pairs: `accent-hover / bg` and `accent-hover / accent-light`. `.k-ilink` is 14px/700 body text, so it answers to AA and not AA_LARGE, and it renders on the page background and on the accent tint, never on surface — checking only `accent / surface` (4.65) passed while these two measured **4.26** and **4.03**, and one of them is the Help desk's broker hand-off, i.e. the remedy the whole fact/advice boundary routes a client to. `design.md` → *Accessibility* asks each project to read the pair list against its own token roles and to derive pairs from its own components, so this is the directive being followed. The file is otherwise verbatim; upstream's template did not change at this head. |
-| `styles/components.js` (the house page script) on a project NOT marked `house_style` | Taken verbatim at `f667e89` on the owner's instruction, for `House.typeahead` on the app bar search. `/refresh-repo` does not compare `styles/` on an unmarked project, so it will not report this file as stale. **Re-copy it from `templates/styles/components.js` at every refresh** and re-run S32 and S35, until the project moves to the house style with `/design-intake` and the drift script takes it over. Never edit it here. |
 | `qa.yml` has a `unit-tests` job | No upstream equivalent. `node --test` over `js/**/*.test.mjs` plus `html-validate` — a deterministic blocking gate needing no browser or backend (#202). |
 | `cron-notify.yml` is **absent** (not a deliberate divergence — a gap) | `global.md` → *Repo Structure Standard* listed it among the unconditional workflows when this row was written (2026-10-05); re-read that section before acting on it, since upstream retired most watcher workflows on 2026-10-25. **Inert today:** no workflow here has a `schedule:` trigger, so there is nothing for it to notify about. Install it with the first scheduled workflow, or record it here as deliberate. Found by `/audit-repo` 2026-10-05. |
 | ~~`awaitAuthReady` consults an already-arrived response~~ **RESOLVED — ADOPTED UPSTREAM AND IMPROVED ON, measured 2026-10-15** | The bug this repo found (Codex, #253) is fixed upstream, in `templates/ui-tests/tests/lib/auth.js` at `8c1a398`: `armAuthReady(page)` starts recording BEFORE `goto()` and `awaitAuthReady(page, armed)` reads the recording first, with `gotoAuthReady()` doing all three in the one order that works. ⚠️ **Upstream went further and this repo's local fix is now the WEAKER one:** theirs resolves on `requestfinished`, not `response`, because `response` fires once status and headers arrive — before the body downloads — so an app that streams or parses a slow session payload was marked ready before the code awaiting that body could render the gate (Codex, #438). ⚠️ **Taking it is NOT a copy-and-paste** — it arrives only with the kit-helper migration, which is the open question below. |
@@ -5446,6 +5475,9 @@ moved onto `House.typeahead`. `js/keep/views/shell.js` imports it for its
 inert here today: no element in the app carries `aria-disabled`, `.menu-btn`,
 `.segmented`, `[data-icon]` or `.th-sort`, so `House.init` binds nothing and the
 `aria-disabled` guard never fires.
+✅ **Superseded 2026-10-29:** the project is now marked `house_style`, so
+`/refresh-repo` compares `styles/components.js` itself and the hand re-copy
+below no longer applies.
 ⚠️ **NOTHING KEEPS IT CURRENT.** `/refresh-repo` compares `styles/` only on a
 marked project, and marking this one would also require the house
 `components.css` verbatim and `tokens.css` with every house token name, which is

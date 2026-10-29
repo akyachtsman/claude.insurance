@@ -50,7 +50,7 @@ function hero() {
           "pinpoint exactly what you need — and shares it with a licensed broker when you're ready." }),
         el("div", { class: "btn-row hero__cta" }, [
           ctaLink("Find what coverage I need", "#/qualify", { size: "btn-lg" }),
-          ctaLink("Explore coverage", "#/residential", { variant: "btn-secondary", noArrow: true }),
+          ctaLink("Explore coverage", "#/residential", { variant: "legacy-btn-secondary", noArrow: true }),
         ]),
         el("div", { class: "hero__assure" }, [
           el("span", {}, [icon("lock", { size: 16 }), el("span", { text: "100% anonymous" })]),
@@ -99,7 +99,7 @@ function explore() {
             iconBadge(sec.icon, { lg: true }),
             el("h3", { class: "coverage-card__title", text: sec.title }),
             el("p", { class: "coverage-card__blurb", text: sec.blurb }),
-            el("div", { class: "pill-row" }, sec.items.map((it) => el("span", { class: "pill", text: it }))),
+            el("div", { class: "pill-row" }, sec.items.map((it) => el("span", { class: "legacy-pill", text: it }))),
             el("span", { class: "coverage-card__more" }, [
               el("span", { text: `Explore ${sec.title.toLowerCase()}` }), icon("arrow-right", { size: 18 }),
             ]),

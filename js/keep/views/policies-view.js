@@ -41,7 +41,7 @@ export function renderKeepPolicy(params, id) {
   ]);
   const pg = (rows) => el("dl", { class: "k-pg" }, rows.map(([dt, dd]) =>
     el("div", {}, [el("dt", { text: dt }), el("dd", { text: dd })])));
-  const chips = (items) => el("div", { class: "k-pcard__chips" }, items.map((c) => el("span", { class: "pill", text: c })));
+  const chips = (items) => el("div", { class: "k-pcard__chips" }, items.map((c) => el("span", { class: "legacy-pill", text: c })));
 
   const covt = el("div", { class: "k-covt" }, policy.coverages.map((c) => {
     const amt = c.recommended

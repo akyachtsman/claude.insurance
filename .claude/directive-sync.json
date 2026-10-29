@@ -20,5 +20,6 @@
       "local": "d1d39bdda12677c013b1ac4b444305ff9285ff96",
       "reason": "DECLINED with the kit-helper migration above -- it arrives in the same upstream bundle and is not separable from it in practice. Upstream now derives the screenshot directory from GITHUB_WORKSPACE instead of a hardcoded ../../../, which only resolves when the kit sits at exactly .github/scripts/ui-tests/. It does here, so this is LATENT rather than live: the local relative path is correct for this layout. Same revisit trigger as the tests/ entry. Re-recorded 2026-10-25 at d23c822: the local file gained upstream's iphone/WebKit project comment (directives #474) by hand, and nothing else."
     }
-  }
+  },
+  "house_style": true
 }

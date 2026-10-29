@@ -1,0 +1,42 @@
+/* ── legacy.css — what the house page base must not change yet ───────────────
+   Step 1 of the house-style move (design.md, /design-intake 1c, 2026-10-29)
+   loads the house styles/components.css on every page, BEFORE this project's
+   own sheets, so the project's rules still win where they overlap it. Where the
+   house page base sets something the project's sheets never did, it would show
+   on the old screens. Each rule below pins exactly one such difference back,
+   found by measuring every screen before and after (computed styles, element
+   boxes, focus rings and pixels, at 390 and 1440 px).
+
+   How the pins are written, because both halves are load-bearing:
+   - Scoped under :where(.legacy-screen), never a bare element selector, so a
+     screen moved in step 2 (which drops `legacy-screen`) gets the house look.
+     dom.js's mount() gives every screen root the class; index.html gives it to
+     the skip link, the site header and the site footer.
+   - :where() adds nothing to specificity, so each pin weighs the same as the
+     house rule it answers. This sheet loads after the house file, so the pin
+     wins over it; it loads before css/*, so the project's own rules still win
+     over the pin, exactly as they won over nothing before.
+   - `revert` rolls a property back past every author rule to the browser's own
+     value, which is right where the project set nothing. Where the project's
+     value came from a LESS specific rule (base.css's bare :focus-visible),
+     revert would skip that too, so the value is written out instead.
+
+   Step 2 deletes the lines a moved screen no longer needs; step 3 deletes the
+   file. Nothing here is a style of its own. */
+
+/* body's overflow-wrap: anywhere is inherited by everything; the old screens
+   wrapped at word boundaries only. */
+:where(.legacy-screen) { overflow-wrap: normal; }
+
+/* The house h1-h3 sizes and line height. base.css sets the headings' margin,
+   colour and font but never their size or line height, so a heading whose own
+   class sets neither, and the 16 Keep headings with no class at all (asset,
+   entity, policy and security pages, the home panels; counted in js/keep/views
+   on 2026-10-29), took the house values. */
+:where(.legacy-screen) :is(h1, h2, h3) { font-size: revert; line-height: revert; }
+
+/* a:focus-visible outranks base.css's bare :focus-visible whatever the load
+   order, so the old soft ring is written out here (base.css's values). */
+:where(.legacy-screen) a:focus-visible,
+a:where(.legacy-screen):focus-visible /* the skip link carries the class itself */ { outline: 3px solid var(--color-accent-ring); outline-offset: 2px; }
+

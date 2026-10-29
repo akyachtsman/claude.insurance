@@ -136,7 +136,7 @@ export async function renderQualify(params) {
             },
           });
           fieldEls[f.id] = input;
-          return el("label", { class: "field" }, [
+          return el("label", { class: "legacy-field" }, [
             el("span", { class: "field-label", text: f.label + (f.required ? "" : " (optional)") }),
             input,
           ]);
@@ -151,7 +151,7 @@ export async function renderQualify(params) {
           el("strong", { text: "This creates a lead summary, not a quote. " }),
           el("span", { text: "Your details are shared with a licensed broker to follow up — never sold." }),
         ]),
-        el("button", { class: "btn btn-primary btn-lg", attrs: { type: "submit" } }, [
+        el("button", { class: "legacy-btn legacy-btn-primary btn-lg", attrs: { type: "submit" } }, [
           el("span", { text: "See my coverage needs" }), icon("arrow-right", { size: 20 }),
         ]),
       ]),

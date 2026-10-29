@@ -132,8 +132,8 @@ function renderMissing() {
     el("h1", { class: "placeholder__title", text: "Coverage not found" }),
     el("p", { text: "We couldn't find that coverage. Browse the residential or commercial sections to find what you're looking for." }),
     el("div", { class: "btn-row is-center" }, [
-      ctaLink("Browse residential", "#/residential", { variant: "btn-secondary", noArrow: true }),
-      ctaLink("Browse commercial", "#/commercial", { variant: "btn-secondary", noArrow: true }),
+      ctaLink("Browse residential", "#/residential", { variant: "legacy-btn-secondary", noArrow: true }),
+      ctaLink("Browse commercial", "#/commercial", { variant: "legacy-btn-secondary", noArrow: true }),
     ]),
   ]));
 }

@@ -1,0 +1,10 @@
+/* fonts.css — the six self-hosted @font-face rules (OFL, files in css/fonts/).
+   Moved out of tokens.css on 2026-10-29 when the tokens moved to
+   styles/tokens.css: a url() resolves against the stylesheet that holds it, so
+   these stay in css/ beside the fonts they name. No network at runtime. */
+@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/quicksand-600.woff2") format("woff2"); }
+@font-face { font-family: "Quicksand"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/quicksand-700.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/nunito-400.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/nunito-600.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/nunito-700.woff2") format("woff2"); }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 800; font-display: swap; src: url("fonts/nunito-800.woff2") format("woff2"); }

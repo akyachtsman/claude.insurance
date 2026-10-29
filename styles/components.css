@@ -1,0 +1,403 @@
+/* ── components.css — this project's reusable components ─────────────────────
+   The HOUSE set (design.md, owner rulings 2026-10-19), built on tokens.css. Each
+   block names the design.md section it implements. Every value references
+   var(--…), so re-theming happens in tokens.css alone. A screen never adds its
+   own button, card, pill or dialog class: a size or layout need is a modifier on
+   the shared one. Meets the craft rules in design.md (44px targets,
+   :focus-visible, reduced motion) and the iPhone rules (design.md -> iPhone
+   and iPad). The behaviour these need (the confirmation
+   dialog, the Archived (N) fit, the empty state, inline messages) lives in ONE
+   shared script per project, never per page: components.js, beside this file. */
+
+/* ── Page base: the canvas, text colour and font every page starts from ─────── */
+/* border-box, so padding and borders stay inside a component's width and a
+   width: 100% card never overflows its grid track on a phone. */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--color-bg); }
+body {
+  margin: 0; background: var(--color-bg); color: var(--color-text-primary);
+  font: var(--font-base)/1.5 var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+  /* A long unbroken name (a file name, an id) wraps instead of pushing the page
+     sideways, wherever it sits. anywhere, not break-word: break-word gives a
+     flex item no break points when it sizes, so free text in a flex row (Back,
+     a dialog title, a menu action) would still hold the row open. One rule for
+     the page, so no component has to remember it. */
+  overflow-wrap: anywhere;
+}
+/* The two places that keep whole words: a table, so its columns size to whole
+   words and a wide one scrolls in its own box (.table-wrap), and the controls
+   with short fixed labels, so a squeezed row never splits a word in a button. */
+.table, .btn, .pill, .tag, .segmented [role="tab"] { overflow-wrap: break-word; }
+/* ...and the controls are never wider than their box, so a single word longer
+   than the whole row (a long translation) still splits rather than push the
+   page sideways. */
+.btn, .pill, .tag, .segmented [role="tab"] { max-width: 100%; }
+/* A picture or video never paints wider than its box (a phone photo is
+   thousands of pixels wide), keeping its shape as it shrinks. */
+img, video { max-width: 100%; height: auto; }
+/* hidden always hides: a component's own display (a flex pop-over, a dialog
+   backdrop) would otherwise override the browser's rule and show it. */
+[hidden] { display: none !important; }
+/* Form controls take the house font too; browsers give them their own. */
+button, input, select, textarea { font-family: inherit; }
+h1, h2, h3 { line-height: 1.25; margin: 0 0 var(--space-3); }
+h1 { font-size: var(--font-2xl); } h2 { font-size: var(--font-xl); } h3 { font-size: var(--font-lg); }
+a { color: var(--color-accent); }
+a:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+/* The page's content box: the inset the body's margin: 0 removed, 16px on a
+   phone, 24px from a tablet up, centred and capped on a wide screen. A banner
+   (full width) sits outside it. */
+.page { max-width: 1440px; margin: 0 auto; padding: var(--space-4); }
+@media (min-width: 700px) { .page { padding: var(--space-6); } }
+/* An iPhone on its side puts the notch over the left or right edge. The inset is
+   0 everywhere else, and on an iPhone too unless the page's viewport meta says
+   viewport-fit=cover, so this changes nothing until a page asks for it. */
+.page {
+  padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+}
+@media (min-width: 700px) {
+  .page {
+    padding-left: max(var(--space-6), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-6), env(safe-area-inset-right, 0px));
+  }
+}
+/* Every height tied to the screen is given twice: vh first, for a browser
+   without dvh, then dvh. On an iPhone, vh is the screen with Safari's address
+   bar hidden, so 88vh runs past the bottom of the screen while the bar shows;
+   dvh is the height actually showing (design.md -> iPhone and iPad). */
+/* An action link standing on its own (Back, Clear filters, any link that does
+   something rather than sits in a sentence) gets the 44px target a link in
+   running text is exempt from. Works on <a> or <button>. */
+.link-action {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  min-height: var(--size-target-min); min-width: var(--size-target-min);
+  background: none; border: 0; padding: 0 var(--space-1);
+  font: 600 var(--font-sm)/1.2 var(--font-sans); color: var(--color-accent);
+  text-decoration: none;
+}
+.link-action:hover { text-decoration: underline; }
+.link-action:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* ── Buttons (§4): .btn is Secondary; add .btn-primary, .btn-danger or .btn-delete */
+.btn {
+  min-height: var(--size-target-min); padding: var(--space-2) var(--space-4);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--color-border-input); border-radius: var(--radius-md); cursor: pointer;
+  background: var(--color-surface); color: var(--color-text-primary);
+  font: 600 var(--font-sm)/1.2 var(--font-sans); text-decoration: none;
+  transition: background .15s ease, border-color .15s ease;
+}
+.btn:hover { border-color: var(--color-text-secondary); }
+/* Focus needs its OWN indicator, not the hover state: accent -> accent-hover is a
+   ~1.4:1 shift, so a keyboard user cannot tell where focus is (design.md ->
+   Accessibility, non-negotiable). Outline sits outside the box, so it also reads
+   against whatever surface the button is on. */
+.btn:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.btn-secondary { /* the same look as .btn; named so markup can say it */ }
+.btn-primary {
+  background: var(--color-accent); border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.btn-primary:hover, .btn-primary:focus-visible {
+  background: var(--color-accent-hover); border-color: var(--color-accent-hover);
+}
+.btn-danger { color: var(--color-danger); border-color: var(--color-danger); }
+.btn-danger:hover, .btn-danger:focus-visible { background: var(--color-danger-bg); }
+/* The filled red final button of a Delete permanently / Permanently archive
+   confirmation, and nowhere else. */
+.btn-delete {
+  background: var(--color-danger); border-color: var(--color-danger);
+  color: var(--color-on-danger);
+}
+.btn-delete:hover, .btn-delete:focus-visible {
+  background: var(--color-danger-hover); border-color: var(--color-danger-hover);
+}
+/* Busy: native `disabled`. Pressable later: aria-disabled="true", which looks
+   the same but stays focusable to say why; the shared script cancels its
+   click, Enter and Space (§4), because ARIA alone stops nothing. */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+/* Icon-only: still a 44px target; needs aria-label AND title (§3). */
+.btn-icon { min-width: var(--size-target-min); padding: 0; }
+.btn-icon svg { width: 18px; height: 18px; }
+
+/* ── Cards and grids (§5) ─────────────────────────────────────────────────── */
+.grid {
+  display: grid; gap: var(--space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));   /* laptop */
+}
+@media (max-width: 1199px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }   /* tablet */
+@media (max-width: 699px)  { .grid { grid-template-columns: minmax(0, 1fr); } }              /* phone */
+.card {
+  position: relative; text-align: left; width: 100%;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: var(--shadow-sm);
+  color: var(--color-text-primary); font: inherit;
+}
+/* An actionless card that is itself the control: a native <button> or <a>,
+   never role="button" on a <div> (the keyboard cannot reach that). */
+button.card, a.card { cursor: pointer; display: block; text-decoration: none; }
+/* A card WITH actions: the title's button opens the card through an overlay
+   stretched over it; the actions sit above the overlay (never a button inside
+   a button). */
+.card-open { all: unset; display: block; cursor: pointer; }
+/* The card's own radius: .card-open's all: unset leaves it none to inherit. */
+.card-open::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-lg); }
+.card-open:focus-visible::after { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.card:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+/* Names wrap; never an ellipsis or a line clamp (§1.6, §5). */
+.card-title { display: block; font-size: var(--font-lg); font-weight: 600; }
+.card-sub { font-size: var(--font-sm); color: var(--color-text-secondary); }
+/* At most two icon buttons, top-right, Edit then Archive; 3+ become one ⋮ menu.
+   Always visible: never hover-only, so they show on a phone. The padding
+   belongs to the actions box, so a press within 8px of an icon button lands
+   on the box, never on the card's open target beneath it (8px between targets). */
+.card-actions {
+  position: absolute; z-index: 1; top: 0; right: 0; padding: var(--space-2);
+  display: flex; gap: var(--space-2);
+}
+/* The corner is reserved by layout, not per element: a float the size of the
+   actions box (less the card's own padding) sits top-right, so every line in
+   the card (title, context, a pill, a row of its own) flows around it. */
+.card:has(.card-actions) { display: flow-root; }
+.card:has(.card-actions)::before {
+  content: ""; float: right;
+  width: calc(2 * var(--size-target-min) + 3 * var(--space-2) - var(--space-6));
+  height: calc(var(--size-target-min) + 2 * var(--space-2) - var(--space-6));
+}
+/* .card.card-add, not .card-add: it must outrank button.card / a.card's
+   display: block, since the Add card is itself a native button or link. */
+.card.card-add {
+  border-style: dashed; border-color: var(--color-border-input); box-shadow: none; display: flex; align-items: center;
+  justify-content: center; gap: var(--space-2); color: var(--color-accent); font-weight: 600;
+}
+
+/* ── Lists and tables (§6) ────────────────────────────────────────────────── */
+/* Wider or taller than the screen: scrolls inside its own box, so the page
+   never scrolls sideways and the sticky header stays visible. */
+.table-wrap { overflow: auto; overscroll-behavior: contain; max-width: 100%; max-height: 70vh; max-height: 70dvh; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.table { width: 100%; border-collapse: collapse; background: var(--color-surface); }
+.table th, .table td { padding: var(--space-3); border-bottom: 1px solid var(--color-border); text-align: left; }
+.table th {
+  position: sticky; top: 0; background: var(--color-surface);
+  font-size: var(--font-sm); color: var(--color-text-secondary); font-weight: 600;
+}
+/* A sortable header's control: a native button, so the keyboard reaches it.
+   aria-sort stays on the <th>. */
+.th-sort {
+  all: unset; cursor: pointer; font: inherit; color: inherit;
+  display: inline-flex; align-items: center;
+  min-height: var(--size-target-min); min-width: var(--size-target-min);   /* a 44px target */
+}
+/* A cell holding a 44px control keeps 4px above and below, so controls in
+   neighbouring rows (and the header) stay 8px apart (§ Accessibility, targets). */
+.table th:has(> .th-sort) { padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.th-sort:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* A row's opening control (§6), a link or a button in its name cell: a 44px
+   target, not the height of one line of text. */
+.row-open {
+  display: inline-flex; align-items: center; cursor: pointer; text-align: left;
+  min-height: var(--size-target-min); min-width: var(--size-target-min);
+  background: none; border: 0; padding: 0; font: inherit; color: var(--color-accent);
+}
+.table td:has(> .row-open) { padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.row-open:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* A row's own actions (§6): the last cell, right-aligned, icon buttons 8px
+   apart; a .menu-btn takes their place at three or more. */
+.row-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+/* No nowrap: .row-actions is a non-wrapping flex row already, and nowrap here
+   would reach a ⋮ menu placed inside the cell and stop its labels wrapping. */
+.table td:has(> .row-actions) { width: 1%; padding-top: var(--space-1); padding-bottom: var(--space-1); }
+
+/* ── Forms and fields (§12) ───────────────────────────────────────────────── */
+.field { display: flex; flex-direction: column; gap: var(--space-1); }
+.label { font-size: var(--font-sm); font-weight: 600; color: var(--color-text-primary); }
+.label .req { color: var(--color-danger); }
+/* max-width: a <select> sizes to its longest option, which may be a sentence. */
+.input {
+  max-width: 100%; min-height: var(--size-input-min); padding: var(--space-2) var(--space-4);
+  font-size: var(--font-input-min); /* never below 16px: prevents iOS zoom on focus */
+  border: 1px solid var(--color-border-input); border-radius: var(--radius-sm);
+  background: var(--color-surface); color: var(--color-text-primary);
+}
+/* The same 3px accent ring as every other control: a pale halo alone is about
+   1.1:1 against the surface and cannot be seen. */
+.input:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 1px; border-color: var(--color-accent); }
+/* Placeholder text at 4.5:1 (secondary on the surface is 5.56:1); the search box
+   uses it as its label. Firefox dims placeholders by default, hence opacity. */
+.input::placeholder { color: var(--color-text-secondary); opacity: 1; }
+/* Locked: greyed and not focusable (pair with `disabled`), padlock after the label. */
+.input:disabled { background: var(--color-bg); color: var(--color-text-secondary); cursor: not-allowed; }
+
+/* ── Search and toolbar (§16): search box, filters, then + Add at the right ── */
+/* Wraps on a phone; the search box takes the row's free width. */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.toolbar-add { margin-left: auto; } /* the + Add button, always last */
+/* A native input cannot hold an icon, so the search box is a wrapper: the
+   magnifying glass (from the icon set, aria-hidden) sits over the input's
+   left padding. Markup: <label class="search"><svg aria-hidden="true">…</svg>
+   <input class="input" type="search" placeholder="Search things…" aria-label="Search things"></label> */
+.search { position: relative; display: flex; flex: 1 1 240px; min-width: 0; max-width: 100%; }
+.search .input { width: 100%; padding-left: calc(var(--space-4) + 18px + var(--space-2)); }
+.search svg {
+  position: absolute; left: var(--space-4); top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; color: var(--color-text-secondary); pointer-events: none;
+}
+
+/* design.md sets a 24x24px floor (larger than the browser default, ~13px). */
+.checkbox {
+  width: var(--size-check-min); height: var(--size-check-min);
+  accent-color: var(--color-accent); cursor: pointer;
+}
+.checkbox:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+/* ── Status pills and tags (§14): words in a pill, one meaning per colour ──── */
+.pill {
+  display: inline-flex; align-items: center; padding: 2px var(--space-2);
+  border-radius: var(--radius-pill); font-size: var(--font-xs); font-weight: 600;
+  background: var(--color-neutral-bg); color: var(--color-neutral);
+}
+.pill-success { background: var(--color-success-bg); color: var(--color-success); }
+.pill-warning { background: var(--color-warning-bg); color: var(--color-warning); }
+.pill-danger  { background: var(--color-danger-bg);  color: var(--color-danger); }
+.pill-info    { background: var(--color-info-bg);    color: var(--color-info); }
+.pill-expired { background: var(--color-expired-bg); color: var(--color-expired); }
+/* A kind of thing, not a status: never a status colour. */
+.tag {
+  display: inline-flex; padding: 2px var(--space-2); border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border); font-size: var(--font-xs); color: var(--color-text-secondary);
+}
+
+/* ── Empty states (§15) ───────────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: var(--space-12) var(--space-6); color: var(--color-text-secondary); }
+.empty-state .empty-title { font-size: var(--font-base); font-weight: 700; color: var(--color-text-primary); margin-bottom: 6px; }
+.empty-state .empty-sub { font-size: var(--font-sm); max-width: 360px; margin: 0 auto; line-height: 1.5; }
+.empty-state .empty-act { margin-top: var(--space-4); }
+.empty-state.empty-sm { padding: var(--space-6) var(--space-3); }
+
+/* ── Dialogs (§9, §10): one shell; sized to the window, never a fixed width ── */
+/* The backdrop scrolls too, as a last resort: a dialog taller than the screen
+   (a phone on its side, the keyboard up) can still be scrolled into view. */
+.dialog-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-dialog); background: var(--color-backdrop);
+  display: flex; align-items: center; justify-content: center; padding: var(--space-4);
+  overflow-y: auto; overscroll-behavior: contain;
+}
+/* While a dialog is open the page behind it stays still. CSS, not a script:
+   the usual script lock cancels every touchmove, and that also stops a finger
+   scrolling the dialog's own list on an iPhone (design.md -> iPhone and iPad). */
+html:has(.dialog-backdrop:not([hidden])), html:has(dialog.dialog[open]) { overflow: hidden; }
+/* margin: auto keeps a dialog taller than the backdrop reachable from its top;
+   align-items: center alone would push its top off the screen. */
+.dialog {
+  width: min(480px, 94vw); max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column;
+  margin: auto;
+  background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+}
+/* A native <dialog> opened with showModal() takes the same shell. */
+dialog.dialog { border: 0; padding: 0; color: inherit; }
+/* .dialog's display: flex would override the browser's hiding of a closed one. */
+dialog.dialog:not([open]) { display: none; }
+dialog.dialog::backdrop { background: var(--color-backdrop); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-6); }
+.dialog-title { font-size: var(--font-lg); font-weight: 600; margin: 0; min-width: 0; }
+.dialog-body { padding: 0 var(--space-6) var(--space-4); overflow: auto; overscroll-behavior: contain; }
+/* Cancel (secondary) on the left, the act on the right, right-aligned. */
+.dialog-footer { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-border); }
+
+/* ── Archived (N) pop-over (§7): stays inside the window, long lists scroll ── */
+/* Every pop-over (Archived, the ⋮ menu, the type-ahead list) is position:
+   fixed, so no card, dialog or sidebar with overflow: hidden can cut it off,
+   and the shared fit places it inside the screen. overscroll-behavior: contain
+   keeps a swipe at the end of its list from scrolling the page behind it. */
+.archived-btn { /* a .btn: the archive icon, then "Archived (N)"; hidden when N is 0 */ }
+.archived-pop, .menu-pop, .list-pop {
+  position: fixed; z-index: var(--z-popover); width: min(360px, 94vw);
+  max-height: min(60vh, 480px); max-height: min(60dvh, 480px);
+  overflow: auto; overscroll-behavior: contain; background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: var(--space-2);
+}
+.archived-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2); }
+
+/* ── The ⋮ menu (§5): a disclosure of native buttons, placed by the same fit ── */
+.menu-btn { /* a .btn-icon in .card-actions: aria-label="More actions", aria-expanded, aria-controls */ }
+.menu-pop { width: min(240px, 94vw); display: flex; flex-direction: column; gap: var(--space-2); } /* 8px between targets */
+.menu-item {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--size-target-min);
+  padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent;
+  color: var(--color-text-primary); font: 500 var(--font-sm) var(--font-sans); text-align: left; cursor: pointer;
+}
+.menu-item:hover { background: var(--color-accent-light); }
+.menu-item:focus-visible { outline: 3px solid var(--color-accent); outline-offset: -3px; }
+.menu-item.danger { color: var(--color-danger); }
+.menu-item.danger:hover { background: var(--color-danger-bg); } /* the checked danger pair, never accent-light */
+
+/* ── The type-ahead list (§16): choices that filter as you type ───────────────
+   A /command, an @mention, an autocomplete. A fixed list is a native <select>
+   instead: on a phone it opens the phone's own picker. Markup: the field has
+   role="combobox", aria-expanded, aria-controls and aria-activedescendant;
+   <div class="list-pop" role="listbox" id="…"> of <div class="list-option"
+   role="option" id="…">. House.typeahead (components.js) writes those roles,
+   places it under its field by the shared fit and runs its keys. */
+.list-pop { display: flex; flex-direction: column; }
+.list-option {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  min-height: var(--size-target-min); padding: var(--space-2) var(--space-3); flex: none;
+  border-radius: var(--radius-sm); color: var(--color-text-primary); cursor: pointer;
+}
+.list-option .list-hint { font-size: var(--font-sm); color: var(--color-text-secondary); text-align: right; }
+.list-option:hover, .list-option[aria-selected="true"] { background: var(--color-accent-light); }
+.list-head { padding: var(--space-2) var(--space-3); font-size: var(--font-xs); font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: .06em; }
+
+/* ── Upload box (§13) ─────────────────────────────────────────────────────── */
+.upload {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-6); text-align: center; color: var(--color-text-secondary);
+  border: 2px dashed var(--color-border-input); border-radius: var(--radius-md); background: var(--color-surface);
+}
+/* While a file is over the box, its words go text-primary: the one pair checked on
+   accent-light (design.md -> Accessibility), as on a menu item's hover. */
+.upload.is-over { border-color: var(--color-accent); background: var(--color-accent-light); color: var(--color-text-primary); }
+.upload .upload-limits { font-size: var(--font-sm); }
+.upload img { max-height: 160px; border-radius: var(--radius-sm); } /* the chosen photo's thumbnail (§13) */
+
+/* ── Messages (§18): errors next to what failed; toasts for success ───────── */
+.inline-msg { font-size: var(--font-sm); margin-top: var(--space-1); color: var(--color-text-secondary); }
+.inline-msg.err { color: var(--color-danger); } /* set role="alert" with it */
+.inline-msg.ok { color: var(--color-success); }
+.toast {
+  position: fixed; z-index: var(--z-toast); left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px)); /* above the iPhone's home bar */
+  max-width: min(480px, 94vw); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
+  background: var(--color-text-primary); color: var(--color-surface); box-shadow: var(--shadow-md);
+}
+.toast.err { background: var(--color-danger); color: var(--color-on-danger); }
+/* Announcements, maintenance, lockdown: full width, in the flow, never floating. */
+.banner { width: 100%; padding: var(--space-3) var(--space-4); background: var(--color-info-bg); color: var(--color-info); }
+
+/* ── Segmented control (§11): role="tablist" / role="tab" / aria-selected ──── */
+/* Each tab is a native <button role="tab">; the arrow keys come from the shared script (§11). */
+/* More tabs than a phone row holds wrap onto a second line inside the control. */
+.segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--color-border-input); border-radius: var(--radius-md); padding: 2px; gap: var(--space-2); }
+.segmented [role="tab"] {
+  min-height: var(--size-target-min); min-width: var(--size-target-min); padding: 0 var(--space-4); border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-primary); font: 600 var(--font-sm) var(--font-sans); cursor: pointer;
+}
+/* §14: selection is blue whatever the brand accent; the inset edge gives the
+   selected state its 3:1 against the control, which the pale fill alone lacks. */
+.segmented [role="tab"][aria-selected="true"] { background: var(--color-info-bg); color: var(--color-info); box-shadow: inset 0 0 0 2px var(--color-info); }
+.segmented [role="tab"]:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+.section-header {
+  font-size: var(--font-sm); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-2);
+}
+
+/* `transition` alone is not enough: an @keyframes pulse is an animation, and
+   smooth scrolling is motion too. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  html { scroll-behavior: auto !important; }
+}

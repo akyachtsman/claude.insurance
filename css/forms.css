@@ -35,8 +35,8 @@
 
 /* ── Form fields ─────────────────────────────────────────────────────────── */
 .contact-form { display: grid; gap: var(--space-4); margin-top: var(--space-2); }
-label.field { display: block; }
-label.field > .field-label { display: block; font-weight: 600; margin-bottom: var(--space-2); }
+label.legacy-field { display: block; }
+label.legacy-field > .field-label { display: block; font-weight: 600; margin-bottom: var(--space-2); }
 .contact-form input {
   width: 100%;
   min-height: 52px;
@@ -49,7 +49,7 @@ label.field > .field-label { display: block; font-weight: 600; margin-bottom: va
   border-radius: var(--radius-md);
 }
 .contact-form input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-ring); }
-.contact-form .btn { margin-top: var(--space-2); }
+.contact-form .legacy-btn { margin-top: var(--space-2); }
 
 /* Honeypot — visually removed, still focusable only to bots. */
 .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
@@ -117,7 +117,7 @@ label.field > .field-label { display: block; font-weight: 600; margin-bottom: va
 .need .why { color: var(--color-text-secondary); }
 .need__link { display: inline-flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); font-weight: 600; font-size: var(--font-sm); }
 .need__link:hover .icon { transform: translateX(2px); }
-.tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
+.legacy-tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
 .tag-high { background: var(--color-accent-light); color: var(--color-accent-hover); }
 .tag-medium { background: var(--color-bg); color: var(--color-text-secondary); }
 

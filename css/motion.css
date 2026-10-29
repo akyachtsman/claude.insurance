@@ -28,5 +28,5 @@
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .reveal, .reveal-stagger > * { opacity: 1; transform: none; transition: none; }
-  .btn, a.coverage-card { transition: none; }
+  .legacy-btn, a.coverage-card { transition: none; }
 }

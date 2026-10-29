@@ -862,7 +862,7 @@ function policySummaryCard(policy) {
   // "ended" shares the lapsed treatment: both mean the cover is not in force,
   // and the badge beside it already says which of the two it is.
   const cls = (kind === "exp" || kind === "ended") ? " lapsed" : (kind === "warn" ? " exp" : "");
-  const chips = policy.coverages.slice(0, 3).map((c) => el("span", { class: "pill", text: `${c.label} ${c.limit}` }));
+  const chips = policy.coverages.slice(0, 3).map((c) => el("span", { class: "legacy-pill", text: `${c.label} ${c.limit}` }));
   return el("a", { class: `k-pcard${cls}`, attrs: { href: `#/keep/policy/${policy.id}` } }, [
     el("div", { class: "k-pcard__head" }, [
       el("span", { class: `k-cic k-cic--${policy.cic}` }, [icon(policy.icon, { size: 24 })]),
