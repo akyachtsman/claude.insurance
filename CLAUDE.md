@@ -959,13 +959,16 @@ profile**, never by listing a directory.
   with its three rules: never expose `net`, `extensions`, `cron` or `vault`
   through the Data API; never enable `pg_graphql` without re-running this
   audit; never write a function in an exposed schema that reads `net.*`.
-  **Check 3 — leaked-password protection: OFF, owner action.** The Keep uses
-  Supabase Auth passwords and the org is on the Pro plan, so it applies and
-  the plan has it; the security advisor flags it (`auth_leaked_password_protection`).
-  It is a Dashboard Auth setting (the advisor links
-  `supabase.com/docs/guides/auth/password-security`), and no session tool can
-  set it. Like public sign-up and custom SMTP, it is
-  project configuration: nothing in this repo fails if it is off, and
+  **Check 3 — leaked-password protection: ON (owner, Dashboard), measured
+  2026-10-31.** The Keep uses Supabase Auth passwords and the org is on the Pro
+  plan, so it applies. On 2026-10-29 the security advisor flagged it
+  (`auth_leaked_password_protection`); on 2026-10-31, after the owner turned it
+  on, `get_advisors` (security) no longer lists that lint. The only remaining
+  notes are INFO `rls_enabled_no_policy` on `enhancement_notifications` and
+  `help_queries`, which are server-only by design. It is a Dashboard Auth
+  setting (`supabase.com/docs/guides/auth/password-security`) that no session
+  tool can set. Like public sign-up and custom SMTP, it is project
+  configuration: nothing in this repo fails if it is switched off, and
   `get_advisors` is the one session-side reading of it.
 
 ### ✅ CLOSED 2026-10-15 — THE PORTAL COULD NOT HAVE INVITED ITS FIRST CLIENT
